@@ -43,6 +43,36 @@ CLASSIFY_FORCE=1 CLASSIFY_DOC=<id> python3 classify.py     # schon-klassifiziert
 CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # Mistral-OCR erzwingen
 ```
 
+## Panel (`panel/`)
+
+Schlankes **FastAPI-Dashboard** (kein Fork — eigenständiger Baustein) als eigener Container
+im selben Docker-Netz, mit dem geteilten `scripts/`-Volume:
+
+- **Dashboard** (`/`) — Live-Status („läuft gerade"), Kennzahlen (klassifiziert / OCR-Rescues /
+  repariert / Fehler / übersprungen), Aktivitäts-Feed mit Klick auf jede Doc-ID → **Trace-Inspect**.
+- **Manuell klassifizieren** — Doc-ID → neu klassifizieren bzw. mit OCR erzwingen.
+- **JSON-API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
+  `/api/config` (GET/POST). Eine übergeordnete Plattform kann dieselben Endpunkte konsumieren.
+- **Schutz**: optional `PANEL_TOKEN` (Bearer/Cookie). In Prod sonst Reverse-Proxy + TinyAuth/OIDC davor.
+
+## Ingest-API (externe Scans / Herkunft)
+
+`POST /ingest` (multipart `file` + optional `title`, Header `X-Ingest-Token`) → Datei an
+Paperless `post_document` + **Quelle-Tag**. Ein Token je Eingang (`INGEST_TOKENS`), räumlich oder
+nach Person benannt (`Scan Büro`, `Scan Werkstatt`, `Scan Melli`). So liefern externe Scanner
+selbstständig mit ihrer Herkunfts-Kennung; classify.py erhält den Quelle-Tag beim Klassifizieren.
+
+```bash
+curl -F "file=@scan.pdf" -H "X-Ingest-Token: geheim-scanner-buero" http://panel:8400/ingest
+```
+
+## Deployment (Docker)
+
+Beispiel in [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) +
+[`deploy/.env.example`](deploy/.env.example): den bestehenden `paperless`-Service um das
+`./scripts`-Volume + `POST_CONSUME` + `CLASSIFY_*`-Env erweitern, den `panel`-Service ergänzen.
+`scripts/` muss für beide Container schreibbar sein.
+
 ## Konfiguration (`classify-config.json`)
 
 | Key | Default | Bedeutung |

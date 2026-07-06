@@ -1,0 +1,36 @@
+# Beispiel: paperlaiss an einen bestehenden Paperless-ngx-Stack hängen.
+#
+# 1) Den paperless-Service um das geteilte ./scripts-Volume (classify.py +
+#    classify-config.json + log/traces/running) und die CLASSIFY_*-Env erweitern.
+# 2) Den panel-Service ergänzen (baut ./panel).
+# 3) Secrets in .env (siehe .env.example). ./scripts muss für beide Container
+#    schreibbar sein (chmod 777 scripts; touch scripts/classify.log; chmod 666 …).
+services:
+  paperless:
+    # ... euer bestehender paperless-ngx-Service (image, db, redis, …) ...
+    volumes:
+      - ./scripts:/scripts
+    environment:
+      PAPERLESS_POST_CONSUME_SCRIPT: /scripts/classify.py
+      CLASSIFY_CONFIG: /scripts/classify-config.json
+      CLASSIFY_LOG: /scripts/classify.log
+      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
+      MISTRAL_KEY: ${MISTRAL_KEY}
+
+  panel:
+    build: ./panel
+    container_name: paperlaiss-panel
+    restart: unless-stopped
+    ports:
+      - "8400:8400"                    # in Prod hinter Reverse-Proxy + Auth (PANEL_TOKEN / TinyAuth / OIDC)
+    volumes:
+      - ./scripts:/scripts
+    environment:
+      PAPERLESS_API: http://paperless:8000/api
+      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
+      MISTRAL_KEY: ${MISTRAL_KEY}
+      CLASSIFY_DIR: /scripts
+      PANEL_TOKEN: ${PANEL_TOKEN:-}
+      INGEST_TOKENS: ${INGEST_TOKENS:-{}}
+    depends_on:
+      - paperless
