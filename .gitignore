@@ -1,0 +1,16 @@
+# Laufzeit-Artefakte
+classify.log
+traces/
+running/
+__pycache__/
+*.pyc
+
+# lokale Daten-Stores (können Kundendaten enthalten)
+correspondent-hints.json
+correspondent-email.json
+correspondent-alias.json
+dandata.db
+
+# Secrets / lokale Overrides
+.env
+*.local.json

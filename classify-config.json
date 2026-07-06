@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "model": "mistral-small-latest",
+  "ocr_model": "mistral-ocr-latest",
+  "ocr_enabled": true,
+  "ocr_always": false,
+  "ocr_min_len": 300,
+  "temperature": 0.1,
+  "content_max_len": 7000,
+
+  "tagging_enabled": false,
+  "marker_tag": "ai-processed",
+  "unsicher_tag": "",
+  "redo_tag": "",
+
+  "summary_field": "",
+  "hinweis_field": "",
+  "mail_context_field": "",
+  "mail_from_field": "",
+  "manual_fields": ["Bezahlt-Am"],
+
+  "reserved_tags": ["Offen", "Bezahlt", "Storno", "Eingang", "Ausgang", "Bar", "verbucht", "IGL", "Inbox", "2025", "2026"],
+
+  "system_prompt": "",
+  "tag_descriptions": {},
+
+  "api_key_text": "",
+  "api_key_ocr": ""
+}
