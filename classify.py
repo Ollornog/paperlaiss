@@ -89,9 +89,29 @@ def _load_json(name, default):
         return v if isinstance(v, type(default)) else default
     except Exception:
         return default
-CORR_HINTS = _load_json("correspondent-hints.json", {})
-CORR_EMAIL = _load_json("correspondent-email.json", {})
-CORR_ALIAS = _load_json("correspondent-alias.json", {})
+# Korrespondent-Metadaten-Store (im Panel gepflegt), an Paperless-Korrespondenten per ID gebunden:
+#   {"<paperless_id>": {email, domains, telefon, adresse, kundennummer, uid, kontext, aliase}}
+CORR_META = _load_json("correspondents.json", {})
+
+
+def cmeta(cid):
+    m = CORR_META.get(str(cid))
+    return m if isinstance(m, dict) else {}
+
+
+def cfull_hint(c):  # Kontext + harte Kennungen (Kundennr/UID) fürs KI-Grounding
+    m = cmeta(c["id"]); parts = []
+    if m.get("kontext"):
+        parts.append(str(m["kontext"]).strip())
+    if m.get("kundennummer"):
+        parts.append("Kundennr " + str(m["kundennummer"]).strip())
+    if m.get("uid"):
+        parts.append("UID " + str(m["uid"]).strip())
+    return "; ".join(p for p in parts if p)
+
+
+def calias(c):
+    return str(cmeta(c["id"]).get("aliase") or "").strip()
 
 
 def log(m):
@@ -398,11 +418,13 @@ def main():
     hinweis = (cur_vals.get(hinweis_fid) or "").strip() if hinweis_fid else ""
     hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
 
-    # Korrespondent-Hinweis (Panel-Store) fürs Prompt, wenn Doc schon einen Korrespondenten hat
-    cname = next((c["name"] for c in corrs if c["id"] == doc.get("correspondent")), None) if doc.get("correspondent") else None
+    # Korrespondent-Metadaten (Panel-Store, per ID an Paperless gebunden) fürs Prompt
+    _c_by_id = {c["id"]: c for c in corrs}
+    _c_by_norm = {norm(c["name"]): c for c in corrs}
     def _khint(nm):
-        h = (CORR_HINTS.get(nm) or "").strip()
-        return h or next((str(v).strip() for k, v in CORR_HINTS.items() if norm(k) == norm(nm) and v), "")
+        c = _c_by_norm.get(norm(nm)) if nm else None
+        return cfull_hint(c) if c else ""
+    cname = (_c_by_id.get(doc.get("correspondent")) or {}).get("name") if doc.get("correspondent") else None
     chint = _khint(cname) if cname else ""
     corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
     TRACE["corr_hint"] = ({"korrespondent": cname, "hinweis": chint} if chint else None)
@@ -410,12 +432,12 @@ def main():
     # --- Pass 0: Absender extrahieren → fokussierte Korrespondent-Kandidaten ---
     set_stage(did, "Absender")
     p0_name = ""
-    if mail_from and CORR_EMAIL:
+    if mail_from:   # Absender-Domain → Korrespondent (aus dem Metadaten-Store: email/domains)
         _dom = mail_from.split("@")[-1].strip().lower().strip(">")
-        for _cn, _em in CORR_EMAIL.items():
-            _ems = str(_em or "").lower()
-            if _ems and _dom and (_dom in _ems or mail_from.lower() in _ems):
-                p0_name = _cn; break
+        for c in corrs:
+            _m = cmeta(c["id"]); _doms = str(_m.get("domains") or _m.get("email") or "").lower()
+            if _doms and _dom and (_dom in _doms or mail_from.lower() in _doms):
+                p0_name = c["name"]; break
     if not p0_name:
         try:
             _p0 = mistral('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). Antworte NUR JSON {"correspondent": <Name|null>}.',
@@ -427,7 +449,7 @@ def main():
     if p0_name:
         _at = ctoks(p0_name); _ak = " ".join(_at)
         def _ks(c):
-            names = [c["name"]] + [a.strip() for a in str(CORR_ALIAS.get(c["name"], "")).split(",") if a.strip()]
+            names = [c["name"]] + [a.strip() for a in calias(c).split(",") if a.strip()]
             best = 0.0
             for nm in names:
                 bt = ctoks(nm)
@@ -437,10 +459,10 @@ def main():
                 best = max(best, ov, difflib.SequenceMatcher(None, _ak, " ".join(bt)).ratio())
             return best
         kand = [c for sc, c in sorted(((_ks(c), c) for c in corrs), key=lambda x: -x[0])[:8] if sc >= 0.3]
-    def _kalias(nm):
-        a = str(CORR_ALIAS.get(nm, "")).strip()
+    def _kalias_c(c):
+        a = calias(c)
         return (" (auch: " + a + ")") if a else ""
-    kand_lines = _NL.join("- " + c["name"] + _kalias(c["name"]) + ((" [Kontext: " + _khint(c["name"]) + "]") if _khint(c["name"]) else "") for c in kand)
+    kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") for c in kand)
     kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand else "")
     TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand]}
     TRACE["trigger"] = ("Redo mit Nutzer-Hinweis" if hinweis else "Redo aus Paperless" if SOURCE == "redo"

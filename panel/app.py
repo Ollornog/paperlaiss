@@ -26,6 +26,7 @@ CONFIG = os.environ.get("CLASSIFY_CONFIG", os.path.join(CLASSIFY_DIR, "classify-
 LOG = os.environ.get("CLASSIFY_LOG", os.path.join(CLASSIFY_DIR, "classify.log"))
 TRACE_DIR = os.path.join(CLASSIFY_DIR, "traces")
 RUN_DIR = os.path.join(CLASSIFY_DIR, "running")
+CORR_STORE = os.path.join(CLASSIFY_DIR, "correspondents.json")   # per Paperless-ID an Korrespondenten gebunden
 BASE = os.environ.get("PAPERLESS_API", "http://webserver:8000/api")
 TOK = os.environ.get("PAPERLESS_TOKEN", "")
 MISTRAL_KEY = os.environ.get("MISTRAL_KEY", "")
@@ -249,6 +250,125 @@ async def ingest(file: UploadFile = File(...), title: str = Form(None),
         raise HTTPException(502, f"Paperless-Upload fehlgeschlagen: {e.read().decode('utf-8','replace')[:300]}")
 
 
+# ---------- Korrespondent-Metadaten (Store, per Paperless-ID gekoppelt) ----------
+CORR_FIELDS = ("email", "domains", "telefon", "adresse", "kundennummer", "uid", "kontext", "aliase")
+
+
+def load_corr_store():
+    try:
+        d = json.load(open(CORR_STORE))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_corr_store(d):
+    json.dump(d, open(CORR_STORE, "w"), ensure_ascii=False, indent=2)
+
+
+@app.get("/api/correspondents")
+def correspondents(request: Request):
+    guard(request)
+    store = load_corr_store()
+    try:
+        res = api_get("/correspondents/?page_size=2000")["results"]
+    except Exception:
+        res = []
+    out = []
+    for c in res:
+        m = store.get(str(c["id"]), {})
+        row = {"id": c["id"], "name": c["name"], "document_count": c.get("document_count", 0)}
+        for f in CORR_FIELDS:
+            row[f] = m.get(f, "")
+        out.append(row)
+    out.sort(key=lambda x: (x["name"] or "").lower())
+    return out
+
+
+@app.post("/api/correspondents")
+async def save_correspondent(request: Request):
+    guard(request)
+    b = await request.json()
+    cid = str(b.get("id", "")).strip()
+    if not cid.isdigit():
+        raise HTTPException(400, "gültige Paperless-Korrespondent-id nötig")
+    store = load_corr_store()
+    vals = {f: str(b.get(f) or "").strip() for f in CORR_FIELDS}
+    if any(vals.values()):
+        store[cid] = vals
+    else:
+        store.pop(cid, None)   # alles leer → Eintrag entfernen (verwaist)
+    save_corr_store(store)
+    return {"ok": True, "id": cid}
+
+
+CORR_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Korrespondenten</title>
+<style>
+:root{color-scheme:light dark}
+body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
+header{padding:14px 20px;background:#161a22;border-bottom:1px solid #262b36;display:flex;align-items:center;gap:14px}
+header h1{font-size:18px;margin:0;font-weight:600}a{color:#7dd3fc;text-decoration:none}
+.wrap{max-width:1000px;margin:0 auto;padding:18px 20px}
+input,textarea{background:#0f1115;color:#e6e6e6;border:1px solid #303643;border-radius:6px;padding:7px 9px;font-family:inherit;width:100%;box-sizing:border-box}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td{padding:7px 8px;border-bottom:1px solid #20252f}tr:hover{background:#151a22;cursor:pointer}
+.muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
+button{cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:13px}button.sec{background:#374151}
+dialog{background:#161a22;color:#e6e6e6;border:1px solid #303643;border-radius:12px;max-width:560px;width:92%}
+label{display:block;font-size:12px;color:#9aa4b2;margin:10px 0 3px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+</style></head><body>
+<header><h1>🧠 paperlaiss</h1><a href="/">← Dashboard</a><span class=muted>Korrespondenten</span></header>
+<div class=wrap>
+  <div class=row style="margin-bottom:12px"><input id=q placeholder="filtern…" oninput="render()" style="max-width:280px"></div>
+  <table id=tbl></table>
+</div>
+<dialog id=dlg><form method=dialog style="padding:18px"><div style="display:flex;justify-content:space-between;align-items:center"><b id=dt></b><span class=muted id=dc></span></div>
+  <div class=grid2>
+    <div><label>E-Mail</label><input id=f_email></div>
+    <div><label>Domains (Absender-Match, kommagetrennt)</label><input id=f_domains></div>
+    <div><label>Telefon</label><input id=f_telefon></div>
+    <div><label>Kundennummer</label><input id=f_kundennummer></div>
+    <div><label>UID-Nr.</label><input id=f_uid></div>
+    <div><label>Aliase (kommagetrennt)</label><input id=f_aliase></div>
+  </div>
+  <label>Adresse</label><input id=f_adresse>
+  <label>Kontext (KI-Hinweis: was ist dieser Absender / welche Dokumente kommen von ihm)</label><textarea id=f_kontext rows=3></textarea>
+  <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end"><button type=button class=sec onclick="dlg.close()">Abbrechen</button><button type=button onclick="save()">Speichern</button></div>
+</form></dialog>
+<script>
+const F=["email","domains","telefon","adresse","kundennummer","uid","kontext","aliase"];
+let DATA=[],cur=null;
+async function load(){DATA=await (await fetch('/api/correspondents')).json();render()}
+function render(){
+  const q=document.getElementById('q').value.toLowerCase();
+  const rows=DATA.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.kontext||'').toLowerCase().includes(q));
+  document.getElementById('tbl').innerHTML=rows.map((c,i)=>{
+    const has=F.some(f=>c[f]);const idx=DATA.indexOf(c);
+    return `<tr onclick="edit(${idx})"><td><b>${c.name.replace(/</g,'&lt;')}</b> <span class=pill>${c.document_count} Docs</span></td>`+
+      `<td class=muted>${(c.kontext||c.email||'').replace(/</g,'&lt;').slice(0,70)}</td>`+
+      `<td style="text-align:right">${has?'✓ Metadaten':'<span class=muted>—</span>'}</td></tr>`;
+  }).join('');
+}
+function edit(i){cur=DATA[i];document.getElementById('dt').textContent=cur.name;
+  document.getElementById('dc').textContent='ID '+cur.id+' · '+cur.document_count+' Docs';
+  F.forEach(f=>document.getElementById('f_'+f).value=cur[f]||'');document.getElementById('dlg').showModal();}
+async function save(){
+  const body={id:cur.id};F.forEach(f=>body[f]=document.getElementById('f_'+f).value);
+  await fetch('/api/correspondents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  F.forEach(f=>cur[f]=body[f]);document.getElementById('dlg').close();render();
+}
+load();
+</script></body></html>"""
+
+
+@app.get("/korrespondenten", response_class=HTMLResponse)
+def corr_page(request: Request):
+    guard(request)
+    return CORR_PAGE
+
+
 # ---------- Dashboard ----------
 PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
@@ -275,7 +395,7 @@ button.sec{background:#374151}input,textarea{background:#0f1115;color:#e6e6e6;bo
 dialog{background:#161a22;color:#e6e6e6;border:1px solid #303643;border-radius:12px;max-width:760px;width:92%}
 pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115;padding:10px;border-radius:8px;max-height:60vh;overflow:auto}
 </style></head><body>
-<header><h1>🧠 paperlaiss</h1><span style="font-size:13px;color:#9aa4b2">Klassifizierer-Panel</span></header>
+<header><h1>🧠 paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
 <div class=wrap>
   <div class=banner id=banner>…</div>
   <div class=cards id=cards></div>

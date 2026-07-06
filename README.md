@@ -66,6 +66,18 @@ selbstständig mit ihrer Herkunfts-Kennung; classify.py erhält den Quelle-Tag b
 curl -F "file=@scan.pdf" -H "X-Ingest-Token: geheim-scanner-buero" http://panel:8400/ingest
 ```
 
+## Korrespondent-Metadaten (Kontaktdaten + Kontext)
+
+Paperless kann Korrespondenten **nativ nicht** um Felder erweitern (Custom Fields hängen nur an
+Dokumenten). paperlaiss löst das mit einem **eigenen Store** (`correspondents.json`, im Panel
+gepflegt), der **per Paperless-Korrespondent-ID** an die Korrespondenten gebunden ist — stabil
+auch bei Umbenennung. Pro Korrespondent: `email`, `domains`, `telefon`, `adresse`,
+`kundennummer`, `uid`, `kontext`, `aliase`.
+
+Gepflegt im Panel unter **`/korrespondenten`** (Liste aller Paperless-Korrespondenten + Edit-Modal).
+classify.py nutzt die Daten fürs Grounding: `domains`→Absender-Zuordnung, `kontext`+`kundennummer`+`uid`
+im Prompt, `aliase` im Feedback-Loop → präzisere Klassifizierung.
+
 ## Deployment (Docker)
 
 Beispiel in [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) +
