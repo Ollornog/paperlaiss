@@ -7,7 +7,7 @@ Läuft als Paperless POST_CONSUME_SCRIPT (oder manuell/per Panel). Mandantenunab
 alle Feld-/Tag-Referenzen werden per NAME gegen die Paperless-API aufgelöst — keine
 hartkodierten IDs, keine Secrets im Code (Token/Key kommen aus ENV bzw. der Config).
 
-Features (aus dem ollornog-classify.py generalisiert):
+Features:
   - Korrespondent-Feedback-Loop (Token-Match + Pass-2-LLM-Auflösung, verhindert Dubletten)
   - OCR-Rescue via Mistral-OCR bei schwachem/Müll-Text (+ needs_ocr aus Pass 1)
   - Custom-Field-Voll-Steuerung (Wert / null=leeren / "BEHALTEN"), typgerecht
@@ -15,8 +15,8 @@ Features (aus dem ollornog-classify.py generalisiert):
   - Self-Repair-Loop (Ping-Pong mit dem Paperless-Fehler bis der PATCH sitzt)
   - Trace + Live-Marke fürs Panel
 
-BrunPower-Fork bewusst OHNE: Vertrags-/Geräte-Verknüpfung (dandata), owner-/Rechte-Setzen
-(macht post-consume.sh + owner=NULL-Trigger), Steuer-Automatik, Personen-Routing.
+Bewusst NICHT enthalten: Vertrags-/Geräte-Verknüpfung, owner-/Rechte-Setzen
+(macht der Paperless-Konsumpfad / post-consume.sh), Steuer-Automatik, Personen-Routing.
 
 Secrets NUR aus ENV/Config: PAPERLESS_TOKEN, MISTRAL_KEY (bzw. config api_key_text/_ocr).
 
@@ -55,7 +55,7 @@ CFG = {
     "ocr_min_len": 300,
     "temperature": 0.1,
     "content_max_len": 7000,
-    # BrunPower-Defaults:
+    # Defaults:
     "tagging_enabled": False,          # KI vergibt KEINE inhaltlichen Tags (Firmen-DMS: Tags sind manuelle Status/Richtung)
     "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
     "unsicher_tag": "",                # optional: Flag-Tag bei Unsicherheit / KI-Tag-Vorschlag
@@ -232,22 +232,20 @@ def bad_ocr(content):
     return False
 
 
-# Themen-Tag-Beschreibungen (nur relevant wenn tagging_enabled). BrunPower: primär via Config gepflegt.
+# Themen-Tag-Beschreibungen (nur relevant wenn tagging_enabled). Primär via Config gepflegt.
 TAG_DESC = {}
 
 DEFAULT_PROMPT = (
-    "Du klassifizierst ein Dokument für ein KFZ-/Autohaus-Firmenarchiv (Salzburg; Österreich + Deutschland). "
+    "Du klassifizierst ein Dokument für ein Dokumentenarchiv. "
     "Antworte AUSSCHLIESSLICH als gültiges JSON. Deutsch mit echten Umlauten.\n"
     "DOKUMENTTYPEN (wähle GENAU EINEN oder null): {TYPES}\n\n"
     "{TAGBLOCK}"
-    "Korrespondent = ABSENDER/Aussteller (Firma/Behörde/Person), NICHT das eigene Autohaus. Kurzer gängiger Markenname.\n"
+    "Korrespondent = ABSENDER/Aussteller (Firma/Behörde/Person), NICHT der Archiv-Inhaber selbst. Kurzer gängiger Markenname.\n"
     "JSON-KEYS: document_type (String|null), correspondent (String|null), "
     "korrespondent_kontext (1 kurzer Satz: was ist dieser Absender / welche Dokumente kommen von ihm — nur bei NEUEM Korrespondent, sonst null), "
     "needs_ocr (true wenn Text unbrauchbar/Müll), "
     "fields (Objekt, siehe VERFÜGBARE FELDER). "
-    "FAHRZEUG-Felder (Kennzeichen, Fahrzeug, Fahrgestell-Nr., Polizze Nr., Kilometerstand) NUR füllen, wenn das Dokument "
-    "konkret ein Fahrzeug betrifft (Kfz-Kauf, -Werkstatt, -Versicherung, Zulassung); bei allgemeinen Lieferanten-, Büro-, "
-    "Baumarkt- oder sonstigen Rechnungen ohne Fahrzeugbezug diese Felder auf null lassen — nichts hineinraten. "
+    "Ein Feld nur füllen, wenn das Dokument den Wert konkret hergibt — nichts hineinraten; im Zweifel null lassen. "
     "document_date = tatsächliches Ausstellungs-/Erstellungsdatum des Dokuments 'YYYY-MM-DD', NICHT nur im Text erwähnte/referenzierte Daten; null wenn unklar."
 )
 
@@ -658,19 +656,22 @@ def main():
     unmark_running(did)
 
 
-if os.environ.get("CLASSIFY_DUMP_DEFAULTS") == "1":
-    print(json.dumps({"system_prompt": DEFAULT_PROMPT, "tag_descriptions": TAG_DESC,
-                      "model": CFG["model"], "ocr_model": CFG["ocr_model"], "ocr_min_len": CFG["ocr_min_len"],
-                      "temperature": CFG["temperature"], "content_max_len": CFG["content_max_len"],
-                      "ocr_always": CFG["ocr_always"], "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
-    sys.exit(0)
+# Nur beim direkten Aufruf ausführen (Post-Consume / manuell / Panel). So bleibt das Modul
+# importierbar — die Tests prüfen die reinen Hilfsfunktionen, ohne main() oder sys.exit auszulösen.
+if __name__ == "__main__":
+    if os.environ.get("CLASSIFY_DUMP_DEFAULTS") == "1":
+        print(json.dumps({"system_prompt": DEFAULT_PROMPT, "tag_descriptions": TAG_DESC,
+                          "model": CFG["model"], "ocr_model": CFG["ocr_model"], "ocr_min_len": CFG["ocr_min_len"],
+                          "temperature": CFG["temperature"], "content_max_len": CFG["content_max_len"],
+                          "ocr_always": CFG["ocr_always"], "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
+        sys.exit(0)
 
-try:
-    main()
-except Exception as e:
-    eid = os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
-    log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
-    save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
-finally:
-    unmark_running(os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
-sys.exit(0)
+    try:
+        main()
+    except Exception as e:
+        eid = os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
+        log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
+        save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
+    finally:
+        unmark_running(os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
+    sys.exit(0)
