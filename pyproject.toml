@@ -1,0 +1,26 @@
+[project]
+name = "paperlaiss"
+version = "0.1.0"
+description = "Grounded document classifier for Paperless-ngx: type, correspondent, custom fields and OCR rescue via Mistral — a stdlib-only replacement for paperless-ai."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["paperless", "paperless-ngx", "document-classification", "mistral", "ocr", "self-hosted"]
+
+# Der Klassifizierer (classify.py) ist bewusst stdlib-only — keine Laufzeit-Abhängigkeiten.
+dependencies = []
+
+[project.optional-dependencies]
+# Nur für das FastAPI-Panel (panel/). Der Klassifizierer braucht davon nichts.
+panel = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/Ollornog/paperlaiss"
+Issues = "https://github.com/Ollornog/paperlaiss/issues"
+
+[tool.setuptools]
+packages = []

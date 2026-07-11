@@ -3,8 +3,8 @@
 """
 paperlaiss Panel — schlankes FastAPI-Dashboard für den Klassifizierer + Ingest-API.
 
-Kein Fork des ollornog-Flask-Panels: neu, klein, als eigenständiger paperlaiss-Baustein.
-Eine übergeordnete Plattform (ChatWisMe) kann dieselben JSON-Endpunkte konsumieren.
+Neu und klein, als eigenständiger paperlaiss-Baustein. Eine übergeordnete Plattform
+kann dieselben JSON-Endpunkte konsumieren.
 
 Läuft als eigener Container im selben Docker-Netz wie Paperless, mit dem geteilten
 scripts-Verzeichnis (classify.py + config + log + traces + running) als Volume.

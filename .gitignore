@@ -3,14 +3,20 @@ classify.log
 traces/
 running/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+_site/
 
-# lokale Daten-Stores (können Kundendaten enthalten)
+# lokale Daten-Stores (können Nutzerdaten enthalten)
+correspondents.json
 correspondent-hints.json
 correspondent-email.json
 correspondent-alias.json
-dandata.db
 
 # Secrets / lokale Overrides
 .env
 *.local.json
+*.bak
