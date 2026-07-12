@@ -10,6 +10,8 @@
 <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python">
 </p>
 
+> 🚧 **Work in progress** — under active development; interfaces and structure may still change before a stable `1.0` release.
+
 ### A grounded document classifier for Paperless-ngx.
 
 A lean, self-contained replacement for [paperless-ai](https://github.com/clusterzx/paperless-ai).
