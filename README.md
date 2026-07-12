@@ -138,3 +138,7 @@ Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 ## Licence
 
 [MIT](LICENSE)
+
+## Credits
+
+Icon: <a href="https://www.flaticon.com/authors/creaticca-creative-agency" target="_blank" rel="noopener">Toilet Paper PNG Image by Creaticca Creative Agency - flaticon.com</a>

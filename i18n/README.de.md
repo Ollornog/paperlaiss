@@ -139,3 +139,7 @@ Schwachstellen bitte vertraulich melden — siehe [`SECURITY.de.md`](SECURITY.de
 ## Lizenz
 
 [MIT](../LICENSE)
+
+## Bildnachweis
+
+Icon: <a href="https://www.flaticon.com/authors/creaticca-creative-agency" target="_blank" rel="noopener">Toilet Paper PNG Image by Creaticca Creative Agency - flaticon.com</a>
