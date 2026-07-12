@@ -54,10 +54,12 @@ r.check(f"keine private Infrastruktur ({len(POLICY['private_muster'])} Muster"
         not treffer, " | ".join(sorted(set(treffer))[:4]))
 
 # ---- Nur neutrale Beispieladressen
-# api.mistral.ai ist der echte LLM-Endpunkt, img.shields.io liefert die README-Badges —
-# beides gehört zum Werkzeug, nicht zur privaten Infrastruktur.
+# api.mistral.ai ist der echte LLM-Endpunkt, img.shields.io liefert die README-Badges,
+# flaticon.com trägt den lizenzpflichtigen Bildnachweis fürs Logo —
+# alles gehört zum Werkzeug, nicht zur privaten Infrastruktur.
 adressen = hygiene.pruefe_adressen(str(ROOT), DATEIEN, POLICY,
-                                   zusaetzliche_hosts=[r"mistral\.ai", r"img\.shields\.io"])
+                                   zusaetzliche_hosts=[r"mistral\.ai", r"img\.shields\.io",
+                                                       r"(?:www\.)?flaticon\.com"])
 r.check("nur neutrale Beispieladressen", not adressen, " | ".join(sorted(set(adressen))[:4]))
 
 # ---- Keine Geheimnisse; Version steht überall gleich

@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- **Bildnachweis** fürs Logo (`docs/toilet-roll.png`) im README beider Sprachfassungen: Link auf die
+  Flaticon-Autorenseite (Creaticca Creative Agency), öffnet in neuem Tab, im Format
+  `Icon: … PNG Image by … - flaticon.com`. `flaticon.com` ist damit ein erlaubter Attributions-Host
+  in der Hygiene.
+
 ## [0.1.0] - 2026-07-12
 
 ### Hinzugefügt
