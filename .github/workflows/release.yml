@@ -27,7 +27,7 @@ jobs:
           [ "$TAG" = "$PKG" ] || { echo "Tag und Paketversion laufen auseinander"; exit 1; }
           grep -q "## \[$PKG\]" CHANGELOG.md || { echo "CHANGELOG kennt $PKG nicht"; exit 1; }
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.12"
 
@@ -50,7 +50,7 @@ jobs:
 
       - name: Panel-Abbild bauen und veröffentlichen (genau ein Tag, kein latest)
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: ./panel
           platforms: linux/amd64,linux/arm64
