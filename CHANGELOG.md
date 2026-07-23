@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Backlog im Repo (`backlog/`)
+
+Meilensteine, Aufgaben und **Entscheidungen (ADR)** liegen als Markdown mit Frontmatter unter
+`backlog/`, geprüft von der Testsuite (`python3 scripts/_backlog.py list|check|index`).
+Verworfene Entscheidungen werden nicht gelöscht, sondern bekommen `status: verworfen` und
+`superseded_by`.
+
 ### Geändert
 
 - **Geteilte Testbasis auf repokit 0.7.0** (`repokit sync`, von 0.6.1): bringt
