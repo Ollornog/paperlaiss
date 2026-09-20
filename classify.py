@@ -286,12 +286,37 @@ def coerce_field(f, v):
         return None
 
 
-def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids):
-    """KI-Entscheidung je Feld → custom_fields-Liste. skip_fids = nicht-KI-Felder (documentlink/hinweis/summary/…)."""
+def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds=None):
+    """KI-Entscheidung je Feld → custom_fields-Liste.
+
+    Drei Quellen entscheiden über ein Feld, und sie dürfen sich nicht vermischen:
+      flds        was die KI vorschlägt (Wert / null / "BEHALTEN")
+      skip_fids   Felder, die die KI NICHT setzen darf (manuelle, Mail-Kontext, Hinweis) —
+                  ihr bisheriger Wert wird unverändert übernommen
+      code_flds   {fid: wert}, was der Klassifizierer SELBST setzt, auch für Felder aus
+                  skip_fids. None heißt „Zuordnung entfernen" (Paperless löscht alles, was
+                  in der gesendeten Liste fehlt). Eigener Kanal, damit ein halluzinierter
+                  Feldname der KI nie ein geschütztes Feld erreichen kann.
+    summary_fid wird ausschließlich am Ende angehängt — nie in der Schleife.
+
+    Bis 2026-09-21 warf skip_fids alle drei in einen Topf, der nur „behalten" konnte. Folge:
+    das Hinweisfeld wurde nie geleert (der Redo-Trigger feuerte dadurch erneut) und die
+    Zusammenfassung landete zweimal in der Liste. Beides in tests/test_classify.py festgehalten.
+    """
+    code_flds = code_flds or {}
     cfs, flog = [], {}
     for f in cfields:
         fid, name, t = f["id"], f["name"], f["data_type"]
-        if fid == summary_fid or fid in skip_fids or t == "documentlink":
+        if fid == summary_fid:
+            continue                            # wird unten gesetzt, genau einmal
+        if fid in code_flds:                    # der Klassifizierer selbst entscheidet
+            v = code_flds[fid]
+            if v is None:
+                flog[name] = "entfernt"         # nicht anhängen ⇒ Zuordnung fällt weg
+            else:
+                cfs.append({"field": fid, "value": v}); flog[name] = v
+            continue
+        if fid in skip_fids or t == "documentlink":
             if cur_vals.get(fid) is not None:   # unverändert behalten
                 cfs.append({"field": fid, "value": cur_vals[fid]})
             continue
@@ -616,9 +641,10 @@ def main():
     if dm and 1950 <= int(dm.group(1)) <= 2035 and (doc.get("created") or "")[:10] != dm.group(0):
         patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
-    if hinweis_fid and hinweis:   # Nutzer-Hinweis nach Gebrauch leeren
-        flds.setdefault(next((f["name"] for f in cfields if f["id"] == hinweis_fid), ""), None)
-    cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids)
+    code_flds = {}
+    if hinweis_fid and hinweis:   # Nutzer-Hinweis nach Gebrauch entfernen (sonst feuert der Redo-Trigger erneut)
+        code_flds[hinweis_fid] = None
+    cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
     TRACE["writeback"] = {"document_type": dt, "tags": [tagname_by_id.get(i) for i in tag_ids],
                           "new_tags": new_tags, "correspondent": corr_info,
@@ -638,7 +664,7 @@ def main():
             "{\"fields\": {<Feldname>: <Wert|null>}} mit denselben Feldnamen zurück."})
         fix, assistant_raw = mistral_chat(messages, 900)
         flds = {**flds, **(fix.get("fields") or {})}
-        cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids)
+        cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
         patch["custom_fields"] = cfs
         prev = err; ok, err = patch_doc(did, patch)
         TRACE["repair"].append({"round": rounds, "error": prev, "correction": fix.get("fields"), "ok": ok, "error_after": None if ok else err})

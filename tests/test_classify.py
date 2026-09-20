@@ -81,4 +81,75 @@ _p = classify.DEFAULT_PROMPT.lower()
 r.check("Default-Prompt ist mandantenneutral", not any(w in _p for w in ("salzburg", "autohaus")))
 r.check("Default-Prompt behält die Platzhalter", "{TYPES}" in classify.DEFAULT_PROMPT and "{TAGBLOCK}" in classify.DEFAULT_PROMPT)
 
+
+# ---- build_cfs(): die Funktion, die entscheidet WAS geschrieben wird.
+# Bis 2026-09-21 ungetestet — und genau dort steckten zwei Fehler, die der
+# laengst laufende Produktivstand nicht hat. Die Faelle stehen hier, damit sie nicht
+# wiederkommen. Aufbau: ein Zusammenfassungsfeld (38, longtext), ein Hinweisfeld
+# (39, longtext), ein manuelles Feld (13, date) und ein normales KI-Feld (2, monetary).
+_CF = [
+    {"id": 38, "name": "Zusammenfassung", "data_type": "longtext"},
+    {"id": 39, "name": "KI-Hinweis", "data_type": "longtext"},
+    {"id": 13, "name": "Bezahlt-Am", "data_type": "date"},
+    {"id": 2, "name": "Betrag", "data_type": "monetary"},
+]
+_SKIP = {38, 39, 13}
+
+
+def _feld(cfs, fid):
+    """Alle Einträge zu einem Feld — als Liste, denn genau die Anzahl ist der Testgegenstand."""
+    return [c for c in cfs if c["field"] == fid]
+
+
+# Die Zusammenfassung wird am Ende gesetzt. Stünde sie zusätzlich in der Schleife,
+# enthielte die Liste dasselbe Feld zweimal — Paperless bekäme zwei Werte für ein Feld.
+_cfs, _ = classify.build_cfs(
+    _CF, {38: "ALTE Zusammenfassung", 2: "EUR10.00"}, {},
+    "NEUE Zusammenfassung", 38, _SKIP)
+r.check("build_cfs: Zusammenfassung steht genau einmal in der Liste",
+        len(_feld(_cfs, 38)) == 1)
+r.check("build_cfs: und zwar mit dem NEUEN Wert",
+        _feld(_cfs, 38)[0]["value"] == "NEUE Zusammenfassung")
+
+# Der Nutzer-Hinweis wird nach Gebrauch entfernt (Schleifenschutz: solange das Feld
+# befüllt ist, feuert der Redo-Trigger erneut). Das Feld steht in skip_fids, damit die
+# KI es nicht setzt — der Klassifizierer selbst muss es aber leeren dürfen.
+_cfs, _flog = classify.build_cfs(
+    _CF, {39: "Korrespondent war falsch", 2: "EUR10.00"}, {},
+    "", None, _SKIP, {39: None})
+r.check("build_cfs: geleertes Hinweisfeld ist NICHT mehr in der Liste",
+        _feld(_cfs, 39) == [])
+r.check("build_cfs: das Entfernen wird protokolliert",
+        _flog.get("KI-Hinweis") == "entfernt")
+
+# Gegenprobe: ohne Auftrag des Codes bleibt der Hinweis stehen.
+_cfs, _ = classify.build_cfs(
+    _CF, {39: "bleibt stehen"}, {}, "", None, _SKIP)
+r.check("build_cfs: ohne Auftrag bleibt der Hinweis erhalten",
+        _feld(_cfs, 39) == [{"field": 39, "value": "bleibt stehen"}])
+
+# Ein geschütztes Feld bleibt geschützt, selbst wenn die KI seinen Namen halluziniert.
+# (Die KI bekommt skip_fids gar nicht erst im Prompt — aber „bekommt es nicht" ist keine Zusage.)
+_cfs, _ = classify.build_cfs(
+    _CF, {13: "2026-01-01"}, {"Bezahlt-Am": "2026-09-21"}, "", None, _SKIP)
+r.check("build_cfs: KI kann ein manuelles Feld nicht überschreiben",
+        _feld(_cfs, 13) == [{"field": 13, "value": "2026-01-01"}])
+
+# Die gewohnten Wege bleiben, wie sie waren.
+_cfs, _flog = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": "BEHALTEN"}, "", None, _SKIP)
+r.check("build_cfs: BEHALTEN lässt den alten Wert stehen",
+        _feld(_cfs, 2) == [{"field": 2, "value": "EUR10.00"}] and _flog["Betrag"] == "behalten")
+
+_cfs, _flog = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": None}, "", None, _SKIP)
+r.check("build_cfs: null leert ein KI-Feld",
+        _feld(_cfs, 2) == [] and _flog["Betrag"] == "geleert")
+
+_cfs, _ = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": "12,50"}, "", None, _SKIP)
+r.check("build_cfs: neuer Wert wird typgerecht gesetzt",
+        _feld(_cfs, 2) == [{"field": 2, "value": "EUR12.50"}])
+
+
 sys.exit(r.done())
