@@ -16,7 +16,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _kit import hygiene  # noqa: E402
+import subprocess  # noqa: E402
+from _kit import backlog, hygiene  # noqa: E402
 from _kit.report import Report  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,7 +41,8 @@ PFLICHT = [
     "deploy/.env.example", "deploy/docker-compose.example.yml",
     "scripts/check.sh", "scripts/_residue_check.sh", ".githooks/pre-push",
     ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/dependabot.yml",
-    "tests/_kit/hygiene.py", "tests/run_all.py", "docs/toilet-roll.png",
+    "tests/_kit/hygiene.py", "tests/_kit/backlog.py",
+    "scripts/_backlog.py", "backlog/README-KONVENTION.md", "tests/run_all.py", "docs/toilet-roll.png",
 ]
 fehlt = hygiene.pruefe_pflichtdateien(str(ROOT), PFLICHT)
 r.check("alle Pflichtdateien vorhanden", not fehlt, " | ".join(fehlt))
@@ -54,10 +56,12 @@ r.check(f"keine private Infrastruktur ({len(POLICY['private_muster'])} Muster"
         not treffer, " | ".join(sorted(set(treffer))[:4]))
 
 # ---- Nur neutrale Beispieladressen
-# api.mistral.ai ist der echte LLM-Endpunkt, img.shields.io liefert die README-Badges —
-# beides gehört zum Werkzeug, nicht zur privaten Infrastruktur.
+# api.mistral.ai ist der echte LLM-Endpunkt, img.shields.io liefert die README-Badges,
+# flaticon.com trägt den lizenzpflichtigen Bildnachweis fürs Logo —
+# alles gehört zum Werkzeug, nicht zur privaten Infrastruktur.
 adressen = hygiene.pruefe_adressen(str(ROOT), DATEIEN, POLICY,
-                                   zusaetzliche_hosts=[r"mistral\.ai", r"img\.shields\.io"])
+                                   zusaetzliche_hosts=[r"mistral\.ai", r"img\.shields\.io",
+                                                       r"(?:www\.)?flaticon\.com"])
 r.check("nur neutrale Beispieladressen", not adressen, " | ".join(sorted(set(adressen))[:4]))
 
 # ---- Keine Geheimnisse; Version steht überall gleich
@@ -129,5 +133,13 @@ r.check("run_all.py findet die Suiten automatisch", not sammel, " | ".join(samme
 # ---- Ausführbarkeit
 nicht_x = hygiene.pruefe_ausfuehrbar(str(ROOT), ["scripts/check.sh", ".githooks/pre-push"])
 r.check("scripts/check.sh und pre-push sind ausführbar", not nicht_x, " | ".join(nicht_x))
+
+# ---- Backlog: Struktur, Verweise, generierter Index
+for _v in backlog.alle_pruefungen(str(ROOT)):
+    r.check(f"Backlog: {_v}", False)
+r.check("Backlog hat Eintraege", bool(backlog.lade(str(ROOT))))
+_idx = subprocess.run([sys.executable, "scripts/_backlog.py", "index", "--dry-run"],
+                      cwd=ROOT, capture_output=True, text=True)
+r.check("backlog/README.md ist aktuell (sonst: scripts/_backlog.py index)", _idx.returncode == 0)
 
 sys.exit(r.done())

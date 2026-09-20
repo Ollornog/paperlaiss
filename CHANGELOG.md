@@ -6,6 +6,27 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Backlog im Repo (`backlog/`)
+
+Meilensteine, Aufgaben und **Entscheidungen (ADR)** liegen als Markdown mit Frontmatter unter
+`backlog/`, geprüft von der Testsuite (`python3 scripts/_backlog.py list|check|index`).
+Verworfene Entscheidungen werden nicht gelöscht, sondern bekommen `status: verworfen` und
+`superseded_by`.
+
+### Geändert
+
+- **Geteilte Testbasis auf repokit 0.7.0** (`repokit sync`, von 0.6.1): bringt
+  `tests/_kit/headers.py` mit — Prüfungen für Security-Header und Cookie-Flags. paperlaiss setzt
+  derzeit keine eigenen Cookies, die Datei liegt für später bereit. Der Sync zieht außerdem die
+  Sperrlisten auf den Stand von 0.7.0 nach (ein Namens-Hash weniger, aus 0.6.2).
+
+### Hinzugefügt
+
+- **Bildnachweis** fürs Logo (`docs/toilet-roll.png`) im README beider Sprachfassungen: Link auf die
+  Flaticon-Autorenseite (Creaticca Creative Agency), öffnet in neuem Tab, im Format
+  `Icon: … PNG Image by … - flaticon.com`. `flaticon.com` ist damit ein erlaubter Attributions-Host
+  in der Hygiene.
+
 ## [0.1.0] - 2026-07-12
 
 ### Hinzugefügt
