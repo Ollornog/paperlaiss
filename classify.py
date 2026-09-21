@@ -32,7 +32,7 @@ Env-Schalter:
   CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
 """
-import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile
+import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile, subprocess
 
 BASE = os.environ.get("PAPERLESS_API", "http://localhost:8000/api")
 TOK = os.environ.get("PAPERLESS_TOKEN", "")
@@ -77,6 +77,11 @@ CFG = {
     # → "Mustermann" ist ein Muster, das man zeigen, nicht erklären kann. Sie gehören in die
     # Config und nicht in den Code, weil es echte Namen der jeweiligen Installation sind.
     "korrespondent_beispiele": [],
+    # Pfad zu einem Skript, das NACH dem Writeback laeuft — die Naht fuer alles, was zu einer
+    # einzelnen Installation gehoert und nicht in einen mandantenneutralen Klassifizierer:
+    # Verknuepfungen in ein Fremdsystem, Rechte, hauseigene Sonderregeln. Es bekommt JSON auf
+    # stdin und darf scheitern, ohne den Lauf mitzureissen.
+    "nachbearbeitung": "",
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
@@ -211,6 +216,48 @@ def save_trace(did, extra=None):
         # entstanden dadurch ueber zwei Monate keine Traces, ohne dass es jemandem auffiel.
         # Ein Trace ist Diagnose, kein Selbstzweck: faellt er aus, muss man es SEHEN.
         log(f"trace-fail {did}: {e!r}")
+
+
+def nachbearbeiten(did, patch, erfolg, lesbar):
+    """Ein installationseigenes Skript nach dem Writeback aufrufen.
+
+    Warum es das gibt: Ohne diese Naht muss jede Installation, die mehr braucht als
+    Klassifizierung — eine Verknuepfung in ein Fremdsystem, eine hauseigene Regel — den
+    Klassifizierer forken. Genau so sind vier auseinanderlaufende Staende desselben Codes
+    entstanden. Mit der Naht bleibt der Kern ueberall gleich, und das Eigene liegt daneben.
+
+    Das Skript bekommt auf stdin:
+      {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…}, "quelle": "redo",
+       "dry": false, "vorschlag": false}
+    Es laeuft mit denselben Umgebungsvariablen (PAPERLESS_TOKEN, PAPERLESS_API …), kann also
+    selbst die API benutzen. Seine Ausgabe geht ins Log.
+
+    Es darf scheitern: ein Fehler dort wird protokolliert, beendet aber NICHT den Lauf — die
+    Klassifizierung ist zu diesem Zeitpunkt bereits geschrieben, und eine Zusatzaufgabe darf
+    kein Dokument unklassifiziert zuruecklassen.
+    """
+    skript = (CFG.get("nachbearbeitung") or "").strip()
+    if not skript or DRY:
+        return
+    if not os.path.exists(skript):
+        log(f"nachbearbeitung-fehlt {did}: {skript} nicht gefunden")
+        return
+    eingabe = json.dumps({"doc_id": int(did), "erfolg": bool(erfolg), "patch": patch,
+                          "lesbar": lesbar, "quelle": SOURCE or "auto",
+                          "dry": DRY, "vorschlag": PROPOSE}, ensure_ascii=False)
+    try:
+        r = subprocess.run([sys.executable, skript], input=eingabe, text=True,
+                           capture_output=True, timeout=120, env=os.environ.copy())
+        ausgabe = ((r.stdout or "") + (r.stderr or "")).strip().replace("\n", " | ")[:300]
+        if r.returncode == 0:
+            if ausgabe:
+                log(f"nachbearbeitung {did}: {ausgabe}")
+        else:
+            log(f"nachbearbeitung-fail {did} (exit {r.returncode}): {ausgabe}")
+    except subprocess.TimeoutExpired:
+        log(f"nachbearbeitung-timeout {did}: {skript} nach 120 s abgebrochen")
+    except Exception as e:
+        log(f"nachbearbeitung-fail {did}: {e!r}")
 
 
 def speichere_vorschlag(did, patch, doc, lesbar, hinweis=""):
@@ -916,6 +963,7 @@ def main():
         patch.pop("custom_fields", None); patch_doc(did, patch)
 
     log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}" + (f" | {repair_note}" if repair_note else ""))
+    nachbearbeiten(did, patch, ok, TRACE.get("writeback") or {})
     TRACE["_stage"] = "fertig"
     save_trace(did)
     unmark_running(did)
