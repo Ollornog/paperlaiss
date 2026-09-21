@@ -87,10 +87,14 @@ def cmd_index(args) -> int:
         for m in ms:
             aufgaben = [e for e in eintraege if e.get("milestone") == m.get("id")]
             fertig = [e for e in aufgaben if e.get("status") == "erledigt"]
-            quote = f"{len(fertig)}/{len(aufgaben)}" if aufgaben else "—"
+            # Ohne Aufgaben ergab die Quote frueher "—" und die Zeile endete auf
+            # "— — erledigt" — das las sich, als waere der Meilenstein fertig.
+            # Ein offener Meilenstein ohne Aufgaben ist keine Erfolgsmeldung.
+            stand = (f" — {len(fertig)}/{len(aufgaben)} erledigt" if aufgaben
+                     else " — noch keine Aufgaben")
             s = SYMBOL.get(str(m.get("status")), "?")
             zeilen.append(f"* {s} **[{m.get('id')}]({os.path.basename(m['_datei'])})** "
-                          f"{m.get('title')} — {quote} erledigt")
+                          f"{m.get('title')}{stand}")
         zeilen.append("")
 
     for typ, titel in (("Task", "Aufgaben"), ("Bug", "Fehler"), ("Decision", "Entscheidungen (ADR)")):

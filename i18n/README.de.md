@@ -1,4 +1,4 @@
-<p align="center"><img src="../docs/toilet-roll.png" alt="paperlaiss" width="250" height="250"></p>
+<p align="center"><img src="../docs/paperlaiss.png" alt="paperlaiss" width="250" height="250"></p>
 
 <h1 align="center">paperlaiss</h1>
 
@@ -144,4 +144,4 @@ Schwachstellen bitte vertraulich melden — siehe [`SECURITY.de.md`](SECURITY.de
 
 ## Bildnachweis
 
-Icon: <a href="https://www.flaticon.com/authors/creaticca-creative-agency" target="_blank" rel="noopener">Toilet Paper PNG Image by Creaticca Creative Agency - flaticon.com</a>
+Icon: <a href="https://www.flaticon.com/authors/magnific" target="_blank" rel="noopener">Origami PNG Image by Magnific - flaticon.com</a>
