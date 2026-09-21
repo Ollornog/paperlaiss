@@ -213,4 +213,74 @@ r.check("cfull_hint: leerer Eintrag ergibt leeren Hinweis",
         classify.cfull_hint({"id": 9}) == "")
 classify.CORR_META = _corr_meta_vorher          # Test auf jeden folgenden ab
 
+# ---- fehler_mit_feldnamen(): Paperless schluesselt Custom-Field-Fehler nach LISTEN-INDEX.
+# Ein Modell kann Index -> Name nicht aufloesen; es raet. Deshalb uebersetzen wir im Code.
+# Reihenfolge der gesendeten Liste = die Indizes, die Paperless zurueckmeldet.
+_CFS = [{"field": 2, "value": "x"}, {"field": 13, "value": "y"}, {"field": 38, "value": "z"}]
+
+r.check("fehler_mit_feldnamen: Index wird zum Feldnamen",
+        classify.fehler_mit_feldnamen(
+            '{"custom_fields": {"1": {"value": ["ungueltig"]}}}', _CFS, _CF)
+        == """Feld 'Bezahlt-Am': {"value": ["ungueltig"]}""")
+
+r.check("fehler_mit_feldnamen: mehrere Fehler werden alle benannt",
+        classify.fehler_mit_feldnamen(
+            '{"custom_fields": {"0": {"value": ["a"]}, "2": {"value": ["b"]}}}', _CFS, _CF)
+        == """Feld 'Betrag': {"value": ["a"]} | Feld 'Zusammenfassung': {"value": ["b"]}""")
+
+r.check("fehler_mit_feldnamen: Listenform, leere Eintraege sind fehlerfrei",
+        classify.fehler_mit_feldnamen(
+            '{"custom_fields": [{}, {"value": ["kaputt"]}, {}]}', _CFS, _CF)
+        == """Feld 'Bezahlt-Am': {"value": ["kaputt"]}""")
+
+r.check("fehler_mit_feldnamen: Index ausserhalb der Liste bleibt als Nummer stehen",
+        "Eintrag 99" in classify.fehler_mit_feldnamen(
+            '{"custom_fields": {"99": {"value": ["x"]}}}', _CFS, _CF))
+
+r.check("fehler_mit_feldnamen: andere Fehlerteile gehen nicht verloren",
+        "weitere" in classify.fehler_mit_feldnamen(
+            '{"custom_fields": {"0": {"value": ["a"]}}, "title": ["zu lang"]}', _CFS, _CF))
+
+# Kein JSON, kein custom_fields, Unsinn: lieber unveraendert als falsch geraten.
+r.check("fehler_mit_feldnamen: Nicht-JSON bleibt unveraendert",
+        classify.fehler_mit_feldnamen("500 Internal Server Error", _CFS, _CF)
+        == "500 Internal Server Error")
+r.check("fehler_mit_feldnamen: Fehler ohne custom_fields bleibt unveraendert",
+        classify.fehler_mit_feldnamen('{"title": ["zu lang"]}', _CFS, _CF) == '{"title": ["zu lang"]}')
+r.check("fehler_mit_feldnamen: leere Liste ergibt keine Ausgabe-Aenderung",
+        classify.fehler_mit_feldnamen('{"custom_fields": []}', _CFS, _CF) == '{"custom_fields": []}')
+
+# ---- Stille Fehlschlaege: ein kaputter Store darf nicht lautlos zu leeren Daten fuehren.
+# Bis 2026-09-21 verschluckte _load_json jeden Fehler; ein Tippfehler im Korrespondent-Store
+# haette das Grounding lautlos abgeschaltet.
+import json as _json
+_alt_dir = classify.SCRIPT_DIR
+_probe = Path(_TMP) / "stores"
+_probe.mkdir(exist_ok=True)
+classify.SCRIPT_DIR = str(_probe)
+classify._STORE_FEHLER.clear()
+
+(_probe / "leer.json").write_text("{}", encoding="utf-8")
+r.check("_load_json: gueltige Datei wird geladen", classify._load_json("leer.json", {}) == {})
+r.check("_load_json: gueltige Datei meldet nichts", classify._STORE_FEHLER == [])
+
+r.check("_load_json: fehlende Datei ist KEIN Befund",
+        classify._load_json("gibtsnicht.json", {"a": 1}) == {"a": 1} and classify._STORE_FEHLER == [])
+
+(_probe / "kaputt.json").write_text("{das ist kein json", encoding="utf-8")
+r.check("_load_json: kaputte Datei liefert den Default",
+        classify._load_json("kaputt.json", {"a": 1}) == {"a": 1})
+r.check("_load_json: kaputte Datei WIRD gemeldet",
+        any("kaputt.json" in f and "nicht lesbar" in f for f in classify._STORE_FEHLER))
+
+(_probe / "falsch.json").write_text("[1, 2, 3]", encoding="utf-8")
+classify._STORE_FEHLER.clear()
+r.check("_load_json: falscher Aufbau liefert den Default",
+        classify._load_json("falsch.json", {}) == {})
+r.check("_load_json: falscher Aufbau WIRD gemeldet",
+        any("falsch.json" in f and "Aufbau" in f for f in classify._STORE_FEHLER))
+
+classify.SCRIPT_DIR = _alt_dir
+classify._STORE_FEHLER.clear()
+
 sys.exit(r.done())
