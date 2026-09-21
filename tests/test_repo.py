@@ -208,4 +208,12 @@ for _py in sorted(ROOT.glob("*.py")) + sorted((ROOT / "panel").glob("*.py")) + s
                 _escape_fehler.append(f"{_py.relative_to(ROOT)}:{_warnung.lineno}: {_warnung.message}")
 r.check("kein Python-Quelltext erzeugt SyntaxWarnings", not _escape_fehler, " | ".join(_escape_fehler[:3]))
 
+# Das Panel-Abbild muss JEDE Python-Datei aus panel/ enthalten. Beim Aufteilen in app.py und
+# kern.py fiel kern.py zunaechst heraus — der Container startete mit ModuleNotFoundError,
+# und das faellt erst beim Ausrollen auf, nicht in der Suite.
+_dockerfile = (ROOT / "panel" / "Dockerfile").read_text(encoding="utf-8")
+_panel_module = sorted(p.name for p in (ROOT / "panel").glob("*.py"))
+_fehlend = [m for m in _panel_module if m not in _dockerfile]
+r.check("Panel-Dockerfile kopiert alle Module aus panel/", not _fehlend, ", ".join(_fehlend))
+
 sys.exit(r.done())
