@@ -43,7 +43,7 @@ PFLICHT = [
     "scripts/check.sh", "scripts/_residue_check.sh", ".githooks/pre-push",
     ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/dependabot.yml",
     "tests/_kit/hygiene.py", "tests/_kit/backlog.py",
-    "scripts/_backlog.py", "backlog/README-KONVENTION.md", "tests/run_all.py", "docs/toilet-roll.png",
+    "scripts/_backlog.py", "backlog/README-KONVENTION.md", "tests/run_all.py", "docs/paperlaiss.png",
 ]
 fehlt = hygiene.pruefe_pflichtdateien(str(ROOT), PFLICHT)
 r.check("alle Pflichtdateien vorhanden", not fehlt, " | ".join(fehlt))
@@ -180,5 +180,14 @@ _dumps = _dump_in_open(panel)
 r.check("JSON wird atomar geschrieben (kein truncate-dann-schreiben)",
         "def schreibe_json" in panel and "os.replace(tmp, pfad)" in panel and not _dumps,
         f"json.dump(..., open(...)) in Zeile {_dumps}" if _dumps else "")
+
+# Der Generator haengte an einen Meilenstein ohne Aufgaben "— — erledigt" an: eine leere
+# Quote plus das Wort "erledigt". Ein offener Meilenstein las sich damit als fertiger.
+_bl = (ROOT / "backlog" / "README.md").read_text(encoding="utf-8")
+r.check("Backlog-Index behauptet nichts Erledigtes ohne Aufgaben",
+        "— — erledigt" not in _bl and "—  erledigt" not in _bl)
+r.check("offene Meilensteine sind als offen erkennbar",
+        all("☑" not in z for z in _bl.splitlines()
+            if "M-1" in z and "offen" not in z.lower()) or "☐ **[M-1]" in _bl)
 
 sys.exit(r.done())

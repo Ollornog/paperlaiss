@@ -27,6 +27,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   BEHALTEN/null/neuer Wert, und dass ein manuelles Feld auch dann geschützt bleibt, wenn die KI
   seinen Namen nennt).
 
+### Geändert — Icon und Bildnachweis
+
+Das Projektbild ist jetzt ein Papierschiffchen (`docs/paperlaiss.png`) statt der bisherigen
+Klorolle. Bildnachweis entsprechend auf **Magnific** umgestellt, in beiden Sprachfassungen.
+
+### Behoben — Backlog-Index las sich falsch
+
+Ein Meilenstein **ohne** Aufgaben bekam im generierten `backlog/README.md` die Zeile
+`… — — erledigt` (leere Quote plus das Wort „erledigt"). Der offene Meilenstein M-1 sah damit
+aus wie ein abgeschlossener. Steht jetzt als „noch keine Aufgaben" da, mit einer Prüfung
+in der Hygiene-Suite.
+
 ### Hinzugefügt — Backlog im Repo (`backlog/`)
 
 Meilensteine, Aufgaben und **Entscheidungen (ADR)** liegen als Markdown mit Frontmatter unter
@@ -49,6 +61,11 @@ Verworfene Entscheidungen werden nicht gelöscht, sondern bekommen `status: verw
   in der Hygiene.
 
 ## [0.1.0] - 2026-07-12
+
+> **Nicht veröffentlicht.** Diese Version beschreibt den Stand vom 2026-07-12 und entspricht der
+> Versionsnummer in `pyproject.toml`, aber es wurde **kein Tag und kein Release gezogen** — das ist
+> Absicht, solange das Projekt den WIP-Banner trägt. Der erste Tag folgt, wenn es etwas Releasbares
+> gibt; bis dahin ist `main` der Stand.
 
 ### Hinzugefügt
 
