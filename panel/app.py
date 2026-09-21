@@ -16,7 +16,7 @@ ENV:
   PANEL_TOKEN     optional: Bearer-Token schützt die UI/API (leer = offen, für Prod TinyAuth/OIDC davor)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
 """
-import os, json, re, glob, html, subprocess, datetime, urllib.request, urllib.error
+import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, urllib.request, urllib.error
 from fastapi import FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
@@ -31,12 +31,49 @@ BASE = os.environ.get("PAPERLESS_API", "http://webserver:8000/api")
 TOK = os.environ.get("PAPERLESS_TOKEN", "")
 MISTRAL_KEY = os.environ.get("MISTRAL_KEY", "")
 PANEL_TOKEN = os.environ.get("PANEL_TOKEN", "")
+# Ein fehlender Token oeffnet das Panel NICHT mehr. Wer bewusst ohne eigene Anmeldung
+# betreiben will (z.B. weil ein Reverse-Proxy mit OIDC davorhaengt), setzt PANEL_AUTH=none.
+PANEL_AUTH = os.environ.get("PANEL_AUTH", "").strip().lower()
 try:
     INGEST_TOKENS = json.loads(os.environ.get("INGEST_TOKENS", "{}"))
 except Exception:
     INGEST_TOKENS = {}
 
+# Felder der Config, die Geheimnisse tragen koennen: werden nie ausgeliefert und nie
+# ueber die API geschrieben. Sie gehoeren in die Umgebung (MISTRAL_KEY), nicht in eine
+# Datei, die eine offene Weboberflaeche lesen kann.
+GEHEIM_FELDER = ("api_key_text", "api_key_ocr")
+
 app = FastAPI(title="paperlaiss")
+
+if not PANEL_TOKEN and PANEL_AUTH != "none":
+    print("paperlaiss-panel: PANEL_TOKEN fehlt — alle API-Aufrufe antworten mit 503. "
+          "Token setzen, oder PANEL_AUTH=none wenn eine Anmeldung davorhaengt.", file=sys.stderr)
+
+
+def schreibe_json(pfad, daten):
+    """JSON atomar schreiben: erst in eine Nachbardatei, dann umbenennen.
+
+    `json.dump(d, open(pfad, "w"))` kuerzt die Zieldatei SOFORT auf null. Bricht der
+    Schreibvorgang danach ab — voller Datentraeger, Absturz, Neustart des Containers —,
+    ist der alte Inhalt weg und der neue nie angekommen. Fuer den Korrespondent-Store
+    heisst das: der gepflegte Kundenstamm ist futsch. os.replace ist auf POSIX atomar,
+    es gibt also keinen Moment, in dem die Datei halb geschrieben dasteht.
+    """
+    ordner = os.path.dirname(os.path.abspath(pfad)) or "."
+    fd, tmp = tempfile.mkstemp(dir=ordner, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(daten, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, pfad)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _cfg():
@@ -46,13 +83,29 @@ def _cfg():
         return {}
 
 
+def _cfg_oeffentlich():
+    """Config ohne Geheimnisfelder — das, was eine Oberflaeche sehen darf."""
+    return {k: v for k, v in _cfg().items() if k not in GEHEIM_FELDER}
+
+
 def guard(request: Request):
-    """Optionaler Panel-Schutz (Bearer PANEL_TOKEN). Leer = offen."""
+    """Panel-Schutz (Bearer PANEL_TOKEN).
+
+    Faellt GESCHLOSSEN aus: ohne Token antwortet das Panel mit 503 statt offen zu stehen.
+    Bis 2026-09-21 war es umgekehrt („leer = offen") — im Testbett lief das Panel dadurch
+    ohne jede Anmeldung im LAN, mit Lesezugriff auf die Korrespondent-Kontaktdaten und
+    Schreibzugriff auf system_prompt (= Prompt-Injektion in jede kuenftige Klassifizierung).
+    """
     if not PANEL_TOKEN:
-        return
+        if PANEL_AUTH == "none":
+            return                      # bewusst offen, Anmeldung haengt davor
+        raise HTTPException(503, "Panel nicht konfiguriert: PANEL_TOKEN fehlt "
+                                 "(oder PANEL_AUTH=none setzen, wenn eine Anmeldung davorhaengt).")
     auth = request.headers.get("authorization", "")
     cookie = request.cookies.get("panel_token", "")
-    if auth == f"Bearer {PANEL_TOKEN}" or cookie == PANEL_TOKEN:
+    erwartet = f"Bearer {PANEL_TOKEN}"
+    # compare_digest statt ==: gleiche Laufzeit unabhaengig davon, ab welchem Zeichen es abweicht
+    if hmac.compare_digest(auth, erwartet) or hmac.compare_digest(cookie, PANEL_TOKEN):
         return
     raise HTTPException(401, "Panel-Token nötig")
 
@@ -199,17 +252,21 @@ async def reclassify(request: Request):
 @app.get("/api/config")
 def get_config(request: Request):
     guard(request)
-    return _cfg()
+    return _cfg_oeffentlich()
 
 
 @app.post("/api/config")
 async def set_config(request: Request):
     guard(request)
     body = await request.json()
+    verboten = sorted(k for k in body if k in GEHEIM_FELDER)
+    if verboten:
+        raise HTTPException(400, f"Diese Felder gehören in die Umgebung, nicht in die Config: "
+                                 f"{', '.join(verboten)} (MISTRAL_KEY als ENV setzen).")
     cfg = _cfg()
     cfg.update(body)
-    json.dump(cfg, open(CONFIG, "w"), ensure_ascii=False, indent=2)
-    return {"ok": True, "config": cfg}
+    schreibe_json(CONFIG, cfg)
+    return {"ok": True, "config": _cfg_oeffentlich()}
 
 
 # ---------- Ingest-API (externe Scans / Herkunft) ----------
@@ -263,7 +320,7 @@ def load_corr_store():
 
 
 def save_corr_store(d):
-    json.dump(d, open(CORR_STORE, "w"), ensure_ascii=False, indent=2)
+    schreibe_json(CORR_STORE, d)
 
 
 @app.get("/api/correspondents")

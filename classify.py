@@ -541,24 +541,18 @@ def main():
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200)
 
-    # needs_ocr aus Pass 1 → OCR nachholen + erneut. Nur wenn die Heuristik den Text AUCH für schwach hält
-    # (mistral-small setzt needs_ocr oft fälschlich bei reichem Text → sonst unnötige OCR-Kosten).
-    if prop.get("needs_ocr") and bad_ocr(content) and not NO_OCR and not TRACE["ocr"].get("triggered") and CFG["ocr_enabled"] and not DRY:
-        set_stage(did, "OCR (KI-Anforderung)")
-        try:
-            new = mistral_ocr(did)
-            if len(new) > 40:
-                send(f"/documents/{did}/", {"content": new}, "PATCH"); content = new
-                ocr_note = (ocr_note + " " if ocr_note else "") + f"OCR-KI({len(new)})"
-                TRACE["ocr"] = {"triggered": True, "grund": "von KI angefordert", "chars": len(new), "excerpt": new[:600]}
-                messages.append({"role": "assistant", "content": assistant_raw})
-                messages.append({"role": "user", "content":
-                    f"Der Text war unbrauchbar. Hier der per OCR neu gelesene INHALT:\n{new[:CFG['content_max_len']]}\n"
-                    "Gib die vollständige Analyse (alle Felder, correspondent, document_date"
-                    + (", tags" if CFG['tagging_enabled'] else "") + (", summary" if summary_fid else "") + ") mit diesem Text erneut."})
-                prop, assistant_raw = mistral_chat(messages, 1200)
-        except Exception as e:
-            log(f"KI-OCR-fail {did}: {e!r}")
+    # Wenn die KI needs_ocr meldet, ist das eine DIAGNOSE, keine Aktion mehr.
+    # Bis 2026-09-21 stand hier ein zweiter OCR-Lauf, der nie stattfand: die Bedingung verlangte
+    # bad_ocr(content) UND not TRACE["ocr"]["triggered"] — der Rescue oben laeuft aber genau bei
+    # bad_ocr(content) und setzt triggered in ALLEN Ausgaengen (Erfolg, verworfen, Fehler).
+    # Beides zugleich ist unerreichbar; ein Durchlauf ueber alle 256 Flag-Kombinationen fand 0 Treffer,
+    # und in 931 produktiven Laeufen hat der Zweig kein einziges Mal gefeuert.
+    # Er waere auch redundant: der Rescue ersetzt den Text VOR Pass 1, die KI sieht ihn also nie roh.
+    # Statt einer toten Aktion steht der Widerspruch jetzt im Trace — sichtbar in der Panel-Ansicht,
+    # ohne einen zweiten teuren Modell- und OCR-Aufruf auszuloesen.
+    if prop.get("needs_ocr"):
+        TRACE["ocr"]["ki_meldet_unlesbar"] = True
+        TRACE["ocr"]["heuristik_stimmt_zu"] = bad_ocr(content)
     TRACE["pass1"] = {"system": system, "user": user_msg[:4000], "response": prop}
 
     # --- Korrespondent-Feedback-Loop ---

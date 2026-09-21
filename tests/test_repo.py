@@ -12,6 +12,7 @@ Testzeit nichts nach. Was hier steht, gilt nur für dieses Projekt.
 from __future__ import annotations
 
 import re
+import ast
 import sys
 from pathlib import Path
 
@@ -141,5 +142,43 @@ r.check("Backlog hat Eintraege", bool(backlog.lade(str(ROOT))))
 _idx = subprocess.run([sys.executable, "scripts/_backlog.py", "index", "--dry-run"],
                       cwd=ROOT, capture_output=True, text=True)
 r.check("backlog/README.md ist aktuell (sonst: scripts/_backlog.py index)", _idx.returncode == 0)
+
+# ---- Panel: Zusagen, die sich ohne FastAPI-Import statisch pruefen lassen.
+# Am 2026-09-21 stand das Panel im Testbett ohne jede Anmeldung im LAN, weil guard()
+# bei leerem PANEL_TOKEN einfach zurueckkehrte. Diese Pruefungen halten fest, dass die
+# Schutzfunktion GESCHLOSSEN ausfaellt und dass keine Schluessel nach aussen gehen.
+panel = (ROOT / "panel" / "app.py").read_text(encoding="utf-8")
+
+r.check("guard() faellt geschlossen aus (kein stilles return bei leerem Token)",
+        'if not PANEL_TOKEN:\n        if PANEL_AUTH == "none":' in panel
+        and 'raise HTTPException(503' in panel)
+r.check("Token-Vergleich ist laufzeitkonstant (hmac.compare_digest statt ==)",
+        "hmac.compare_digest" in panel and 'auth == f"Bearer {PANEL_TOKEN}"' not in panel)
+r.check("/api/config liefert keine Geheimnisfelder aus",
+        "_cfg_oeffentlich()" in panel and "return _cfg()\n" not in panel)
+r.check("/api/config nimmt keine Geheimnisfelder entgegen",
+        "verboten = sorted(k for k in body if k in GEHEIM_FELDER)" in panel)
+# Per AST statt per Textsuche: ein Docstring, der das schlechte Muster ZITIERT, ist kein
+# Verstoss. Die erste Fassung dieser Pruefung schlug genau darauf an — Fehlalarm.
+def _dump_in_open(quelle):
+    """json.dump(..., open(...)) als AUFRUF finden, nicht als Text."""
+    treffer = []
+    for knoten in ast.walk(ast.parse(quelle)):
+        if not isinstance(knoten, ast.Call):
+            continue
+        f = knoten.func
+        if not (isinstance(f, ast.Attribute) and f.attr == "dump"
+                and isinstance(f.value, ast.Name) and f.value.id == "json"):
+            continue
+        if len(knoten.args) >= 2 and isinstance(knoten.args[1], ast.Call) \
+                and isinstance(knoten.args[1].func, ast.Name) and knoten.args[1].func.id == "open":
+            treffer.append(knoten.lineno)
+    return treffer
+
+
+_dumps = _dump_in_open(panel)
+r.check("JSON wird atomar geschrieben (kein truncate-dann-schreiben)",
+        "def schreibe_json" in panel and "os.replace(tmp, pfad)" in panel and not _dumps,
+        f"json.dump(..., open(...)) in Zeile {_dumps}" if _dumps else "")
 
 sys.exit(r.done())
