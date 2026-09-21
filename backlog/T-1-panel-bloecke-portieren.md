@@ -2,7 +2,7 @@
 id: T-1
 type: Task
 title: Vier Panel-Blöcke aus der Flask-Fassung übernehmen
-status: offen
+status: erledigt
 milestone: M-1
 tags: [panel, ui]
 created: 2026-09-21
@@ -32,3 +32,13 @@ Fremdsystemen einer einzelnen Installation. Dafür gibt es seit 2026-09-21 die N
 
 **Fertig, wenn** die vier Blöcke in der FastAPI-Fassung laufen, die Authentifizierung über
 `guard()` greift und die reine Logik in `panel/kern.py` getestet ist.
+
+
+## Erledigt 2026-09-21
+
+Alle vier Blöcke gebaut, die reine Logik in `panel/kern.py` getestet (Merge, Typumwandlung,
+Verlauf, Auffälligkeiten). Am Testbett gegen echte Daten geprüft, inklusive des typsicheren
+Speicherpfads: `"350"` → `350`, `"0,2"` → `0.2`, `"dreihundert"` → übergangen und gemeldet.
+
+Nicht übernommen wie geplant: Vertrags-/Bestandstabellen und Bulk-Steuerung — dafür gibt es
+die Naht `nachbearbeitung` (ADR-3).
