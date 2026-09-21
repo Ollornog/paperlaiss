@@ -20,6 +20,8 @@ import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, urll
 from fastapi import FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
+from kern import doc_hat_sich_geaendert, doc_id_aus_webhook
+
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
 CLASSIFY_PY = os.path.join(CLASSIFY_DIR, "classify.py")
 CONFIG = os.environ.get("CLASSIFY_CONFIG", os.path.join(CLASSIFY_DIR, "classify-config.json"))
@@ -76,11 +78,65 @@ def schreibe_json(pfad, daten):
         raise
 
 
+PROP_DIR = os.path.join(os.path.dirname(LOG), "proposals")
+# Eigenes Geheimnis fuer den Webhook — NICHT PANEL_TOKEN. Regel: ein Geheimnis, ein Bereich.
+# Wer den Webhook kennt, soll damit nicht die Panel-API bedienen koennen.
+REDO_SECRET = os.environ.get("REDO_SECRET", "")
+
+
 def _cfg():
     try:
         return json.load(open(CONFIG))
     except Exception:
         return {}
+
+
+def lade_vorschlaege():
+    """Alle abgelegten Vorschlaege, neueste zuerst."""
+    out = []
+    for pfad in glob.glob(os.path.join(PROP_DIR, "*.json")):
+        try:
+            out.append(json.load(open(pfad, encoding="utf-8")))
+        except Exception:
+            continue          # eine kaputte Datei darf die Liste nicht sprengen
+    out.sort(key=lambda v: v.get("ts", ""), reverse=True)
+    return out
+
+
+def raeume_ausloeser(doc_id, doc=None):
+    """Ausloeser-Tag und Hinweisfeld entfernen — der Schleifenschutz des Vorschlagsmodus.
+
+    Im Direktmodus macht das der Klassifizierer beim Schreiben. Im Vorschlagsmodus schreibt er
+    nicht, also muss der ANSTOSS raeumen: sonst bleiben Tag und Feld stehen, und jedes weitere
+    Update am Dokument loest den Webhook erneut aus. Gibt den gelesenen Hinweistext zurueck,
+    damit er nicht verloren geht.
+    """
+    cfg = _cfg()
+    doc = doc or api_get(f"/documents/{doc_id}/")
+    hinweis = ""
+    patch = {}
+
+    redo_name = (cfg.get("redo_tag") or "").strip()
+    if redo_name:
+        tags = api_get("/tags/?page_size=1000")["results"]
+        redo_id = next((t["id"] for t in tags if t["name"].strip().lower() == redo_name.lower()), None)
+        if redo_id and redo_id in (doc.get("tags") or []):
+            patch["tags"] = [t for t in doc["tags"] if t != redo_id]
+
+    hinweis_name = (cfg.get("hinweis_field") or "").strip()
+    if hinweis_name:
+        felder = api_get("/custom_fields/?page_size=1000")["results"]
+        hid = next((f["id"] for f in felder if f["name"].strip().lower() == hinweis_name.lower()), None)
+        if hid:
+            for c in (doc.get("custom_fields") or []):
+                if c["field"] == hid:
+                    hinweis = str(c.get("value") or "").strip()
+            if hinweis:
+                patch["custom_fields"] = [c for c in (doc.get("custom_fields") or [])
+                                          if c["field"] != hid]
+    if patch:
+        api_send(f"/documents/{doc_id}/", patch, "PATCH")
+    return hinweis
 
 
 def _cfg_oeffentlich():
@@ -187,7 +243,7 @@ def running_jobs():
 
 
 # ---------- classify.py Re-Trigger ----------
-def run_classify(doc, force=True, force_ocr=False, source="manual"):
+def run_classify(doc, force=True, force_ocr=False, source="manual", propose=False, hinweis=""):
     env = dict(os.environ)
     env.update({"CLASSIFY_DOC": str(doc), "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK,
                 "MISTRAL_KEY": MISTRAL_KEY, "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG,
@@ -196,6 +252,10 @@ def run_classify(doc, force=True, force_ocr=False, source="manual"):
         env["CLASSIFY_FORCE"] = "1"
     if force_ocr:
         env["CLASSIFY_FORCE_OCR"] = "1"
+    if propose:
+        env["CLASSIFY_PROPOSE"] = "1"
+    if hinweis:
+        env["CLASSIFY_HINWEIS"] = hinweis
     try:
         r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=300)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
@@ -247,6 +307,87 @@ async def reclassify(request: Request):
     mode = body.get("mode", "classify")
     rc, out = run_classify(doc, force=True, force_ocr=(mode == "ocr"))
     return {"ok": rc == 0, "doc": doc, "mode": mode, "output": out[-1500:]}
+
+
+# ---------- Vorschlagsmodus ----------
+# Die reine Logik steht in kern.py — dort ist sie ohne FastAPI testbar.
+
+
+@app.post("/redo")
+async def redo(request: Request, x_redo_secret: str = Header(None)):
+    """Webhook-Ziel fuer den Paperless-Workflow: erzeugt einen VORSCHLAG statt zu schreiben.
+
+    Reihenfolge ist der Schleifenschutz: erst Ausloeser-Tag und Hinweisfeld raeumen (und den
+    Hinweistext dabei mitnehmen), dann klassifizieren. Andersherum blieben Tag und Feld bei
+    einem verworfenen Vorschlag stehen und jedes weitere Update feuerte den Webhook erneut.
+    """
+    if not REDO_SECRET:
+        raise HTTPException(503, "REDO_SECRET nicht gesetzt — der Webhook ist nicht konfiguriert.")
+    if not hmac.compare_digest(x_redo_secret or "", REDO_SECRET):
+        raise HTTPException(403, "falsches Redo-Secret")
+    # Paperless sendet je nach Einstellung anders: `use_params=true` als Query-Parameter
+    # oder Formularfeld, `as_json=true` mit `body` als (doppelt kodiertes) JSON. Statt eine
+    # Form vorzuschreiben, werden alle drei gelesen — der Betreiber soll den Workflow
+    # einrichten koennen, wie er mag.
+    roh = (await request.body()).decode("utf-8", "replace")
+    doc_id = None
+    for kandidat in (request.query_params.get("doc_id"),
+                     request.query_params.get("document_id"),
+                     request.query_params.get("id")):
+        if kandidat and str(kandidat).strip().isdigit():
+            doc_id = int(kandidat)
+            break
+    if not doc_id and roh:
+        doc_id = doc_id_aus_webhook(roh)
+    if not doc_id and roh:
+        # Formularfeld (application/x-www-form-urlencoded)
+        from urllib.parse import parse_qs
+        for schluessel, werte in parse_qs(roh).items():
+            if schluessel in ("doc_id", "document_id", "id") and werte and werte[0].strip().isdigit():
+                doc_id = int(werte[0])
+                break
+    if not doc_id:
+        # Sagen, was ankam — sonst sucht man im Dunkeln, welche Webhook-Form eingestellt ist.
+        print(f"redo: keine Dokument-ID. query={dict(request.query_params)} "
+              f"body={roh[:200]!r}", file=sys.stderr)
+        raise HTTPException(400, "keine Dokument-ID im Webhook gefunden "
+                                 "(weder Query-Parameter noch Rumpf enthielten eine)")
+    hinweis = raeume_ausloeser(doc_id)
+    rc, out = run_classify(doc_id, force=True, source="redo", propose=True, hinweis=hinweis)
+    return {"ok": rc == 0, "doc": doc_id, "hinweis": bool(hinweis), "output": out[-800:]}
+
+
+@app.get("/api/proposals")
+def get_proposals(request: Request):
+    guard(request)
+    return {"vorschlaege": lade_vorschlaege()}
+
+
+@app.post("/api/proposals/{doc_id}/annehmen")
+def annehmen(doc_id: int, request: Request):
+    """Den abgelegten Patch ausfuehren — aber nur, wenn das Dokument sich nicht geaendert hat."""
+    guard(request)
+    pfad = os.path.join(PROP_DIR, f"{doc_id}.json")
+    if not os.path.exists(pfad):
+        raise HTTPException(404, "kein Vorschlag zu diesem Dokument")
+    vorschlag = json.load(open(pfad, encoding="utf-8"))
+    doc = api_get(f"/documents/{doc_id}/")
+    if doc_hat_sich_geaendert(vorschlag, doc):
+        raise HTTPException(409, "Das Dokument wurde seit dem Vorschlag geändert. "
+                                 "Bitte neu klassifizieren, damit nichts überschrieben wird.")
+    api_send(f"/documents/{doc_id}/", vorschlag["patch"], "PATCH")
+    os.remove(pfad)
+    return {"ok": True, "doc": doc_id, "angewendet": sorted(vorschlag["patch"].keys())}
+
+
+@app.post("/api/proposals/{doc_id}/verwerfen")
+def verwerfen(doc_id: int, request: Request):
+    guard(request)
+    pfad = os.path.join(PROP_DIR, f"{doc_id}.json")
+    if not os.path.exists(pfad):
+        raise HTTPException(404, "kein Vorschlag zu diesem Dokument")
+    os.remove(pfad)
+    return {"ok": True, "doc": doc_id}
 
 
 @app.get("/api/config")
@@ -461,6 +602,13 @@ button.sec{background:#374151}input,textarea{background:#0f1115;color:#e6e6e6;bo
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
 dialog{background:#161a22;color:#e6e6e6;border:1px solid #303643;border-radius:12px;max-width:760px;width:92%}
 pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115;padding:10px;border-radius:8px;max-height:60vh;overflow:auto}
+.vk{background:#161a22;border:1px solid #303643;border-radius:10px;padding:14px;margin-bottom:10px}
+.vk h3{margin:0 0 4px;font-size:15px}
+.vk .hinweis{background:#1f2937;border-left:3px solid #2563eb;padding:8px 10px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.vk dl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:8px 0 0;font-size:13px}
+.vk dt{color:#9aa4b2}.vk dd{margin:0}
+.vk .akt{display:flex;gap:8px;margin-top:12px;align-items:center}
+.muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
 </style></head><body>
 <header><h1>🧠 paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
 <div class=wrap>
@@ -473,6 +621,9 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
     <button class=sec onclick="rc('ocr')">mit OCR erzwingen</button>
     <span id=rcout style="font-size:12px;color:#9aa4b2"></span>
   </div>
+  <h2>Vorschläge <span class=pill id=vzahl style="display:none"></span></h2>
+  <div id=vorschlaege><div class=muted style="font-size:13px">Keine offenen Vorschläge.</div></div>
+
   <h2>Aktivität</h2>
   <table id=feed></table>
 </div>
@@ -480,6 +631,56 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
 <script>
 const badge=k=>`<span class="badge ${k}">${k}</span>`;
 async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+function txt(v){return String(v==null?'':v).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
+
+async function ladeVorschlaege(){
+  let d;
+  try{ d = await j('/api/proposals'); }catch(e){ return; }
+  const v = d.vorschlaege||[];
+  const zahl=document.getElementById('vzahl');
+  zahl.style.display = v.length ? '' : 'none';
+  zahl.textContent = v.length;
+  const ziel=document.getElementById('vorschlaege');
+  if(!v.length){ ziel.innerHTML='<div class=muted style="font-size:13px">Keine offenen Vorschläge.</div>'; return; }
+  ziel.innerHTML = v.map(p=>{
+    const L=p.lesbar||{};
+    const felder=Object.entries(L.felder||{}).filter(([k,w])=>w!=='behalten');
+    return `<div class=vk id="vk${p.id}">
+      <h3>#${p.id} · ${txt(L.titel)}</h3>
+      <div class=muted style="font-size:12px">${txt(p.ts)} · ausgelöst durch ${txt(p.quelle)}</div>
+      ${p.hinweis?`<div class=hinweis>Dein Hinweis: „${txt(p.hinweis)}"</div>`:''}
+      <dl>
+        ${L.korrespondent?`<dt>Korrespondent</dt><dd>${txt(L.korrespondent)}</dd>`:''}
+        ${L.dokumenttyp?`<dt>Dokumenttyp</dt><dd>${txt(L.dokumenttyp)}</dd>`:''}
+        ${L.datum?`<dt>Datum</dt><dd>${txt(L.datum)}</dd>`:''}
+        ${(L.neue_tags||[]).length?`<dt>neue Tags</dt><dd>${(L.neue_tags||[]).map(txt).join(', ')}</dd>`:''}
+        ${felder.length?`<dt>Felder</dt><dd>${felder.map(([k,w])=>`${txt(k)} = <b>${txt(w)}</b>`).join('<br>')}</dd>`:''}
+        ${L.zusammenfassung?`<dt>Zusammenfassung</dt><dd>${txt(L.zusammenfassung)}</dd>`:''}
+      </dl>
+      <div class=akt>
+        <button onclick="entscheide(${p.id},'annehmen')">Übernehmen</button>
+        <button class=sec onclick="entscheide(${p.id},'verwerfen')">Verwerfen</button>
+        <span class=muted id="vm${p.id}" style="font-size:12px"></span>
+      </div></div>`;
+  }).join('');
+}
+
+async function entscheide(id, was){
+  const meld=document.getElementById('vm'+id);
+  meld.textContent='…';
+  try{
+    await j(`/api/proposals/${id}/${was}`,{method:'POST'});
+    document.getElementById('vk'+id).remove();
+    await ladeVorschlaege(); await load();
+  }catch(e){
+    // 409 = das Dokument hat sich seit dem Vorschlag geaendert. Das ist kein Fehler,
+    // sondern der Schutz davor, eine Handkorrektur stillschweigend zu ueberschreiben.
+    // Zeichenklassen ausgeschrieben statt als Kurzform: dieser HTML-Block ist ein
+    // normaler Python-String, Kurzformen mit Rueckstrich loesen dort eine SyntaxWarning aus.
+    meld.textContent = String(e.message||e).replace(/^[0-9]+[ ]*/,'').slice(0,160);
+  }
+}
+
 async function load(){
   try{
     const s=await j('/api/stats');
@@ -515,7 +716,8 @@ async function showtrace(id){
     document.getElementById('dlg').showModal();}
   catch(e){alert('kein Trace für '+id)}
 }
-load();setInterval(load,6000);
+load(); ladeVorschlaege();
+setInterval(ladeVorschlaege, 15000);setInterval(load,6000);
 </script></body></html>"""
 
 

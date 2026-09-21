@@ -26,10 +26,13 @@ Env-Schalter:
   CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
+  CLASSIFY_PROPOSE=1           nichts schreiben, sondern einen VORSCHLAG ablegen
+                               (proposals/<id>.json; Panel nimmt an oder verwirft)
+  CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
   CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
 """
-import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback
+import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile
 
 BASE = os.environ.get("PAPERLESS_API", "http://localhost:8000/api")
 TOK = os.environ.get("PAPERLESS_TOKEN", "")
@@ -42,6 +45,7 @@ CONFIG = os.environ.get("CLASSIFY_CONFIG", os.path.join(SCRIPT_DIR, "classify-co
 DRY = os.environ.get("CLASSIFY_DRY") == "1"
 FORCE = os.environ.get("CLASSIFY_FORCE") == "1"
 FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
+PROPOSE = os.environ.get("CLASSIFY_PROPOSE") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
@@ -77,10 +81,17 @@ CFG = {
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
 }
+# Fehler beim Laden werden gesammelt und weiter unten protokolliert — hier oben gibt es
+# log() noch nicht. Eine kaputte Config darf NICHT still zu Standardwerten fuehren: dann
+# faellt der installationsspezifische Prompt weg, manual_fields ist leer, und der Lauf sieht
+# aeusserlich normal aus, waehrend er gegen die falsche Taxonomie arbeitet.
+_CFG_FEHLER = None
 try:
     CFG.update(json.load(open(CONFIG)))
-except Exception:
-    pass
+except FileNotFoundError:
+    pass                      # keine Config = Standardwerte, das ist der vorgesehene Fall
+except Exception as _e:
+    _CFG_FEHLER = f"{CONFIG} nicht lesbar ({_e!r}) — es gelten die Standardwerte!"
 
 MODEL = CFG["model"]
 OCR_MODEL = CFG["ocr_model"]
@@ -89,12 +100,27 @@ KEY_TEXT = CFG.get("api_key_text") or _ENV_KEY
 KEY_OCR = CFG.get("api_key_ocr") or _ENV_KEY
 
 # Optionale Panel-Stores (Korrespondent-Hinweise/Aliase/E-Mail-Domains) — fehlen = leer
+_STORE_FEHLER = []
+
+
 def _load_json(name, default):
+    """Einen Store laden. Fehlt die Datei, ist das normal — ist sie KAPUTT, ist es ein Befund.
+
+    Ohne die Unterscheidung verschwindet ein gepflegter Korrespondent-Store bei einem einzigen
+    Tippfehler lautlos, und die Klassifizierung laeuft ohne Grounding weiter.
+    """
+    pfad = os.path.join(SCRIPT_DIR, name)
     try:
-        v = json.load(open(os.path.join(SCRIPT_DIR, name)))
-        return v if isinstance(v, type(default)) else default
-    except Exception:
+        v = json.load(open(pfad))
+    except FileNotFoundError:
         return default
+    except Exception as e:
+        _STORE_FEHLER.append(f"{name} nicht lesbar ({e!r}) — wird ignoriert")
+        return default
+    if not isinstance(v, type(default)):
+        _STORE_FEHLER.append(f"{name} hat den falschen Aufbau ({type(v).__name__}) — wird ignoriert")
+        return default
+    return v
 # Korrespondent-Metadaten-Store (im Panel gepflegt), an Paperless-Korrespondenten per ID gebunden:
 #   {"<paperless_id>": {email, domains, telefon, adresse, kundennummer, ustid, kontext,
 #                        aliase, quelle, extern_id}}
@@ -103,6 +129,8 @@ def _load_json(name, default):
 # war — eine stille Kollision, sobald je ein Adressbuch angebunden wird. Alte Stores werden
 # beim Lesen weiter verstanden.
 CORR_META = _load_json("correspondents.json", {})
+for _f in _STORE_FEHLER:
+    log(f"STORE: {_f}")
 
 
 def cmeta(cid):
@@ -130,13 +158,43 @@ def log(m):
     try:
         with open(LOG, "a") as f:
             f.write(f"{datetime.datetime.now():%F %T} {'DRY ' if DRY else ''}{m}\n")
-    except Exception:
-        pass
+    except Exception as e:
+        # Letzte Instanz: wenn nicht einmal das Log schreibbar ist, nach stderr —
+        # das landet im post-consume-Log von Paperless und ist damit auffindbar.
+        print(f"classify: Log nicht schreibbar ({e!r}): {m}", file=sys.stderr)
 
+
+if _CFG_FEHLER:
+    log(f"KONFIGURATION: {_CFG_FEHLER}")
+    print(f"classify: {_CFG_FEHLER}", file=sys.stderr)
 
 TRACE_DIR = os.path.join(os.path.dirname(LOG), "traces")
 RUN_DIR = os.path.join(os.path.dirname(LOG), "running")
+PROP_DIR = os.path.join(os.path.dirname(LOG), "proposals")
 TRACE = {}
+
+
+def schreibe_json(pfad, daten):
+    """JSON atomar schreiben: erst in eine Nachbardatei, dann umbenennen.
+
+    `json.dump(d, open(pfad, "w"))` kürzt die Zieldatei sofort auf null; bricht der Vorgang
+    danach ab, steht dort eine halbe Datei. Bei einem Trace heisst das: die Panel-Ansicht
+    zeigt kaputtes JSON statt des letzten brauchbaren Standes.
+    """
+    ordner = os.path.dirname(os.path.abspath(pfad)) or "."
+    fd, tmp = tempfile.mkstemp(dir=ordner, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(daten, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, pfad)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def save_trace(did, extra=None):
@@ -147,9 +205,53 @@ def save_trace(did, extra=None):
         t = dict(TRACE); t["id"] = did; t["ts"] = f"{datetime.datetime.now():%F %T}"
         if extra:
             t.update(extra)
-        json.dump(t, open(os.path.join(TRACE_DIR, f"{did}.json"), "w"), ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        schreibe_json(os.path.join(TRACE_DIR, f"{did}.json"), t)
+    except Exception as e:
+        # NICHT still verschlucken. Bis 2026-09-21 stand hier `pass` — auf einer Instanz
+        # entstanden dadurch ueber zwei Monate keine Traces, ohne dass es jemandem auffiel.
+        # Ein Trace ist Diagnose, kein Selbstzweck: faellt er aus, muss man es SEHEN.
+        log(f"trace-fail {did}: {e!r}")
+
+
+def speichere_vorschlag(did, patch, doc, lesbar, hinweis=""):
+    """Den geplanten Patch ablegen, statt ihn zu schreiben.
+
+    Der Vorschlag traegt drei Dinge, die beim Annehmen gebraucht werden:
+      patch    — was geschrieben wuerde, unveraendert uebernehmbar
+      lesbar   — dieselben Angaben mit Namen statt IDs, fuer die Anzeige
+      stand    — der Dokumentstand bei der Erzeugung. Beim Annehmen wird geprueft, ob sich
+                 das Dokument seither geaendert hat; sonst ueberschreibt ein alter Vorschlag
+                 stillschweigend eine zwischenzeitliche Korrektur von Hand.
+
+    Gibt den Pfad zurueck oder None, wenn nichts geschrieben werden konnte.
+    """
+    if not did:
+        return None
+    try:
+        os.makedirs(PROP_DIR, exist_ok=True)
+        pfad = os.path.join(PROP_DIR, f"{did}.json")
+        schreibe_json(pfad, {
+            "id": int(did),
+            "ts": f"{datetime.datetime.now():%F %T}",
+            "quelle": SOURCE or "manual",
+            "hinweis": hinweis,
+            "patch": patch,
+            "lesbar": lesbar,
+            "stand": {
+                "modified": doc.get("modified"),
+                "title": doc.get("title"),
+                "correspondent": doc.get("correspondent"),
+                "document_type": doc.get("document_type"),
+                "created": (doc.get("created") or "")[:10],
+                "tags": sorted(doc.get("tags") or []),
+                "custom_fields": {str(c["field"]): c.get("value")
+                                  for c in (doc.get("custom_fields") or [])},
+            },
+        })
+        return pfad
+    except Exception as e:
+        log(f"vorschlag-fail {did}: {e!r}")
+        return None
 
 
 def mark_running(did, stage="Start"):
@@ -159,18 +261,22 @@ def mark_running(did, stage="Start"):
         os.makedirs(RUN_DIR, exist_ok=True)
         p = os.path.join(RUN_DIR, f"{did}.json")
         since = json.load(open(p)).get("since") if os.path.exists(p) else f"{datetime.datetime.now():%F %T}"
-        json.dump({"id": did, "since": since, "stage": stage,
-                   "src": "manuell" if (FORCE or FORCE_OCR) else "auto"}, open(p, "w"))
-    except Exception:
-        pass
+        schreibe_json(p, {"id": did, "since": since, "stage": stage,
+                          "src": "manuell" if (FORCE or FORCE_OCR) else "auto"})
+    except Exception as e:
+        # Wie beim Trace: ein stilles `pass` laesst die „laeuft gerade"-Anzeige monatelang
+        # ausfallen, ohne dass es jemand bemerkt. Ein Lauf scheitert daran NICHT.
+        log(f"running-fail {did}: {e!r}")
 
 
 def unmark_running(did):
     try:
         if did:
             os.remove(os.path.join(RUN_DIR, f"{did}.json"))
-    except Exception:
-        pass
+    except FileNotFoundError:
+        pass                      # nie markiert oder schon weg — kein Befund
+    except Exception as e:
+        log(f"unrunning-fail {did}: {e!r}")
 
 
 def set_stage(did, s):
@@ -316,6 +422,56 @@ def beispiel_text(paare, max_paare=6):
     if not gut:
         return ""
     return " (z.B. " + ", ".join(f"'{a}'='{b}'" for a, b in gut[:max_paare]) + ")"
+
+
+def fehler_mit_feldnamen(err, cfs, cfields):
+    """Paperless-Fehlermeldung so umschreiben, dass Feldnamen darin stehen.
+
+    Bei Custom-Field-Fehlern schlüsselt Paperless nach **Listen-Index** der gesendeten
+    `custom_fields`, nicht nach Feld-ID und nicht nach Name — bei Fehlern an Position 2 und 3
+    kommt `{"custom_fields": {"1": {…}, "2": {…}}}` zurück. Diesen Text roh an ein Modell zu
+    geben und es um Korrektur „mit denselben Feldnamen" zu bitten, kann nicht funktionieren:
+    das Modell sieht Zahlen, kennt die gesendete Reihenfolge nicht und rät. Bis 2026-09-21
+    endete das regelmäßig damit, dass nach vier Runden ohne Custom Fields gespeichert wurde.
+
+    Gibt den Originaltext zurück, wenn er sich nicht als JSON lesen lässt oder keine
+    Index-Schlüssel enthält — eine unverständliche Meldung ist besser als eine falsch geratene.
+    """
+    try:
+        daten = json.loads(err)
+    except (ValueError, TypeError):
+        return err
+    if not isinstance(daten, dict) or "custom_fields" not in daten:
+        return err
+    cf_fehler = daten["custom_fields"]
+    name_je_id = {f["id"]: f["name"] for f in cfields}
+
+    def benenne(idx):
+        try:
+            fid = cfs[int(idx)]["field"]
+        except (ValueError, TypeError, IndexError, KeyError):
+            return None
+        return name_je_id.get(fid)
+
+    teile = []
+    if isinstance(cf_fehler, dict):
+        for idx, detail in cf_fehler.items():
+            name = benenne(idx)
+            teile.append(f"Feld '{name}': {json.dumps(detail, ensure_ascii=False)}" if name
+                         else f"Eintrag {idx}: {json.dumps(detail, ensure_ascii=False)}")
+    elif isinstance(cf_fehler, list):
+        # Listenform: Position = Index, leere Einträge sind fehlerfrei
+        for idx, detail in enumerate(cf_fehler):
+            if not detail:
+                continue
+            name = benenne(idx)
+            teile.append(f"Feld '{name}': {json.dumps(detail, ensure_ascii=False)}" if name
+                         else f"Eintrag {idx}: {json.dumps(detail, ensure_ascii=False)}")
+    if not teile:
+        return err
+    rest = {k: v for k, v in daten.items() if k != "custom_fields"}
+    text = " | ".join(teile)
+    return f"{text} | weitere: {json.dumps(rest, ensure_ascii=False)}" if rest else text
 
 
 def _behalten(cfs, cur_vals, fid):
@@ -491,7 +647,13 @@ def main():
     mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
     TRACE["mail"] = ({"from": mail_from or None, "hat_kontext": bool(mail_ktx)} if (mail_ktx or mail_from) else None)
 
-    hinweis = (cur_vals.get(hinweis_fid) or "").strip() if hinweis_fid else ""
+    # Der Hinweis kann aus zwei Richtungen kommen: aus dem Custom Field (normaler Weg) oder
+    # aus der Umgebung. Letzteres braucht der Vorschlagsmodus: dort raeumt der Anstoss Tag und
+    # Feld, bevor der Lauf startet — sonst bliebe der Ausloeser bei einem verworfenen Vorschlag
+    # stehen. Der gelesene Text wird dabei durchgereicht, damit er nicht verloren geht.
+    hinweis = os.environ.get("CLASSIFY_HINWEIS", "").strip()
+    if not hinweis and hinweis_fid:
+        hinweis = (cur_vals.get(hinweis_fid) or "").strip()
     hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
 
     # Korrespondent-Metadaten (Panel-Store, per ID an Paperless gebunden) fürs Prompt
@@ -518,7 +680,8 @@ def main():
         try:
             _p0 = mistral('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). Antworte NUR JSON {"correspondent": <Name|null>}.',
                           mail_block + 'TITEL: ' + title + _NL + _NL + 'INHALT:' + _NL + content[:2500], 150)
-        except Exception:
+        except Exception as e:
+            log(f"pass0-fail {did}: {e!r}")   # ohne Absender weiter, aber sichtbar
             _p0 = {}
         p0_name = (_p0.get("correspondent") or "").strip()
     kand = []
@@ -691,7 +854,11 @@ def main():
         patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
     code_flds = {}
-    if hinweis_fid and hinweis:   # Nutzer-Hinweis nach Gebrauch entfernen (sonst feuert der Redo-Trigger erneut)
+    if hinweis_fid and hinweis and not PROPOSE:
+        # Nutzer-Hinweis nach Gebrauch entfernen, sonst feuert der Redo-Trigger erneut.
+        # Im Vorschlagsmodus NICHT: dort raeumt der Anstoss (das Panel) Tag und Feld, bevor
+        # der Lauf startet. Wuerde der Lauf es tun, bliebe der Ausloeser bei einem verworfenen
+        # Vorschlag stehen und das naechste Update am Dokument feuerte erneut.
         code_flds[hinweis_fid] = None
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
@@ -699,6 +866,29 @@ def main():
                           "new_tags": new_tags, "correspondent": corr_info,
                           "fields_ki": field_log, "summary": summary,
                           "document_date": patch.get("created"), "date_change": date_note}
+
+    if PROPOSE:
+        # Vorschlagsmodus: nichts schreiben, sondern ablegen. Keine Reparaturschleife —
+        # die braucht eine echte Antwort von Paperless, und die gibt es erst beim Annehmen.
+        lesbar = {
+            "titel": doc.get("title"),
+            "dokumenttyp": dt,
+            "korrespondent": corr_info,
+            "tags": [tagname_by_id.get(i) for i in tag_ids],
+            "neue_tags": new_tags,
+            "felder": field_log,
+            "zusammenfassung": summary,
+            "datum": date_note,
+        }
+        pfad = speichere_vorschlag(did, patch, doc, lesbar, hinweis)
+        TRACE["writeback"]["modus"] = "vorschlag"
+        TRACE["_stage"] = "vorschlag abgelegt"
+        save_trace(did)
+        unmark_running(did)
+        log(f"VORSCHLAG {did} | {corr_info} | typ={dt} | felder={len(field_log)}"
+            + (f" | hinweis='{hinweis[:40]}'" if hinweis else "")
+            + ("" if pfad else " | ABLAGE FEHLGESCHLAGEN"))
+        return
 
     ok, err = patch_doc(did, patch)
     TRACE["repair"] = []; rounds = 0
@@ -708,7 +898,7 @@ def main():
         log(f"patch-fail {did} R{rounds}: {err[:100]}")
         messages.append({"role": "assistant", "content": assistant_raw})
         messages.append({"role": "user", "content":
-            f"Beim Speichern nach Paperless kam dieser Fehler:\n{err}\n"
+            f"Beim Speichern nach Paperless kam dieser Fehler:\n{fehler_mit_feldnamen(err, cfs, cfields)}\n"
             "Korrigiere die betroffenen Feldwerte (nicht korrigierbare auf null) und gib NUR das JSON "
             "{\"fields\": {<Feldname>: <Wert|null>}} mit denselben Feldnamen zurück."})
         fix, assistant_raw = mistral_chat(messages, 900)
