@@ -308,7 +308,13 @@ async def ingest(file: UploadFile = File(...), title: str = Form(None),
 
 
 # ---------- Korrespondent-Metadaten (Store, per Paperless-ID gekoppelt) ----------
-CORR_FIELDS = ("email", "domains", "telefon", "adresse", "kundennummer", "uid", "kontext", "aliase")
+# `ustid` hiess bis 2026-09-21 `uid` (Kollision mit vCard-UID, s. classify.py).
+# `quelle`/`extern_id` sind der Platz fuer eine spaetere externe Stammdatenquelle:
+# woher kam der Datensatz, und unter welcher Kennung wird er dort gefuehrt. Zwei
+# Freitextfelder, kein Sync — solange es keine Quelle gibt, waere mehr Architektur ohne Anlass.
+CORR_FIELDS = ("email", "domains", "telefon", "adresse", "kundennummer", "ustid",
+               "kontext", "aliase", "quelle", "extern_id")
+CORR_ALTNAMEN = {"ustid": "uid"}     # beim Lesen alter Stores
 
 
 def load_corr_store():
@@ -336,7 +342,9 @@ def correspondents(request: Request):
         m = store.get(str(c["id"]), {})
         row = {"id": c["id"], "name": c["name"], "document_count": c.get("document_count", 0)}
         for f in CORR_FIELDS:
-            row[f] = m.get(f, "")
+            # Altname beruecksichtigen, damit ein Store von vor der Umbenennung nicht
+            # so aussieht, als waere das Feld leer (uid -> ustid, 2026-09-21).
+            row[f] = m.get(f) or m.get(CORR_ALTNAMEN.get(f, ""), "") or ""
         out.append(row)
     out.sort(key=lambda x: (x["name"] or "").lower())
     return out
@@ -387,7 +395,9 @@ label{display:block;font-size:12px;color:#9aa4b2;margin:10px 0 3px}
     <div><label>Domains (Absender-Match, kommagetrennt)</label><input id=f_domains></div>
     <div><label>Telefon</label><input id=f_telefon></div>
     <div><label>Kundennummer</label><input id=f_kundennummer></div>
-    <div><label>UID-Nr.</label><input id=f_uid></div>
+    <div><label>UID-Nr. (USt-IdNr.)</label><input id=f_ustid></div>
+    <div><label>Quelle</label><input id=f_quelle placeholder="z.B. carddav, bmd — leer = hier gepflegt"></div>
+    <div><label>Kennung in der Quelle</label><input id=f_extern_id></div>
     <div><label>Aliase (kommagetrennt)</label><input id=f_aliase></div>
   </div>
   <label>Adresse</label><input id=f_adresse>
@@ -395,7 +405,7 @@ label{display:block;font-size:12px;color:#9aa4b2;margin:10px 0 3px}
   <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end"><button type=button class=sec onclick="dlg.close()">Abbrechen</button><button type=button onclick="save()">Speichern</button></div>
 </form></dialog>
 <script>
-const F=["email","domains","telefon","adresse","kundennummer","uid","kontext","aliase"];
+const F=["email","domains","telefon","adresse","kundennummer","ustid","kontext","aliase","quelle","extern_id"];
 let DATA=[],cur=null;
 async function load(){DATA=await (await fetch('/api/correspondents')).json();render()}
 function render(){

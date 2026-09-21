@@ -67,6 +67,12 @@ CFG = {
     "manual_fields": [],               # Custom-Field-Namen, die die KI NIE anfasst (rein manuell gepflegt, z.B. Bezahlt-Am)
     "reserved_tags": [],               # Namen, die die KI NIE vergibt + die beim Writeback erhalten bleiben (Status/Quelle/Marker)
     "system_prompt": "",               # leer = DEFAULT_PROMPT
+    # Beispielpaare für den Korrespondent-Abgleich (Pass 2), z.B.
+    #   [["Mustrmann GmbH", "Mustermann"], ["ACME Vers", "ACME"]]
+    # Few-Shot-Beispiele tragen bei OCR-Fehlern mehr als jede Beschreibung — "Mustrmann"
+    # → "Mustermann" ist ein Muster, das man zeigen, nicht erklären kann. Sie gehören in die
+    # Config und nicht in den Code, weil es echte Namen der jeweiligen Installation sind.
+    "korrespondent_beispiele": [],
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
@@ -90,7 +96,12 @@ def _load_json(name, default):
     except Exception:
         return default
 # Korrespondent-Metadaten-Store (im Panel gepflegt), an Paperless-Korrespondenten per ID gebunden:
-#   {"<paperless_id>": {email, domains, telefon, adresse, kundennummer, uid, kontext, aliase}}
+#   {"<paperless_id>": {email, domains, telefon, adresse, kundennummer, ustid, kontext,
+#                        aliase, quelle, extern_id}}
+# `ustid` hiess bis 2026-09-21 `uid`. Umbenannt, weil `UID` in vCard (RFC 6350 §6.7.6) der
+# globale Datensatzschluessel ist, hier aber die Umsatzsteuer-Identifikationsnummer gemeint
+# war — eine stille Kollision, sobald je ein Adressbuch angebunden wird. Alte Stores werden
+# beim Lesen weiter verstanden.
 CORR_META = _load_json("correspondents.json", {})
 
 
@@ -105,8 +116,9 @@ def cfull_hint(c):  # Kontext + harte Kennungen (Kundennr/UID) fürs KI-Groundin
         parts.append(str(m["kontext"]).strip())
     if m.get("kundennummer"):
         parts.append("Kundennr " + str(m["kundennummer"]).strip())
-    if m.get("uid"):
-        parts.append("UID " + str(m["uid"]).strip())
+    ustid = m.get("ustid") or m.get("uid")     # uid = Altname vor 2026-09-21
+    if ustid:
+        parts.append("UID " + str(ustid).strip())
     return "; ".join(p for p in parts if p)
 
 
@@ -286,6 +298,26 @@ def coerce_field(f, v):
         return None
 
 
+def beispiel_text(paare, max_paare=6):
+    """Few-Shot-Beispiele für den Korrespondent-Abgleich als Prompt-Baustein.
+
+    Nimmt [["Mustrmann GmbH", "Mustermann"], …] und macht daraus " (z.B. 'a'='b', …)".
+    Unbrauchbare Einträge (falsche Länge, leer, kein Text) werden übergangen statt zu
+    scheitern — die Config pflegt ein Mensch, ein Tippfehler dort darf keinen
+    Klassifizierungslauf abbrechen.
+    """
+    gut = []
+    for eintrag in (paare or []):
+        if not isinstance(eintrag, (list, tuple)) or len(eintrag) != 2:
+            continue
+        a, b = (str(x).strip() for x in eintrag)
+        if a and b:
+            gut.append((a, b))
+    if not gut:
+        return ""
+    return " (z.B. " + ", ".join(f"'{a}'='{b}'" for a, b in gut[:max_paare]) + ")"
+
+
 def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds=None):
     """KI-Entscheidung je Feld → custom_fields-Liste.
 
@@ -369,7 +401,11 @@ def main():
     if not did:
         return
     if not TOK:
-        log("FEHLER: PAPERLESS_TOKEN nicht gesetzt (ENV)"); return
+        # Laut scheitern statt still zurueckzukehren: ein fehlender Token ist ein
+        # Konfigurationsfehler, kein ueberspringbares Dokument. Exit 2 macht ihn im
+        # post-consume-Log von Paperless sichtbar, statt ihn in einer Logzeile zu begraben.
+        log("FEHLER: PAPERLESS_TOKEN nicht gesetzt (ENV)")
+        raise SystemExit(2)
     if not CFG["enabled"] and not DRY:
         log(f"skip {did}: Klassifizierer im Panel deaktiviert"); return
 
@@ -576,9 +612,11 @@ def main():
             cands = [c for s, c in scored[:20] if s >= 0.28]
             if cands:
                 p2_sys = "Du ordnest einen Absender bestehenden Korrespondenten zu. Antworte NUR JSON {\"match\": <exakter Name aus der Liste> ODER null}."
+                bsp_txt = beispiel_text(CFG["korrespondent_beispiele"])
                 p2_usr = (f"Vorgeschlagener Absender: '{corr_name}'.\nBestehende Kandidaten: {[c['name'] for c in cands]}.\n"
                           "Welcher bezeichnet DIESELBE Firma/Behörde/Person? Rechtsform/Zusätze (GmbH/AG/OG) egal; "
-                          "auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen. Nur bei echter Übereinstimmung, sonst null.")
+                          f"auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{bsp_txt}. "
+                          "Nur bei echter Übereinstimmung, sonst null.")
                 pick = mistral(p2_sys, p2_usr, 200)
                 pass2 = {"system": p2_sys, "user": p2_usr, "response": pick}
                 m = pick.get("match")

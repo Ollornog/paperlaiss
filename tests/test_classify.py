@@ -152,4 +152,36 @@ r.check("build_cfs: neuer Wert wird typgerecht gesetzt",
         _feld(_cfs, 2) == [{"field": 2, "value": "EUR12.50"}])
 
 
+# ---- korrespondent_beispiele: Few-Shot fuer den Pass-2-Abgleich.
+# Die konkreten Beispiele standen frueher hartkodiert im Prompt — mit echten Namen, die
+# in einem oeffentlichen Repo nichts zu suchen haben. Sie gehoeren in die Config; hier
+# steht, dass der Schluessel existiert, einen sicheren Default hat und Unsinn ueberlebt.
+r.check("korrespondent_beispiele ist ein Config-Schluessel",
+        "korrespondent_beispiele" in classify.CFG)
+r.check("beispiel_text: leere Liste ergibt leeren Baustein",
+        classify.beispiel_text([]) == "" and classify.beispiel_text(None) == "")
+r.check("beispiel_text: Paare werden als z.B.-Liste formatiert",
+        classify.beispiel_text([["Mustrmann", "Mustermann"], ["ACME Vers", "ACME"]])
+        == " (z.B. 'Mustrmann'='Mustermann', 'ACME Vers'='ACME')")
+r.check("beispiel_text: kaputte Eintraege werden uebergangen, nicht geworfen",
+        classify.beispiel_text([["nur eins"], [], ["a", "b"], ["", "x"], "quatsch", ["c", "d"]])
+        == " (z.B. 'a'='b', 'c'='d')")
+r.check("beispiel_text: deckelt die Anzahl",
+        classify.beispiel_text([[f"a{i}", f"b{i}"] for i in range(20)]).count("=") == 6)
+
+# ---- cfull_hint: der Grounding-Baustein aus dem Korrespondent-Store.
+# `ustid` hiess bis 2026-09-21 `uid`; ein Store von vorher muss weiter verstanden werden,
+# sonst verliert eine bestehende Installation still ihre Kennungen.
+_corr_meta_vorher = classify.CORR_META          # danach zuruecksetzen, sonst faerbt der
+classify.CORR_META = {"7": {"kontext": "Kfz-Teile", "kundennummer": "KD-1", "ustid": "ATU111"},
+                      "8": {"kontext": "Versicherung", "uid": "ATU222"},
+                      "9": {}}
+r.check("cfull_hint: Kontext, Kundennr und UID landen im Grounding",
+        classify.cfull_hint({"id": 7}) == "Kfz-Teile; Kundennr KD-1; UID ATU111")
+r.check("cfull_hint: alter Feldname uid wird weiter verstanden",
+        classify.cfull_hint({"id": 8}) == "Versicherung; UID ATU222")
+r.check("cfull_hint: leerer Eintrag ergibt leeren Hinweis",
+        classify.cfull_hint({"id": 9}) == "")
+classify.CORR_META = _corr_meta_vorher          # Test auf jeden folgenden ab
+
 sys.exit(r.done())
