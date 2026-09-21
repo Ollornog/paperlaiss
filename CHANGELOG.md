@@ -6,6 +6,22 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — vier Panel-Blöcke (T-1)
+
+- **Einstellungen** (`/einstellungen`): alle Konfigurationswerte in der Oberfläche, mit passendem
+  Eingabeelement je Typ. Der Typ wird aus dem aktuellen Wert abgeleitet — ein neuer Schlüssel
+  erscheint von selbst, statt vergessen zu werden. Schlüsselfelder bleiben ausgespart.
+  Formulareingaben werden **typsicher** zurückgewandelt (`"350"` → `350`, `"0,2"` → `0.2`); was
+  sich nicht umwandeln lässt, wird **übergangen und gemeldet** statt geraten.
+- **Korrespondenten zusammenführen**: Mehrfachauswahl, Dokumente umhängen, Dubletten löschen.
+  Die Metadaten werden verschmolzen — das Ziel behält seine Werte, leere Felder werden gefüllt,
+  Domains und Aliase **vereinigt** (sonst legt der Feedback-Loop den Korrespondenten neu an).
+- **Verlauf** (30 Tage) mit Auffälligkeiten-Liste. Lücken werden aufgefüllt: „seit drei Wochen
+  läuft nichts" sieht man nur mit leeren Tagen. Ein Fehler gilt als gelöst, wenn für dasselbe
+  Dokument **später** ein erfolgreicher Lauf steht.
+- **Trace-Ansicht** (`/trace/{id}`): der Lauf in fünf aufklappbaren Schritten statt als
+  JSON-Block. Bei der Fehlersuche ist die Frage fast immer „an welcher Stelle ist es gekippt".
+
 ### Hinzugefügt — Naht für installationseigene Schritte
 
 Ein optionaler Konfigurationsschlüssel `nachbearbeitung` nennt ein Skript, das **nach** dem

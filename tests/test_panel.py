@@ -64,4 +64,128 @@ r.check("Abgleich ohne Zeitstempel: neuer Tag = geändert",
 r.check("Abgleich: Vorschlag ohne Stand gilt als geändert",
         kern.doc_hat_sich_geaendert({}, _gleich) is True)
 
+# ---- merge_metadaten(): zwei Korrespondenten zusammenführen, ohne Kundendaten zu verlieren.
+_ziel = {"kundennummer": "KD-1", "kontext": "", "domains": "auer.at", "aliase": "Auer"}
+_q1 = {"kundennummer": "KD-99", "kontext": "Reifenhandel", "domains": "auer-reifen.at", "aliase": "AUER Reifen"}
+_erg = kern.merge_metadaten(_ziel, [_q1])
+
+r.check("Merge: das Ziel behält seine Kundennummer", _erg["kundennummer"] == "KD-1")
+r.check("Merge: leeres Zielfeld wird aus der Quelle gefüllt", _erg["kontext"] == "Reifenhandel")
+r.check("Merge: Domains werden vereinigt, nicht überschrieben",
+        _erg["domains"] == "auer.at, auer-reifen.at")
+r.check("Merge: Aliase werden vereinigt", _erg["aliase"] == "Auer, AUER Reifen")
+
+# Dubletten in Listen fallen raus — die zuerst gesehene Schreibweise gewinnt.
+_erg2 = kern.merge_metadaten({"domains": "Auer.AT"}, [{"domains": "auer.at, neu.at"}])
+r.check("Merge: Dubletten fallen raus, Groß-/Kleinschreibung egal",
+        _erg2["domains"] == "Auer.AT, neu.at")
+
+# Leere Felder bleiben draußen, damit der Store nicht mit "" zuwächst.
+r.check("Merge: leere Werte landen nicht im Ergebnis",
+        "telefon" not in kern.merge_metadaten({"telefon": ""}, [{"telefon": "  "}]))
+
+# Mehrere Quellen: die erste, die etwas hat, gewinnt.
+r.check("Merge: erste Quelle mit Wert gewinnt",
+        kern.merge_metadaten({}, [{"email": ""}, {"email": "a@example.com"},
+                                  {"email": "b@example.com"}])["email"] == "a@example.com")
+
+# Ohne Quellen bleibt das Ziel unverändert (aber bereinigt).
+r.check("Merge: ohne Quellen bleibt das Ziel",
+        kern.merge_metadaten({"kundennummer": "KD-1"}, []) == {"kundennummer": "KD-1"})
+r.check("Merge: leeres Ziel und leere Quellen ergibt leeren Eintrag",
+        kern.merge_metadaten({}, []) == {})
+
+# ---- config_uebernehmen(): ein Formular liefert Text, die Konfiguration braucht Typen.
+# Ohne Rückwandlung stünde nach dem ersten Speichern "true" statt true und "300" statt 300 —
+# und der Klassifizierer liest eine Zeichenkette, wo er eine Zahl erwartet.
+_alt = {"enabled": True, "ocr_min_len": 300, "temperature": 0.1, "model": "mistral-small",
+        "manual_fields": ["Bezahlt-Am"], "tag_descriptions": {"a": "b"}, "system_prompt": "lang…"}
+
+r.check("feld_typ erkennt Wahrheitswerte", kern.feld_typ(True) == "bool")
+r.check("feld_typ erkennt Zahlen", kern.feld_typ(300) == "zahl" and kern.feld_typ(0.1) == "zahl")
+r.check("feld_typ erkennt Listen und Wörterbücher",
+        kern.feld_typ([]) == "json" and kern.feld_typ({}) == "json")
+r.check("feld_typ trennt Zeile von Fließtext",
+        kern.feld_typ("kurz") == "zeile" and kern.feld_typ("x" * 200) == "text"
+        and kern.feld_typ("mit\nUmbruch") == "text")
+
+_neu, _weg = kern.config_uebernehmen(_alt, {
+    "enabled": "false", "ocr_min_len": "500", "temperature": "0,3",
+    "model": "mistral-large", "manual_fields": '["Bezahlt-Am", "Notiz"]'})
+r.check("Übernahme: Wahrheitswert aus Text", _neu["enabled"] is False)
+r.check("Übernahme: ganze Zahl bleibt ganz", _neu["ocr_min_len"] == 500 and isinstance(_neu["ocr_min_len"], int))
+r.check("Übernahme: Komma als Dezimaltrenner", _neu["temperature"] == 0.3)
+r.check("Übernahme: Liste aus JSON", _neu["manual_fields"] == ["Bezahlt-Am", "Notiz"])
+r.check("Übernahme: nichts übergangen bei gültiger Eingabe", _weg == [])
+
+# Unsinn wird ÜBERGANGEN, nicht geraten — ein Tippfehler darf keinen Schlüssel zerstören.
+_neu2, _weg2 = kern.config_uebernehmen(_alt, {"ocr_min_len": "dreihundert"})
+r.check("Übernahme: unlesbare Zahl lässt den alten Wert stehen", _neu2["ocr_min_len"] == 300)
+r.check("Übernahme: und wird gemeldet", any("ocr_min_len" in w for w in _weg2))
+
+_neu3, _weg3 = kern.config_uebernehmen(_alt, {"manual_fields": '{"kein": "array"}'})
+r.check("Übernahme: falscher JSON-Typ lässt den alten Wert stehen",
+        _neu3["manual_fields"] == ["Bezahlt-Am"])
+r.check("Übernahme: falscher Typ wird gemeldet", any("manual_fields" in w for w in _weg3))
+
+_neu4, _weg4 = kern.config_uebernehmen(_alt, {"gibtsnicht": "x"})
+r.check("Übernahme: unbekannter Schlüssel wird nicht angelegt", "gibtsnicht" not in _neu4)
+r.check("Übernahme: unbekannter Schlüssel wird gemeldet", any("gibtsnicht" in w for w in _weg4))
+
+r.check("Übernahme: leere Eingabe ändert nichts", kern.config_uebernehmen(_alt, {})[0] == _alt)
+
+# ---- log_art(): die Reihenfolge der Muster entscheidet.
+# "OCR-rescue-fail" enthält "OCR-rescue", "repair-fehlgeschlagen" enthält "repariert" —
+# wer zuerst auf das kürzere prüft, zählt Fehler als Erfolge.
+r.check("log_art: OCR-rescue-fail ist ein Fehler, kein OCR-Lauf",
+        kern.log_art("OCR-rescue-fail 42: kaputt") == "fehler")
+r.check("log_art: OCR-rescue ist ein OCR-Lauf", kern.log_art("OCR-rescue 42: 340 Zeichen") == "ocr")
+r.check("log_art: repair-fehlgeschlagen ist ein Fehler",
+        kern.log_art("repair-fehlgeschlagen 42") == "fehler")
+r.check("log_art: repariert ist kein Fehler", kern.log_art("repariert 42 nach 2 Runde(n)") == "repariert")
+r.check("log_art: OK ist klassifiziert", kern.log_art("OK 42 | exakt='X'") == "klassifiziert")
+r.check("log_art: VORSCHLAG eigene Art", kern.log_art("VORSCHLAG 42 | ...") == "vorschlag")
+r.check("log_art: unbekannte Zeile ergibt None", kern.log_art("irgendwas anderes") is None)
+
+# ---- verlauf(): tägliche Zählung
+_log = [
+    "2026-09-01 10:00:00 OK 1 | x",
+    "2026-09-01 10:01:00 OK 2 | x",
+    "2026-09-01 10:02:00 OCR-rescue 3: 100 Zeichen",
+    "2026-09-02 09:00:00 patch-fail 4 R1: kaputt",
+    "2026-09-02 09:01:00 OK 4 | x",
+    "kaputte Zeile ohne Datum",
+]
+_v = kern.verlauf(_log)
+r.check("verlauf: ein Eintrag je Tag", len(_v) == 2)
+r.check("verlauf: zählt je Art", _v[0]["tag"] == "2026-09-01" and _v[0]["klassifiziert"] == 2
+        and _v[0]["ocr"] == 1)
+r.check("verlauf: Fehler getrennt gezählt", _v[1].get("fehler") == 1 and _v[1].get("klassifiziert") == 1)
+r.check("verlauf: Zeilen ohne Datum werden übergangen", all("tag" in e for e in _v))
+r.check("verlauf: leeres Log ergibt leere Liste", kern.verlauf([]) == [])
+r.check("verlauf: schneidet auf die gewünschte Anzahl Tage",
+        len(kern.verlauf(_log, tage=1)) == 1)
+
+# Lücken gehören dazu — "seit drei Wochen läuft nichts" sieht man nur mit leeren Tagen.
+_luecke = kern.verlauf(["2026-09-01 10:00:00 OK 1 | x", "2026-09-05 10:00:00 OK 2 | x"])
+r.check("verlauf: Lücken werden aufgefüllt", len(_luecke) == 5)
+r.check("verlauf: leere Tage sind leer, nicht erfunden",
+        _luecke[1] == {"tag": "2026-09-02"} and _luecke[0]["klassifiziert"] == 1)
+r.check("verlauf: beginnt nicht vor dem ersten Ereignis", _luecke[0]["tag"] == "2026-09-01")
+
+# ---- auffaelligkeiten(): was ist inzwischen gelöst?
+_a = kern.auffaelligkeiten(_log)
+r.check("auffaelligkeiten: nur Fehlerzeilen", len(_a) == 1)
+r.check("auffaelligkeiten: als gelöst erkannt, weil später ein OK für dasselbe Dokument kam",
+        _a[0]["geloest"] is True and _a[0]["doc"] == "4")
+
+_offen = kern.auffaelligkeiten(["2026-09-03 08:00:00 patch-fail 7 R1: kaputt"])
+r.check("auffaelligkeiten: ohne späteren Erfolg bleibt es offen", _offen[0]["geloest"] is False)
+
+# Ein Erfolg VOR dem Fehler zählt nicht als Lösung.
+_vorher = kern.auffaelligkeiten([
+    "2026-09-03 07:00:00 OK 9 | x",
+    "2026-09-03 08:00:00 patch-fail 9 R1: kaputt"])
+r.check("auffaelligkeiten: ein früherer Erfolg löst nichts", _vorher[0]["geloest"] is False)
+
 sys.exit(r.done())

@@ -7,11 +7,11 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 0/2 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 1/2 erledigt
 
 ## Aufgaben
 
-* ☐ **[T-1](T-1-panel-bloecke-portieren.md)** Vier Panel-Blöcke aus der Flask-Fassung übernehmen · M-1
+* ☑ **[T-1](T-1-panel-bloecke-portieren.md)** Vier Panel-Blöcke aus der Flask-Fassung übernehmen · M-1
 * ☐ **[T-2](T-2-eine-linie-statt-vier-staende.md)** Alle Installationen auf den Repo-Stand bringen · M-1
 
 ## Entscheidungen (ADR)
