@@ -318,6 +318,25 @@ def beispiel_text(paare, max_paare=6):
     return " (z.B. " + ", ".join(f"'{a}'='{b}'" for a, b in gut[:max_paare]) + ")"
 
 
+def _behalten(cfs, cur_vals, fid):
+    """Bestehende Feldzuordnung unverändert übernehmen — auch wenn ihr Wert LEER ist.
+
+    Paperless löscht jede Zuordnung, die in der gesendeten `custom_fields`-Liste fehlt. Ein
+    Feld mit leerem Wert steht in `cur_vals` als `{fid: None}`: der Schlüssel existiert, der
+    Wert ist None. Die frühere Prüfung `cur_vals.get(fid) is not None` konnte beides nicht
+    unterscheiden und liess leere Zuordnungen fallen.
+
+    Das traf ausgerechnet die geschützten Felder: ein manuelles Feld wie „Bezahlt-Am", das
+    ein post-consume-Skript bewusst LEER anlegt, damit es in der Eingabemaske erscheint,
+    verschwand nach dem ersten Klassifizierungslauf wieder. Aufgefallen 2026-09-21 bei einem
+    Lauf gegen echte Dokumente im Testbett.
+    """
+    if fid in cur_vals:
+        cfs.append({"field": fid, "value": cur_vals[fid]})
+        return True
+    return False
+
+
 def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds=None):
     """KI-Entscheidung je Feld → custom_fields-Liste.
 
@@ -349,25 +368,23 @@ def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_fld
                 cfs.append({"field": fid, "value": v}); flog[name] = v
             continue
         if fid in skip_fids or t == "documentlink":
-            if cur_vals.get(fid) is not None:   # unverändert behalten
-                cfs.append({"field": fid, "value": cur_vals[fid]})
+            _behalten(cfs, cur_vals, fid)       # unverändert, auch leer
             continue
         if name not in flds:                    # von KI nicht erwähnt → behalten
-            if cur_vals.get(fid) is not None:
-                cfs.append({"field": fid, "value": cur_vals[fid]})
+            _behalten(cfs, cur_vals, fid)
             continue
         raw = flds[name]
         if isinstance(raw, str) and raw.strip().upper() in ("BEHALTEN", "KEEP"):
-            if cur_vals.get(fid) is not None:
-                cfs.append({"field": fid, "value": cur_vals[fid]}); flog[name] = "behalten"
+            if _behalten(cfs, cur_vals, fid):
+                flog[name] = "behalten"
         elif is_null(raw):
             flog[name] = "geleert"
         else:
             v = coerce_field(f, raw)
             if v is not None:
                 cfs.append({"field": fid, "value": v}); flog[name] = v
-            elif cur_vals.get(fid) is not None:
-                cfs.append({"field": fid, "value": cur_vals[fid]}); flog[name] = "behalten(unparsebar)"
+            elif _behalten(cfs, cur_vals, fid):
+                flog[name] = "behalten(unparsebar)"
     if summary and summary_fid:
         cfs.append({"field": summary_fid, "value": summary})
     return cfs, flog
