@@ -190,4 +190,22 @@ r.check("offene Meilensteine sind als offen erkennbar",
         all("☑" not in z for z in _bl.splitlines()
             if "M-1" in z and "offen" not in z.lower()) or "☐ **[M-1]" in _bl)
 
+# Python meldet ungueltige Escape-Sequenzen (\d, \s in normalen Strings) nur als Warnung —
+# sie verschwindet im Rauschen und die Datei laeuft trotzdem. In den HTML-Bloecken des Panels
+# stehen JavaScript-Regexe, genau dort entsteht das leicht. Hier wird die Warnung zum Fehler.
+import warnings as _warnings
+_escape_fehler = []
+for _py in sorted(ROOT.glob("*.py")) + sorted((ROOT / "panel").glob("*.py")) + sorted((ROOT / "scripts").glob("*.py")):
+    with _warnings.catch_warnings(record=True) as _w:
+        _warnings.simplefilter("always")
+        try:
+            compile(_py.read_text(encoding="utf-8"), str(_py), "exec")
+        except SyntaxError as _e:
+            _escape_fehler.append(f"{_py.name}: {_e}")
+            continue
+        for _warnung in _w:
+            if issubclass(_warnung.category, SyntaxWarning):
+                _escape_fehler.append(f"{_py.relative_to(ROOT)}:{_warnung.lineno}: {_warnung.message}")
+r.check("kein Python-Quelltext erzeugt SyntaxWarnings", not _escape_fehler, " | ".join(_escape_fehler[:3]))
+
 sys.exit(r.done())

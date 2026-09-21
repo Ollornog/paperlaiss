@@ -26,6 +26,9 @@ Env-Schalter:
   CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
+  CLASSIFY_PROPOSE=1           nichts schreiben, sondern einen VORSCHLAG ablegen
+                               (proposals/<id>.json; Panel nimmt an oder verwirft)
+  CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
   CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
 """
@@ -42,6 +45,7 @@ CONFIG = os.environ.get("CLASSIFY_CONFIG", os.path.join(SCRIPT_DIR, "classify-co
 DRY = os.environ.get("CLASSIFY_DRY") == "1"
 FORCE = os.environ.get("CLASSIFY_FORCE") == "1"
 FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
+PROPOSE = os.environ.get("CLASSIFY_PROPOSE") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
@@ -166,6 +170,7 @@ if _CFG_FEHLER:
 
 TRACE_DIR = os.path.join(os.path.dirname(LOG), "traces")
 RUN_DIR = os.path.join(os.path.dirname(LOG), "running")
+PROP_DIR = os.path.join(os.path.dirname(LOG), "proposals")
 TRACE = {}
 
 
@@ -206,6 +211,47 @@ def save_trace(did, extra=None):
         # entstanden dadurch ueber zwei Monate keine Traces, ohne dass es jemandem auffiel.
         # Ein Trace ist Diagnose, kein Selbstzweck: faellt er aus, muss man es SEHEN.
         log(f"trace-fail {did}: {e!r}")
+
+
+def speichere_vorschlag(did, patch, doc, lesbar, hinweis=""):
+    """Den geplanten Patch ablegen, statt ihn zu schreiben.
+
+    Der Vorschlag traegt drei Dinge, die beim Annehmen gebraucht werden:
+      patch    — was geschrieben wuerde, unveraendert uebernehmbar
+      lesbar   — dieselben Angaben mit Namen statt IDs, fuer die Anzeige
+      stand    — der Dokumentstand bei der Erzeugung. Beim Annehmen wird geprueft, ob sich
+                 das Dokument seither geaendert hat; sonst ueberschreibt ein alter Vorschlag
+                 stillschweigend eine zwischenzeitliche Korrektur von Hand.
+
+    Gibt den Pfad zurueck oder None, wenn nichts geschrieben werden konnte.
+    """
+    if not did:
+        return None
+    try:
+        os.makedirs(PROP_DIR, exist_ok=True)
+        pfad = os.path.join(PROP_DIR, f"{did}.json")
+        schreibe_json(pfad, {
+            "id": int(did),
+            "ts": f"{datetime.datetime.now():%F %T}",
+            "quelle": SOURCE or "manual",
+            "hinweis": hinweis,
+            "patch": patch,
+            "lesbar": lesbar,
+            "stand": {
+                "modified": doc.get("modified"),
+                "title": doc.get("title"),
+                "correspondent": doc.get("correspondent"),
+                "document_type": doc.get("document_type"),
+                "created": (doc.get("created") or "")[:10],
+                "tags": sorted(doc.get("tags") or []),
+                "custom_fields": {str(c["field"]): c.get("value")
+                                  for c in (doc.get("custom_fields") or [])},
+            },
+        })
+        return pfad
+    except Exception as e:
+        log(f"vorschlag-fail {did}: {e!r}")
+        return None
 
 
 def mark_running(did, stage="Start"):
@@ -601,7 +647,13 @@ def main():
     mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
     TRACE["mail"] = ({"from": mail_from or None, "hat_kontext": bool(mail_ktx)} if (mail_ktx or mail_from) else None)
 
-    hinweis = (cur_vals.get(hinweis_fid) or "").strip() if hinweis_fid else ""
+    # Der Hinweis kann aus zwei Richtungen kommen: aus dem Custom Field (normaler Weg) oder
+    # aus der Umgebung. Letzteres braucht der Vorschlagsmodus: dort raeumt der Anstoss Tag und
+    # Feld, bevor der Lauf startet — sonst bliebe der Ausloeser bei einem verworfenen Vorschlag
+    # stehen. Der gelesene Text wird dabei durchgereicht, damit er nicht verloren geht.
+    hinweis = os.environ.get("CLASSIFY_HINWEIS", "").strip()
+    if not hinweis and hinweis_fid:
+        hinweis = (cur_vals.get(hinweis_fid) or "").strip()
     hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
 
     # Korrespondent-Metadaten (Panel-Store, per ID an Paperless gebunden) fürs Prompt
@@ -802,7 +854,11 @@ def main():
         patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
     code_flds = {}
-    if hinweis_fid and hinweis:   # Nutzer-Hinweis nach Gebrauch entfernen (sonst feuert der Redo-Trigger erneut)
+    if hinweis_fid and hinweis and not PROPOSE:
+        # Nutzer-Hinweis nach Gebrauch entfernen, sonst feuert der Redo-Trigger erneut.
+        # Im Vorschlagsmodus NICHT: dort raeumt der Anstoss (das Panel) Tag und Feld, bevor
+        # der Lauf startet. Wuerde der Lauf es tun, bliebe der Ausloeser bei einem verworfenen
+        # Vorschlag stehen und das naechste Update am Dokument feuerte erneut.
         code_flds[hinweis_fid] = None
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
@@ -810,6 +866,29 @@ def main():
                           "new_tags": new_tags, "correspondent": corr_info,
                           "fields_ki": field_log, "summary": summary,
                           "document_date": patch.get("created"), "date_change": date_note}
+
+    if PROPOSE:
+        # Vorschlagsmodus: nichts schreiben, sondern ablegen. Keine Reparaturschleife —
+        # die braucht eine echte Antwort von Paperless, und die gibt es erst beim Annehmen.
+        lesbar = {
+            "titel": doc.get("title"),
+            "dokumenttyp": dt,
+            "korrespondent": corr_info,
+            "tags": [tagname_by_id.get(i) for i in tag_ids],
+            "neue_tags": new_tags,
+            "felder": field_log,
+            "zusammenfassung": summary,
+            "datum": date_note,
+        }
+        pfad = speichere_vorschlag(did, patch, doc, lesbar, hinweis)
+        TRACE["writeback"]["modus"] = "vorschlag"
+        TRACE["_stage"] = "vorschlag abgelegt"
+        save_trace(did)
+        unmark_running(did)
+        log(f"VORSCHLAG {did} | {corr_info} | typ={dt} | felder={len(field_log)}"
+            + (f" | hinweis='{hinweis[:40]}'" if hinweis else "")
+            + ("" if pfad else " | ABLAGE FEHLGESCHLAGEN"))
+        return
 
     ok, err = patch_doc(did, patch)
     TRACE["repair"] = []; rounds = 0
