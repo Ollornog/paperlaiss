@@ -283,4 +283,69 @@ r.check("_load_json: falscher Aufbau WIRD gemeldet",
 classify.SCRIPT_DIR = _alt_dir
 classify._STORE_FEHLER.clear()
 
+# ---- nachbearbeiten(): die Naht fuer installationseigene Schritte.
+# Ohne sie muss jede Installation, die mehr braucht als Klassifizierung, den Klassifizierer
+# forken — genau so sind vier auseinanderlaufende Staende entstanden.
+_nb_dir = Path(_TMP) / "nachbearbeitung"
+_nb_dir.mkdir(exist_ok=True)
+
+
+def _log_seit(marke):
+    """Neue Logzeilen seit einer Marke."""
+    text = Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8") if Path(os.environ["CLASSIFY_LOG"]).exists() else ""
+    return text.split(marke, 1)[-1] if marke in text else text
+
+
+_alt_cfg = classify.CFG.get("nachbearbeitung")
+
+# (1) Nichts konfiguriert: der Lauf darf davon nichts merken.
+classify.CFG["nachbearbeitung"] = ""
+classify.log("MARKE-1")
+classify.nachbearbeiten(1, {}, True, {})
+r.check("nachbearbeiten: ohne Konfiguration passiert nichts", _log_seit("MARKE-1").strip() == "")
+
+# (2) Konfiguriert, aber nicht vorhanden: melden statt schweigen.
+classify.CFG["nachbearbeitung"] = str(_nb_dir / "gibtsnicht.py")
+classify.log("MARKE-2")
+classify.nachbearbeiten(2, {}, True, {})
+r.check("nachbearbeiten: fehlendes Skript wird gemeldet", "nachbearbeitung-fehlt" in _log_seit("MARKE-2"))
+
+# (3) Skript laeuft und bekommt die Daten auf stdin.
+_echo = _nb_dir / "echo.py"
+_echo.write_text(
+    "import json,sys\n"
+    "d = json.load(sys.stdin)\n"
+    "print('bekam doc', d['doc_id'], 'erfolg', d['erfolg'], 'quelle', d['quelle'])\n",
+    encoding="utf-8")
+classify.CFG["nachbearbeitung"] = str(_echo)
+classify.log("MARKE-3")
+classify.nachbearbeiten(915, {"tags": [1]}, True, {"x": 1})
+_z3 = _log_seit("MARKE-3")
+r.check("nachbearbeiten: Skript bekommt Dokument-ID und Erfolg",
+        "bekam doc 915 erfolg True" in _z3, _z3.strip()[:120])
+
+# (4) Ein scheiterndes Skript darf den Lauf NICHT mitreissen.
+_kaputt = _nb_dir / "kaputt.py"
+_kaputt.write_text("import sys; sys.exit('absichtlich kaputt')\n", encoding="utf-8")
+classify.CFG["nachbearbeitung"] = str(_kaputt)
+classify.log("MARKE-4")
+try:
+    classify.nachbearbeiten(4, {}, True, {})
+    _durchgelaufen = True
+except BaseException:
+    _durchgelaufen = False
+r.check("nachbearbeiten: ein Fehler im Skript beendet den Lauf nicht", _durchgelaufen)
+r.check("nachbearbeiten: und wird protokolliert", "nachbearbeitung-fail" in _log_seit("MARKE-4"))
+
+# (5) Im Trockenlauf wird nicht nachbearbeitet — sonst schreibt ein DRY-Lauf doch etwas.
+classify.CFG["nachbearbeitung"] = str(_echo)
+_alt_dry = classify.DRY
+classify.DRY = True
+classify.log("MARKE-5")
+classify.nachbearbeiten(5, {}, True, {})
+classify.DRY = _alt_dry
+r.check("nachbearbeiten: im Trockenlauf passiert nichts", "bekam doc 5" not in _log_seit("MARKE-5"))
+
+classify.CFG["nachbearbeitung"] = _alt_cfg
+
 sys.exit(r.done())

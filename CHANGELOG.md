@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Naht für installationseigene Schritte
+
+Ein optionaler Konfigurationsschlüssel `nachbearbeitung` nennt ein Skript, das **nach** dem
+Writeback läuft und Dokument-ID, Erfolg, Patch und die lesbare Fassung als JSON auf stdin
+bekommt. Damit braucht eine Installation, die mehr will als Klassifizierung — eine Verknüpfung
+in ein Fremdsystem, hauseigene Regeln —, keinen Fork mehr. Genau daraus waren mehrere
+auseinanderlaufende Stände desselben Codes entstanden.
+
+Das Skript **darf scheitern**: ein Fehler wird protokolliert, beendet aber nicht den Lauf (die
+Klassifizierung ist dann bereits geschrieben). Im Trockenlauf läuft es nicht.
+→ `deploy/nachbearbeitung-beispiel.py`, Begründung in `backlog/ADR-3-naht-statt-fork.md`.
+
 ### Behoben
 
 - **`build_cfs` vermischte drei Feld-Semantiken** und machte dadurch zwei Dinge falsch, die der
