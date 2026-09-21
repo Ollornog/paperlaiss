@@ -3,7 +3,7 @@ name = "paperlaiss"
 version = "0.1.0"
 description = "Grounded document classifier for Paperless-ngx: type, correspondent, custom fields and OCR rescue via Mistral — a stdlib-only replacement for paperless-ai."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 keywords = ["paperless", "paperless-ngx", "document-classification", "mistral", "ocr", "self-hosted"]
 

@@ -28,8 +28,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Die Ränder, die pyproject zusagt: min, prod (Panel-Image), max.
-        python: ["3.10", "3.12", "3.13"]
+        # Die letzten drei stable Minors — gefuehrt in repokit
+        # (tests/_kit/python_matrix.json) und im Abbild ci-python-web.
+        # 3.10 fiel am 2026-09-22 raus (EOL 31.10.2026).
+        python: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
