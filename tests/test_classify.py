@@ -81,4 +81,107 @@ _p = classify.DEFAULT_PROMPT.lower()
 r.check("Default-Prompt ist mandantenneutral", not any(w in _p for w in ("salzburg", "autohaus")))
 r.check("Default-Prompt behält die Platzhalter", "{TYPES}" in classify.DEFAULT_PROMPT and "{TAGBLOCK}" in classify.DEFAULT_PROMPT)
 
+
+# ---- build_cfs(): die Funktion, die entscheidet WAS geschrieben wird.
+# Bis 2026-09-21 ungetestet — und genau dort steckten zwei Fehler, die der
+# laengst laufende Produktivstand nicht hat. Die Faelle stehen hier, damit sie nicht
+# wiederkommen. Aufbau: ein Zusammenfassungsfeld (38, longtext), ein Hinweisfeld
+# (39, longtext), ein manuelles Feld (13, date) und ein normales KI-Feld (2, monetary).
+_CF = [
+    {"id": 38, "name": "Zusammenfassung", "data_type": "longtext"},
+    {"id": 39, "name": "KI-Hinweis", "data_type": "longtext"},
+    {"id": 13, "name": "Bezahlt-Am", "data_type": "date"},
+    {"id": 2, "name": "Betrag", "data_type": "monetary"},
+]
+_SKIP = {38, 39, 13}
+
+
+def _feld(cfs, fid):
+    """Alle Einträge zu einem Feld — als Liste, denn genau die Anzahl ist der Testgegenstand."""
+    return [c for c in cfs if c["field"] == fid]
+
+
+# Die Zusammenfassung wird am Ende gesetzt. Stünde sie zusätzlich in der Schleife,
+# enthielte die Liste dasselbe Feld zweimal — Paperless bekäme zwei Werte für ein Feld.
+_cfs, _ = classify.build_cfs(
+    _CF, {38: "ALTE Zusammenfassung", 2: "EUR10.00"}, {},
+    "NEUE Zusammenfassung", 38, _SKIP)
+r.check("build_cfs: Zusammenfassung steht genau einmal in der Liste",
+        len(_feld(_cfs, 38)) == 1)
+r.check("build_cfs: und zwar mit dem NEUEN Wert",
+        _feld(_cfs, 38)[0]["value"] == "NEUE Zusammenfassung")
+
+# Der Nutzer-Hinweis wird nach Gebrauch entfernt (Schleifenschutz: solange das Feld
+# befüllt ist, feuert der Redo-Trigger erneut). Das Feld steht in skip_fids, damit die
+# KI es nicht setzt — der Klassifizierer selbst muss es aber leeren dürfen.
+_cfs, _flog = classify.build_cfs(
+    _CF, {39: "Korrespondent war falsch", 2: "EUR10.00"}, {},
+    "", None, _SKIP, {39: None})
+r.check("build_cfs: geleertes Hinweisfeld ist NICHT mehr in der Liste",
+        _feld(_cfs, 39) == [])
+r.check("build_cfs: das Entfernen wird protokolliert",
+        _flog.get("KI-Hinweis") == "entfernt")
+
+# Gegenprobe: ohne Auftrag des Codes bleibt der Hinweis stehen.
+_cfs, _ = classify.build_cfs(
+    _CF, {39: "bleibt stehen"}, {}, "", None, _SKIP)
+r.check("build_cfs: ohne Auftrag bleibt der Hinweis erhalten",
+        _feld(_cfs, 39) == [{"field": 39, "value": "bleibt stehen"}])
+
+# Ein geschütztes Feld bleibt geschützt, selbst wenn die KI seinen Namen halluziniert.
+# (Die KI bekommt skip_fids gar nicht erst im Prompt — aber „bekommt es nicht" ist keine Zusage.)
+_cfs, _ = classify.build_cfs(
+    _CF, {13: "2026-01-01"}, {"Bezahlt-Am": "2026-09-21"}, "", None, _SKIP)
+r.check("build_cfs: KI kann ein manuelles Feld nicht überschreiben",
+        _feld(_cfs, 13) == [{"field": 13, "value": "2026-01-01"}])
+
+# Die gewohnten Wege bleiben, wie sie waren.
+_cfs, _flog = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": "BEHALTEN"}, "", None, _SKIP)
+r.check("build_cfs: BEHALTEN lässt den alten Wert stehen",
+        _feld(_cfs, 2) == [{"field": 2, "value": "EUR10.00"}] and _flog["Betrag"] == "behalten")
+
+_cfs, _flog = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": None}, "", None, _SKIP)
+r.check("build_cfs: null leert ein KI-Feld",
+        _feld(_cfs, 2) == [] and _flog["Betrag"] == "geleert")
+
+_cfs, _ = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": "12,50"}, "", None, _SKIP)
+r.check("build_cfs: neuer Wert wird typgerecht gesetzt",
+        _feld(_cfs, 2) == [{"field": 2, "value": "EUR12.50"}])
+
+
+# ---- korrespondent_beispiele: Few-Shot fuer den Pass-2-Abgleich.
+# Die konkreten Beispiele standen frueher hartkodiert im Prompt — mit echten Namen, die
+# in einem oeffentlichen Repo nichts zu suchen haben. Sie gehoeren in die Config; hier
+# steht, dass der Schluessel existiert, einen sicheren Default hat und Unsinn ueberlebt.
+r.check("korrespondent_beispiele ist ein Config-Schluessel",
+        "korrespondent_beispiele" in classify.CFG)
+r.check("beispiel_text: leere Liste ergibt leeren Baustein",
+        classify.beispiel_text([]) == "" and classify.beispiel_text(None) == "")
+r.check("beispiel_text: Paare werden als z.B.-Liste formatiert",
+        classify.beispiel_text([["Mustrmann", "Mustermann"], ["ACME Vers", "ACME"]])
+        == " (z.B. 'Mustrmann'='Mustermann', 'ACME Vers'='ACME')")
+r.check("beispiel_text: kaputte Eintraege werden uebergangen, nicht geworfen",
+        classify.beispiel_text([["nur eins"], [], ["a", "b"], ["", "x"], "quatsch", ["c", "d"]])
+        == " (z.B. 'a'='b', 'c'='d')")
+r.check("beispiel_text: deckelt die Anzahl",
+        classify.beispiel_text([[f"a{i}", f"b{i}"] for i in range(20)]).count("=") == 6)
+
+# ---- cfull_hint: der Grounding-Baustein aus dem Korrespondent-Store.
+# `ustid` hiess bis 2026-09-21 `uid`; ein Store von vorher muss weiter verstanden werden,
+# sonst verliert eine bestehende Installation still ihre Kennungen.
+_corr_meta_vorher = classify.CORR_META          # danach zuruecksetzen, sonst faerbt der
+classify.CORR_META = {"7": {"kontext": "Kfz-Teile", "kundennummer": "KD-1", "ustid": "ATU111"},
+                      "8": {"kontext": "Versicherung", "uid": "ATU222"},
+                      "9": {}}
+r.check("cfull_hint: Kontext, Kundennr und UID landen im Grounding",
+        classify.cfull_hint({"id": 7}) == "Kfz-Teile; Kundennr KD-1; UID ATU111")
+r.check("cfull_hint: alter Feldname uid wird weiter verstanden",
+        classify.cfull_hint({"id": 8}) == "Versicherung; UID ATU222")
+r.check("cfull_hint: leerer Eintrag ergibt leeren Hinweis",
+        classify.cfull_hint({"id": 9}) == "")
+classify.CORR_META = _corr_meta_vorher          # Test auf jeden folgenden ab
+
 sys.exit(r.done())
