@@ -135,6 +135,35 @@ _cfs, _ = classify.build_cfs(
 r.check("build_cfs: KI kann ein manuelles Feld nicht überschreiben",
         _feld(_cfs, 13) == [{"field": 13, "value": "2026-01-01"}])
 
+# Eine LEERE Feldzuordnung ist ein Zustand, kein fehlendes Feld. Paperless loescht jede
+# Zuordnung, die in der gesendeten Liste fehlt — ein manuelles Feld, das ein post-consume-Skript
+# bewusst leer anlegt (damit es in der Maske erscheint), verschwand dadurch nach dem ersten Lauf.
+# Aufgefallen 2026-09-21 an echten Dokumenten im Testbett.
+_cfs, _ = classify.build_cfs(
+    _CF, {13: None, 2: "EUR10.00"}, {}, "", None, _SKIP)
+r.check("build_cfs: leere Zuordnung eines geschuetzten Feldes bleibt erhalten",
+        _feld(_cfs, 13) == [{"field": 13, "value": None}])
+
+_cfs, _ = classify.build_cfs(
+    _CF, {2: None}, {}, "", None, set())
+r.check("build_cfs: leere Zuordnung eines nicht erwaehnten Feldes bleibt erhalten",
+        _feld(_cfs, 2) == [{"field": 2, "value": None}])
+
+_cfs, _flog = classify.build_cfs(
+    _CF, {2: None}, {"Betrag": "BEHALTEN"}, "", None, set())
+r.check("build_cfs: BEHALTEN auf leerem Feld erhaelt die Zuordnung",
+        _feld(_cfs, 2) == [{"field": 2, "value": None}] and _flog.get("Betrag") == "behalten")
+
+# Gegenprobe: ein Feld, das gar keine Zuordnung hat, bekommt auch keine.
+_cfs, _ = classify.build_cfs(_CF, {}, {}, "", None, _SKIP)
+r.check("build_cfs: ohne bestehende Zuordnung wird keine erfunden", _cfs == [])
+
+# Und der Unterschied zum Leeren auf Wunsch der KI bleibt bestehen.
+_cfs, _flog = classify.build_cfs(
+    _CF, {2: "EUR10.00"}, {"Betrag": None}, "", None, set())
+r.check("build_cfs: null der KI entfernt die Zuordnung weiterhin",
+        _feld(_cfs, 2) == [] and _flog["Betrag"] == "geleert")
+
 # Die gewohnten Wege bleiben, wie sie waren.
 _cfs, _flog = classify.build_cfs(
     _CF, {2: "EUR10.00"}, {"Betrag": "BEHALTEN"}, "", None, _SKIP)
