@@ -12,8 +12,13 @@ permissions:
   contents: read
 
 concurrency:
+  # Auf main NICHT abbrechen: dort haengt am Lauf das Abbild bzw. der Required Check,
+  # und ein abgebrochener main-Commit hat hinterher keines. Genau das ist passiert —
+  # paperlaiss verlor am 2026-09-21 vier main-Laeufe innerhalb von 33 Sekunden,
+  # DashMyBoard drei am 2026-07-10. Auf Feature-Branches bleibt der Abbruch richtig:
+  # dort zaehlt nur der letzte Stand.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   tests:
