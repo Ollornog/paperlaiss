@@ -226,4 +226,26 @@ _panel_module = sorted(p.name for p in (ROOT / "panel").glob("*.py"))
 _fehlend = [m for m in _panel_module if m not in _dockerfile]
 r.check("Panel-Dockerfile kopiert alle Module aus panel/", not _fehlend, ", ".join(_fehlend))
 
+# ---- Python-Matrix: EINE Quelle, mechanisch gehalten (Kit 0.12.0, 2026-09-22)
+# Bis 2026-09-22 stand die Matrix an drei Stellen — im Abbild (/opt/ci-matrix), in
+# dieser ci.yml und implizit in requires-python. Gemessen am 2026-09-21 waren alle
+# drei VERSCHIEDEN; jede sah für sich richtig aus, zusammen war die Zusage "wir
+# testen, was wir versprechen" unbelegt. Die Quelle ist jetzt
+# tests/_kit/python_matrix.json, und diese drei Prüfungen halten alles daran.
+#
+# Die Prüffunktionen lagen seit dem Kit-Sync in tests/_kit/, wurden aber von
+# KEINEM Repo aufgerufen — gefunden beim Nachzählen am 2026-09-22. Eine Prüfung,
+# die niemand ruft, ist keine.
+_mx = hygiene.pruefe_python_matrix(str(ROOT), DATEIEN)
+r.check("ci.yml-Matrix entspricht der geführten Python-Matrix", not _mx, " | ".join(_mx[:3]))
+
+_rp = hygiene.pruefe_requires_python(str(ROOT))
+r.check("requires-python nennt die Untergrenze der Matrix", not _rp, " | ".join(_rp[:3]))
+
+# Die Rolling-Regel MELDET, sie ändert nichts: sonst zöge ein Python-Release die
+# Flotte ungefragt mit. Sie wird erst rot, wenn das Prüfdatum in der Quelle
+# verstrichen ist (naechste_pruefung) — dann ist eine Entscheidung fällig.
+_rr = hygiene.pruefe_python_matrix_regel()
+r.check("geführte Matrix widerspricht der Rolling-Regel nicht", not _rr, " | ".join(_rr[:3]))
+
 sys.exit(r.done())
