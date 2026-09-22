@@ -41,6 +41,17 @@ _kit_drift = manifest.pruefe(str(ROOT))
 r.check(f"tests/_kit unverändert (Kit {manifest.version(str(ROOT))}; sonst: repokit sync .)",
         not _kit_drift, " | ".join(_kit_drift[:3]))
 
+# ---- Die Dateiliste selbst ist vollständig (Kit 0.14.0)
+# Steht direkt danach, weil JEDE folgende Prüfung auf DATEIEN arbeitet: eine leere oder
+# lückenhafte Liste ist von "alles sauber" nicht zu unterscheiden — alle Datei-Prüfungen
+# wären grün und hätten nichts angesehen. Gemessen in einem anderen Repo: über
+# `git archive` fehlten 6 von 1326 Dateien, nämlich das ganze `.github/`, weil
+# `.gitattributes` es per `export-ignore` ausschliesst — also genau die Workflows,
+# die weiter unten geprüft werden. Diese Prüfung zählt gegen `git ls-tree -r HEAD`.
+_liste = hygiene.pruefe_dateiliste_plausibel(DATEIEN, root=str(ROOT))
+r.check(f"Dateiliste vollständig ({len(DATEIEN)} getrackte Dateien)",
+        not _liste, " | ".join(_liste[:3]))
+
 # ---- Pflichtdateien (zweisprachig, wo es den Leser betrifft)
 PFLICHT = [
     "README.md", "i18n/README.de.md", "LICENSE", "CHANGELOG.md",
@@ -75,6 +86,23 @@ adressen = hygiene.pruefe_adressen(str(ROOT), DATEIEN, POLICY,
                                                        r"(?:www\.)?flaticon\.com"])
 r.check("nur neutrale Beispieladressen", not adressen, " | ".join(sorted(set(adressen))[:4]))
 
+# ---- ... und auch keine BLANKEN Hostnamen ohne `https://` davor (Kit 0.14.0)
+# Die Lücke, durch die in einem anderen öffentlichen Repo ein realer Firmenname und zwei
+# echte .at-Domains fielen: `pruefe_adressen` sucht nur URLs MIT Schema, und das Muster
+# für private Infrastruktur verlangt drei Namensteile (sub.domain.tld) — eine blanke
+# Second-Level-Domain rutscht durch beide.
+#
+# Der Grundstock unten ist die HÄNDISCH DURCHGESEHENE und freigegebene Liste der Hosts,
+# die hier bereits stehen und in Ordnung sind: python.org und devguide.python.org
+# (Versions-/EOL-Belege in der Python-Matrix und in der Doku), flaticon.com (der
+# lizenzpflichtige Bildnachweis fürs Logo) und ghcr.io (die Registry des Release-Laufs).
+# Er ist NICHT automatisch erzeugt — ab jetzt wird jede NEUE Adresse rot, und das ist der
+# Zweck. Nie blind erweitern: genau so segnet man den nächsten echten Kundennamen ab.
+blank = hygiene.pruefe_blanke_adressen(str(ROOT), DATEIEN, POLICY,
+                                       grundstock=["python.org", "devguide.python.org",
+                                                   "flaticon.com", "ghcr.io"])
+r.check("keine blanken fremden Hostnamen", not blank, " | ".join(sorted(set(blank))[:4]))
+
 # ---- Keine Geheimnisse; Version steht überall gleich
 lecks = hygiene.pruefe_geheimnisse(str(ROOT), DATEIEN, POLICY)
 r.check("keine Geheimnisse im Klartext", not lecks, " | ".join(lecks[:3]))
@@ -103,6 +131,18 @@ r.check("jeder Workflow setzt `permissions:`", not ohne_rechte, " | ".join(ohne_
 
 runner = hygiene.pruefe_kein_self_hosted_runner(str(ROOT), DATEIEN)
 r.check("kein self-hosted Runner (öffentliches Repo)", not runner, " | ".join(runner[:3]))
+
+# ---- Eigene Härtung (KEIN belegter Standard) — Kit 0.14.0
+# Bewusst NICHT im Block darüber: GitHub empfiehlt `persist-credentials: false` nirgends
+# ausdrücklich. Es zählt dort, wo nach dem Checkout fremder Code im selben Job läuft
+# (pip install -e, Build-Skript, Action eines Dritten); seit checkout@v6 liegt das Token
+# in $RUNNER_TEMP statt in .git/config. Hier braucht KEIN Job das git-Token: der Release
+# nutzt `gh release create` und `docker/login-action`, beide mit eigenem Token aus der
+# Umgebung. Darum null Ausnahmen — käme je ein Job dazu, der selbst pusht, gehört er mit
+# Grund in `ausgenommen` und nicht die Prüfung weg.
+_pc = hygiene.pruefe_persist_credentials(str(ROOT), DATEIEN)
+r.check("jeder actions/checkout setzt `persist-credentials: false`",
+        not _pc, " | ".join(_pc[:3]))
 
 kategorien = hygiene.pruefe_changelog_kategorien(str(ROOT), POLICY)
 r.check("CHANGELOG nutzt gültige Kategorien", not kategorien, " | ".join(kategorien[:2]))
