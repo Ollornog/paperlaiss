@@ -17,7 +17,13 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # `persist-credentials: false` ist EIGENE Haertung, kein belegter Standard.
+      # Dieser Job veroeffentlicht zwar, pusht aber nicht per git: `gh release create`
+      # und `docker/login-action` nehmen ihr Token aus der Umgebung, nicht aus dem
+      # Checkout. Das git-Token darf hier also weg.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Tag gegen die Paketversion prüfen
         run: |

@@ -6,6 +6,32 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit — jeder `actions/checkout` gibt das git-Token nicht mehr weiter
+
+Alle Checkout-Schritte in `ci.yml` und `release.yml` setzen `persist-credentials: false`.
+Ohne das legt checkout das Token so ab, dass **jeder spätere Schritt im selben Job** es lesen
+kann — und nach dem Checkout läuft fremder Code (Build-Skript, Action eines Dritten). Seit
+checkout@v6 liegt es in `$RUNNER_TEMP` statt in `.git/config`, damit ist es kleiner geworden,
+aber nicht weg.
+
+Kein Job hier braucht das Token: der Release veröffentlicht über `gh release create` und
+`docker/login-action`, beide mit eigenem Token aus der Umgebung. Es gibt daher **keine
+Ausnahme**. Das ist eigene Härtung, kein belegter Standard — GitHub empfiehlt es nirgends
+ausdrücklich.
+
+### Geändert — Testbasis auf Kit 0.14.0, drei neue Wächter scharf
+
+`repokit sync` zieht drei Prüfungen nach, die ab jetzt auch gerufen werden:
+
+- **Dateiliste vollständig**: eine leere oder lückenhafte Dateiliste macht jede folgende
+  Hygiene-Prüfung grün, ohne dass sie etwas angesehen hat. Wird gegen `git ls-tree -r HEAD`
+  gezählt.
+- **`persist-credentials: false`** an jedem Checkout (siehe oben) — mechanisch statt auf Zuruf.
+- **keine blanken fremden Hostnamen**: die bisherige Adressprüfung sucht nur URLs *mit*
+  Schema, das Infrastruktur-Muster verlangt drei Namensteile. Eine blanke Second-Level-Domain
+  fiel durch beide. Der Grundstock (`python.org`, `devguide.python.org`, `flaticon.com`,
+  `ghcr.io`) ist durchgesehen und freigegeben; jede **neue** Adresse wird ab jetzt rot.
+
 ### Geändert — Python 3.12 ist die neue Untergrenze (Matrix 3.12 / 3.13 / 3.14)
 
 `requires-python` steigt von `>=3.10` auf `>=3.12`, die CI fährt **3.12, 3.13, 3.14** statt
