@@ -248,4 +248,19 @@ r.check("requires-python nennt die Untergrenze der Matrix", not _rp, " | ".join(
 _rr = hygiene.pruefe_python_matrix_regel()
 r.check("geführte Matrix widerspricht der Rolling-Regel nicht", not _rr, " | ".join(_rr[:3]))
 
+# ---- cancel-in-progress darf auf dem Default-Branch nicht unbedingt greifen
+# Der Schaden ist gemessen, nicht befürchtet: paperlaiss verlor am 2026-09-21 vier
+# main-Läufe in 33 Sekunden, DashMyBoard drei am 2026-07-10. An einem abgebrochenen
+# main-Lauf hängt hinterher kein Abbild und kein Required Check.
+_cip = hygiene.pruefe_kein_abbruch_auf_default_branch(str(ROOT), DATEIEN)
+r.check("kein unbedingtes cancel-in-progress auf main", not _cip, " | ".join(_cip[:3]))
+
+# ---- Der Wächter über den Wächtern (repokit 0.13.0)
+# Er meldet jede Kit-Prüfung, die ausgeliefert, aber nicht gerufen wird — genau der
+# Fehler, der die Matrix-Prüfungen ein Jahr lang unbemerkt stillgelegt hätte.
+# Ausnehmen ist erlaubt, aber nur mit Grund im Aufruf.
+_ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
+r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
+        not _ng, " | ".join(_ng[:3]))
+
 sys.exit(r.done())
