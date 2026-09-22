@@ -170,7 +170,17 @@ r.check("classify-config.json trägt keine API-Schlüssel",
 
 # ---- Release-Workflow: kein latest, Registry-Name kleingeschrieben, Tag geprüft
 release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-r.check("kein latest-Tag im Release", ":latest" not in release)
+# Kommentare AUSNEHMEN, sonst verbietet die Pruefung, ihre eigene Regel zu erklaeren:
+# der Hinweis "setup-qemu-action zieht per Vorgabe tonistiigi/binfmt:latest" machte sie
+# rot (2026-09-22). Dieselbe Falle, die das Kit bei `self-hosted` schon geloest hat —
+# eine Wortsuche im Zeilentext trifft den Kommentar mit, der die Regel begruendet.
+_release_code = "\n".join(
+    re.sub(r"(^|\s)#.*$", "", ln) for ln in release.splitlines())
+r.check("kein latest-Tag im Release", ":latest" not in _release_code)
+# Gegenprobe: die Pruefung muss einen ECHTEN Treffer weiterhin finden.
+r.check("Selbsttest — ein echtes :latest im Code wuerde auffallen",
+        ":latest" in "\n".join(re.sub(r"(^|\s)#.*$", "", ln)
+                                for ln in ["  tags: ghcr.io/x/y:latest"]))
 tags_zeile = [ln for ln in release.splitlines() if ln.strip().startswith("tags:")]
 r.check("repository_owner steht nicht in der tags-Zeile",
         not any("repository_owner" in ln for ln in tags_zeile), str(tags_zeile))
