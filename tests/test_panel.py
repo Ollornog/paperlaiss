@@ -65,20 +65,29 @@ r.check("Abgleich: Vorschlag ohne Stand gilt als geändert",
         kern.doc_hat_sich_geaendert({}, _gleich) is True)
 
 # ---- merge_metadaten(): zwei Korrespondenten zusammenführen, ohne Kundendaten zu verlieren.
-_ziel = {"kundennummer": "KD-1", "kontext": "", "domains": "auer.at", "aliase": "Auer"}
-_q1 = {"kundennummer": "KD-99", "kontext": "Reifenhandel", "domains": "auer-reifen.at", "aliase": "AUER Reifen"}
+#
+# Die Namen sind NEUTRAL (RFC 2606, `.example`), nicht aus einem echten Mandanten.
+# Bis 2026-09-22 standen hier ein realer Firmenname und zwei real registrierte
+# `.at`-Domains — in einem ÖFFENTLICHEN Repo. Gefunden hat es keine Prüfung:
+# `pruefe_adressen` sieht nur URLs MIT Schema, und das Infrastruktur-Muster
+# verlangt drei Namensteile (`sub.domain.tld`) — eine blanke Second-Level-Domain
+# fällt durch beide. Testdaten sind Veröffentlichung wie jede andere Zeile auch.
+_ziel = {"kundennummer": "KD-1", "kontext": "", "domains": "kunde.example", "aliase": "Kunde"}
+_q1 = {"kundennummer": "KD-99", "kontext": "Reifenhandel", "domains": "kunde-handel.example",
+       "aliase": "KUNDE Handel"}
 _erg = kern.merge_metadaten(_ziel, [_q1])
 
 r.check("Merge: das Ziel behält seine Kundennummer", _erg["kundennummer"] == "KD-1")
 r.check("Merge: leeres Zielfeld wird aus der Quelle gefüllt", _erg["kontext"] == "Reifenhandel")
 r.check("Merge: Domains werden vereinigt, nicht überschrieben",
-        _erg["domains"] == "auer.at, auer-reifen.at")
-r.check("Merge: Aliase werden vereinigt", _erg["aliase"] == "Auer, AUER Reifen")
+        _erg["domains"] == "kunde.example, kunde-handel.example")
+r.check("Merge: Aliase werden vereinigt", _erg["aliase"] == "Kunde, KUNDE Handel")
 
 # Dubletten in Listen fallen raus — die zuerst gesehene Schreibweise gewinnt.
-_erg2 = kern.merge_metadaten({"domains": "Auer.AT"}, [{"domains": "auer.at, neu.at"}])
+_erg2 = kern.merge_metadaten({"domains": "Kunde.EXAMPLE"},
+                             [{"domains": "kunde.example, neu.example"}])
 r.check("Merge: Dubletten fallen raus, Groß-/Kleinschreibung egal",
-        _erg2["domains"] == "Auer.AT, neu.at")
+        _erg2["domains"] == "Kunde.EXAMPLE, neu.example")
 
 # Leere Felder bleiben draußen, damit der Store nicht mit "" zuwächst.
 r.check("Merge: leere Werte landen nicht im Ergebnis",
