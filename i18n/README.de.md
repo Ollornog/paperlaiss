@@ -7,7 +7,7 @@
 <p align="right">
 <a href="https://github.com/Ollornog/paperlaiss/actions/workflows/ci.yml"><img src="https://github.com/Ollornog/paperlaiss/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
 <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-informational.svg" alt="License: MIT"></a>
-<img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python">
+<img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python">
 </p>
 
 > 🚧 **In Arbeit** — wird aktiv entwickelt; Schnittstellen und Struktur können sich vor einem stabilen `1.0`-Release noch ändern.

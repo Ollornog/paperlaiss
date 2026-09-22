@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Python 3.12 ist die neue Untergrenze (Matrix 3.12 / 3.13 / 3.14)
+
+`requires-python` steigt von `>=3.10` auf `>=3.12`, die CI fährt **3.12, 3.13, 3.14** statt
+3.10 / 3.12 / 3.13.
+
+Dahinter steht keine Zahl, sondern ein Fenster: **die letzten drei stable Minors**. Python 3.10
+geht am 31.10.2026 EOL — eine Version, die niemand mehr fährt, ist eine Zusage ohne Deckung.
+Die Obergrenze bleibt bewusst bei 3.14: 3.15 erscheint am 01.10.2026, kommt aber erst ins Gate,
+wenn sie auch wirklich gelaufen ist.
+
+Geführt wird die Matrix jetzt an **einer** Stelle (`repokit`, `tests/_kit/python_matrix.json`);
+das CI-Abbild `ci-python-web` trägt dieselben drei Interpreter.
+
 ### Hinzugefügt — vier Panel-Blöcke (T-1)
 
 - **Einstellungen** (`/einstellungen`): alle Konfigurationswerte in der Oberfläche, mit passendem
