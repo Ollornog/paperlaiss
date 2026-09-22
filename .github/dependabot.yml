@@ -13,3 +13,24 @@ updates:
       interval: monthly
     commit-message:
       prefix: "ci"
+  # Die Abhängigkeiten selbst. Bis 2026-09-22 fehlten sie hier: Dependabot meldete zwar
+  # Sicherheitslücken (das tut es repo-weit), aber es gab keine regulären Versions-PRs.
+  # ⚠️ Grenze, gemessen an TinySesam: bei einem Projekt mit `>=`-Untergrenzen hebt die
+  # Vorgabe-Strategie (widen) die Untergrenze NIE an — reguläre pip-PRs bleiben aus,
+  # obwohl die Untergrenze verwundbar sein kann. Dagegen hilft nur ein Lauf gegen die
+  # niedrigste auflösbare Version, nicht diese Datei.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      # Ein PR je Monat statt einem je Paket — sonst ertrinkt ein Solo-Projekt in Rauschen.
+      alle:
+        patterns: ["*"]
+  # Das Basis-Abbild ist per Digest gepinnt; ohne Dependabot bliebe es für immer stehen.
+  - package-ecosystem: docker
+    directory: /panel
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
