@@ -309,6 +309,18 @@ r.check("kein unbedingtes cancel-in-progress auf main", not _cip, " | ".join(_ci
 # Er meldet jede Kit-Prüfung, die ausgeliefert, aber nicht gerufen wird — genau der
 # Fehler, der die Matrix-Prüfungen ein Jahr lang unbemerkt stillgelegt hätte.
 # Ausnehmen ist erlaubt, aber nur mit Grund im Aufruf.
+# ---- Die Ausnahmen und die Policy selbst werden geprüft (Kit 0.17.x)
+# Beide gegen dieselbe Falle: eine Ausnahme oder ein Vorgabewert, den niemand ansieht,
+# verdeckt irgendwann den nächsten echten Befund. `belegstellen` ist hier leer — dieses
+# Repo hat kein Zitatverzeichnis; der Aufruf steht trotzdem, damit ein späterer Eintrag
+# geprüft wird, statt still zu gelten.
+_beleg = hygiene.pruefe_belegstellen_eng(str(ROOT), DATEIEN, [])
+r.check("Belegstellen-Muster treffen keinen Code", not _beleg, " | ".join(_beleg[:3]))
+_tab = hygiene.pruefe_tabelle_vollstaendig()
+r.check("jede Kit-Prüfung steht in genau einer Liste", not _tab, " | ".join(_tab[:3]))
+_pk = hygiene.pruefe_policy_schluessel_gelesen(POLICY)
+r.check("jeder Policy-Schlüssel wird gelesen", not _pk, " | ".join(_pk[:3]))
+
 _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
 r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
         not _ng, " | ".join(_ng[:3]))
