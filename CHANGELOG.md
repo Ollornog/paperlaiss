@@ -6,6 +6,35 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Dependabot bündelt Patch und Minor, Auto-Merge ist aus
+
+Jeder `updates:`-Block in `.github/dependabot.yml` hat jetzt eine Gruppe `klein`, die
+**patch und minor** in EINEN PR zusammenfasst. Majors bleiben absichtlich draußen und kommen
+einzeln.
+
+Anlass ist eine Entscheidung mit Vorgeschichte: Auto-Merge war repo-weit aktiv und hat
+Dependabot-PRs **selbst gemergt** — Tage nach dem Aktivieren und nach einem Rebase, den
+niemand angesehen hat. Der Schalter `allow_auto_merge` ist deshalb aus, gemergt wird von
+Hand. Die Bündelung ist die Gegenleistung dafür, dass „von Hand" nicht „mehr Arbeit" heißt:
+ein Patch-Bump mit gepinntem SHA und grüner Suite braucht keinen eigenen PR, ein Major
+schon — der kann die Laufzeit wechseln (node20 → node24) oder Eingaben entfernen.
+
+Bei pip ersetzt `klein` die bisherige Gruppe `alle` (`patterns: ["*"]` ohne Filter). Zwei
+Gruppen mit demselben Muster im selben Block überschneiden sich, und Dependabot verlangt
+eindeutige, nicht überlappende Gruppen — also umbauen statt daneben setzen.
+
+### Geändert — Testbasis auf Kit 0.16.1
+
+`repokit sync` zieht drei Korrekturen nach:
+
+- **oktal escapte Umlaute in `git ls-tree`**: eine vorhandene Datei mit Umlaut im Namen galt
+  der Dateilisten-Prüfung als fehlend.
+- **eine Subdomain namens `www` ist keine interne Dienst-Subdomain** mehr: das Muster traf
+  vorher jede Quellenangabe dieser Form. Der Anker sitzt jetzt am Anfang des Hostnamens,
+  damit ein Dienstname vor dem `www` nicht durchschlüpft.
+- **generierte Dateien** (Lock-Dateien, IDE-Helfer) sind von den **Adress**prüfungen
+  ausgenommen — ausdrücklich **nicht** von der Geheimnis-Prüfung.
+
 ### Sicherheit — jeder `actions/checkout` gibt das git-Token nicht mehr weiter
 
 Alle Checkout-Schritte in `ci.yml` und `release.yml` setzen `persist-credentials: false`.
