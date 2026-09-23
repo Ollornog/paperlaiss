@@ -47,6 +47,12 @@ jobs:
           python-version: ${{ matrix.python }}
 
       # Der Klassifizierer und die Tests sind stdlib-only — nichts zu installieren.
+      # Der Vorher-Stand macht den Rückstands-Check unten ENTSCHEIDBAR. Er muss NACH
+      # der Installation liegen: `pip install -e` erzeugt `*.egg-info`, und ohne diesen
+      # Schritt wäre das ein Rückstand, den der Check der Suite zuschreibt.
+      - name: Vorher-Stand des Baums
+        run: ./scripts/_residue_check.sh snapshot > "$RUNNER_TEMP/baum-vorher.txt"
+
       - name: Suite (Fach + Hygiene)
         run: ./scripts/check.sh
 
@@ -55,7 +61,7 @@ jobs:
 
       # Dieselbe Prüfung, die der pre-push-Hook fährt.
       - name: Arbeitsverzeichnis ist unverändert geblieben
-        run: ./scripts/_residue_check.sh check
+        run: ./scripts/_residue_check.sh check --seit "$RUNNER_TEMP/baum-vorher.txt"
 
   image:
     runs-on: ubuntu-latest
