@@ -321,6 +321,13 @@ r.check("jede Kit-Prüfung steht in genau einer Liste", not _tab, " | ".join(_ta
 _pk = hygiene.pruefe_policy_schluessel_gelesen(POLICY)
 r.check("jeder Policy-Schlüssel wird gelesen", not _pk, " | ".join(_pk[:3]))
 
+# ---- Nichts wird von Dritten nachgeladen (Kit 0.18.0, PO-Regel 2026-09-23)
+# Die Trennlinie: ein Link ist eine Tür, ein `src` ist ein Bote, den wir ungefragt
+# losschicken. Die Ausnahmeliste ist LEER und soll es bleiben — eine Freigabe für eine
+# Stelle, die man beseitigen könnte, wäre keine Ausnahme, sondern eine Billigung.
+_fremd = hygiene.pruefe_keine_fremdressourcen(str(ROOT), DATEIEN, POLICY)
+r.check("nichts wird von Dritten nachgeladen", not _fremd, " | ".join(_fremd[:3]))
+
 _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
 r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
         not _ng, " | ".join(_ng[:3]))
