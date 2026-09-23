@@ -328,6 +328,13 @@ r.check("jeder Policy-Schlüssel wird gelesen", not _pk, " | ".join(_pk[:3]))
 _fremd = hygiene.pruefe_keine_fremdressourcen(str(ROOT), DATEIEN, POLICY)
 r.check("nichts wird von Dritten nachgeladen", not _fremd, " | ".join(_fremd[:3]))
 
+# ---- Wird jede Testdatei überhaupt gerufen? (Kit 0.21.0)
+# Von AUSSEN gefragt: ein nicht verkabelter Hygiene-Test besteht seine eigene
+# Aufruf-Prüfung dadurch, dass er schweigt. Autodiscovery (run_all+glob, pytest)
+# erkennt die Prüfung und schweigt dann.
+_td = hygiene.pruefe_testdateien_gerufen(str(ROOT))
+r.check("jede Testdatei wird von einem Läufer gerufen", not _td, " | ".join(_td[:3]))
+
 _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
 r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
         not _ng, " | ".join(_ng[:3]))
