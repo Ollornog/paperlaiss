@@ -6,6 +6,20 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Testbasis auf Kit 0.16.2 (Gleichstand)
+
+`repokit sync` verteilte bisher den **Arbeitsbaum** des Kit-Klons statt des freigegebenen
+Standes auf dessen Default-Branch. Dieses Repo bekam dadurch ein `tests/_kit` mit der
+Aufschrift 0.16.1, das zu dem Zeitpunkt noch nicht beschlossen war — der Inhalt war nicht
+falsch, aber er war nie freigegeben. Welcher Stand ein Repo abbekam, hing allein daran, was
+im Kit-Klon gerade ausgecheckt war.
+
+Kit 0.16.2 behebt die Ursache: die Quelle wird aus `origin/<default-branch>` materialisiert
+und für den ganzen Lauf festgehalten. Dieser Commit ist die Gegenprobe dazu — ein
+gewöhnlicher `repokit sync .` liefert jetzt 0.16.2, ohne Kunstgriff. An den verteilten
+Dateien ändert sich nichts außer der Versionsangabe: der Fehler saß im Werkzeug, nicht im
+Kit-Inhalt.
+
 ### Geändert — Dependabot bündelt Patch und Minor, Auto-Merge ist aus
 
 Jeder `updates:`-Block in `.github/dependabot.yml` hat jetzt eine Gruppe `klein`, die
