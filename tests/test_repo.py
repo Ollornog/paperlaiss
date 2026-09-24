@@ -59,7 +59,7 @@ PFLICHT = [
     "CODE_OF_CONDUCT.md", "i18n/CODE_OF_CONDUCT.de.md",
     "pyproject.toml", ".ci-image", ".gitignore",
     "classify.py", "classify-config.json",
-    "panel/app.py", "panel/Dockerfile", "panel/requirements.txt",
+    "panel/app.py", "panel/Dockerfile", "panel/.dockerignore", "panel/requirements.txt",
     "deploy/.env.example", "deploy/docker-compose.example.yml",
     "scripts/check.sh", "scripts/_residue_check.sh", ".githooks/pre-push",
     ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/dependabot.yml",
@@ -275,6 +275,28 @@ _dockerfile = (ROOT / "panel" / "Dockerfile").read_text(encoding="utf-8")
 _panel_module = sorted(p.name for p in (ROOT / "panel").glob("*.py"))
 _fehlend = [m for m in _panel_module if m not in _dockerfile]
 r.check("Panel-Dockerfile kopiert alle Module aus panel/", not _fehlend, ", ".join(_fehlend))
+
+# ---- .dockerignore liegt dort, wo Docker sie liest: im Build-KONTEXT
+# Docker liest die Ignore-Liste nur im Wurzelverzeichnis des Kontexts. Bis 2026-09-24 lag sie hier
+# gar nicht (bzw. neben dem Repo), gebaut wird aber aus einem Unterordner — die Liste griff nie.
+# Harmlos nur, solange jedes COPY gezielt kopiert; die Prüfung macht es unabhängig davon wahr.
+_kontexte = set()
+for _wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+    _text = _wf.read_text(encoding="utf-8")
+    _kontexte.update(re.findall(r"docker build\b[^\n]*?\s(\.\S*)\s*$", _text, re.M))
+    _kontexte.update(re.findall(r"^\s*context:\s*(\S+)\s*$", _text, re.M))
+_kontexte = {k.removeprefix("./").rstrip("/") or "." for k in _kontexte}
+r.check("Build-Kontexte aus den Workflows gefunden", bool(_kontexte), "kein `docker build`/`context:`")
+for _k in sorted(_kontexte):
+    _ignore = ROOT / _k / ".dockerignore"
+    r.check(f"{_k}/.dockerignore liegt im Build-Kontext", _ignore.is_file())
+    if _ignore.is_file():
+        _zeilen = {z.strip() for z in _ignore.read_text(encoding="utf-8").splitlines()}
+        r.check(f"{_k}/.dockerignore hält .env und __pycache__ fern",
+                {".env", "**/__pycache__"} <= _zeilen, str(sorted({".env", "**/__pycache__"} - _zeilen)))
+_tot = [d for d in DATEIEN if d.endswith(".dockerignore")
+        and (str(Path(d).parent) if str(Path(d).parent) != "." else ".") not in _kontexte]
+r.check("keine .dockerignore außerhalb eines Build-Kontexts (sie griffe nie)", not _tot, " | ".join(_tot))
 
 # ---- Python-Matrix: EINE Quelle, mechanisch gehalten (Kit 0.12.0, 2026-09-22)
 # Bis 2026-09-22 stand die Matrix an drei Stellen — im Abbild (/opt/ci-matrix), in
