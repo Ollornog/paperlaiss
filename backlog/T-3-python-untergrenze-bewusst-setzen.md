@@ -52,5 +52,25 @@ Gate. Sie dürfen übereinstimmen, aber nicht deshalb, weil ein Wächter sie ver
 4. Die Entscheidung in `pyproject.toml` und README festhalten, damit die nächste Matrix-Rolle
    sie nicht stillschweigend überschreibt.
 
+## Messung 2026-09-25 (Schritt 1)
+
+`tests/test_classify.py` gegen `origin/main` (b7d807b), je ein frisches venv (uv), ohne weitere
+Pakete:
+
+| Python | Ergebnis |
+|---|---|
+| 3.8.20 | 72 ok, 0 Fehler |
+| 3.9.25 | 72 ok, 0 Fehler |
+| 3.10.20 | 72 ok, 0 Fehler |
+| 3.11.15 | 72 ok, 0 Fehler |
+| 3.12.3 | 72 ok, 0 Fehler |
+
+Gegenprobe statisch: `vermin classify.py` → *Minimum required versions: 3.7*. Die Grenze `>=3.12`
+kommt also allein aus der Testmatrix, nicht aus dem Code. Offen bleibt Schritt 2 (die Zahl
+entscheiden) — ein Versprechen an fremde Installationen, deshalb beim Maintainer. Nicht gemessen:
+das Panel (optionale Abhängigkeiten; laut oben verlangen FastAPI 0.141 und uvicorn 0.53 `>=3.10`).
+Wichtig für jede Zahl unter der Matrix: Die Untergrenze muss dann selbst in der CI laufen
+(Zusage = Prüflauf), sonst ist sie nach dem ersten Matrix-Schritt wieder geraten.
+
 **Fertig, wenn** die Untergrenze eine begründete Zahl ist, die Begründung neben ihr steht, und
 das Erscheinen von Python 3.15 sie nicht von allein anhebt.
