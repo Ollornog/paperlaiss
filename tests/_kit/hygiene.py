@@ -138,7 +138,7 @@ def pruefe_private_infrastruktur(root: str, dateien: list[str], policy: dict,
 
     treffer = []
     for rel, inhalt in _texte(root, dateien, policy):
-        for n, zeile in enumerate(inhalt.splitlines(), 1):
+        for n, zeile in enumerate(zeilen_wie_grep(inhalt), 1):
             sauber = erlaubt.sub("", zeile)
             for pat in muster:
                 if pat.search(sauber):
@@ -228,6 +228,23 @@ def _wert_ist_aufruf(zeile: str, treffer) -> bool:
     return rest.startswith(("::", "->", "(", "()"))
 
 
+def zeilen_wie_grep(inhalt: str) -> list[str]:
+    """Zeilen so schneiden, wie Editor, `grep` und der Mensch sie zaehlen: nur an ``\n``.
+
+    WARUM NICHT ``splitlines()`` (Register 2026-09-23, behoben 2026-09-24):
+    ``str.splitlines()`` trennt auch an U+2028 (LINE SEPARATOR), U+2029, U+0085, ``\v``,
+    ``\f`` und U+001C-1E. Steht eines davon irgendwo VOR einem Treffer, meldet der Waechter
+    eine Zeilennummer, die es im Editor nicht gibt — gemessen an
+    ``tests/test_audit_runde2.py``: gemeldet ``:1610``, gemeint war 1606. Der Befund war
+    richtig, nur der Ort verschoben, und man sucht an der falschen Stelle. Ein Waechter, der
+    den Fundort falsch nennt, kostet genau das Vertrauen, das er aufbauen soll.
+
+    ``rstrip("\r")`` haelt CRLF-Dateien sauber: ohne das truege jede Zeile ein ``\r`` am
+    Ende und ein Muster mit ``$`` wuerde nicht mehr passen.
+    """
+    return [z.rstrip("\r") for z in inhalt.split("\n")]
+
+
 def geheimnis_zeilen(inhalt: str, policy: dict) -> list[tuple[int, str]]:
     """(Zeilennummer, Art) je verdaechtiger Zeile. **Nie der Wert.**
 
@@ -238,7 +255,7 @@ def geheimnis_zeilen(inhalt: str, policy: dict) -> list[tuple[int, str]]:
     """
     formate, zuweisung, platzhalter = _geheimnis_regeln(policy)
     treffer = []
-    for n, zeile in enumerate(inhalt.splitlines(), 1):
+    for n, zeile in enumerate(zeilen_wie_grep(inhalt), 1):
         for pat in formate:
             if pat.search(zeile):
                 treffer.append((n, "Format"))
@@ -599,7 +616,7 @@ def pruefe_kein_self_hosted_runner(root: str, dateien: list[str]) -> list[str]:
         if not rel.startswith(".github/workflows/"):
             continue
         inhalt = _lies(root, rel) or ""
-        for n, zeile in enumerate(inhalt.splitlines(), 1):
+        for n, zeile in enumerate(zeilen_wie_grep(inhalt), 1):
             if "self-hosted" in ohne_yaml_kommentar(zeile):
                 treffer.append(f"{rel}:{n}")
     return treffer
@@ -684,7 +701,7 @@ def pruefe_actions_sha_gepinnt(root: str, dateien: list[str]) -> list[str]:
         if not rel.startswith(".github/workflows/") or not rel.endswith((".yml", ".yaml")):
             continue
         inhalt = _lies(root, rel) or ""
-        for n, zeile in enumerate(inhalt.splitlines(), 1):
+        for n, zeile in enumerate(zeilen_wie_grep(inhalt), 1):
             m = _USES.match(zeile)
             if not m:
                 continue
@@ -798,7 +815,7 @@ def _matrix_listen(inhalt: str) -> list[tuple[int, str, list[str]]]:
     in den Schritten — also genau die Zeile, die die Matrix korrekt benutzt.
     """
     treffer: list[tuple[int, str, list[str]]] = []
-    zeilen = inhalt.splitlines()
+    zeilen = zeilen_wie_grep(inhalt)
     block_tiefe: int | None = None
     i = 0
     while i < len(zeilen):
@@ -1025,7 +1042,7 @@ def pruefe_changelog_kategorien(root: str, policy: dict, datei: str = "CHANGELOG
     erlaubt = policy["changelog_kategorien"]
     treffer, gesehen = [], set()
     innerhalb_code = False
-    for n, zeile in enumerate(inhalt.splitlines(), 1):
+    for n, zeile in enumerate(zeilen_wie_grep(inhalt), 1):
         if zeile.lstrip().startswith("```"):
             innerhalb_code = not innerhalb_code
             continue
@@ -1051,7 +1068,7 @@ def pruefe_changelog_kategorien(root: str, policy: dict, datei: str = "CHANGELOG
 def _ueberschriften(text: str) -> list[tuple[int, str]]:
     """(Ebene, Titel) je Überschrift. Code-Blöcke bleiben außen vor — `# ...` darin ist ein Kommentar."""
     aus, innerhalb_code = [], False
-    for zeile in text.splitlines():
+    for zeile in zeilen_wie_grep(text):
         if zeile.lstrip().startswith("```"):
             innerhalb_code = not innerhalb_code
             continue
@@ -1443,7 +1460,7 @@ def pruefe_persist_credentials(root: str, dateien: list[str],
             continue
         datei = os.path.basename(rel)
         job = "?"
-        for i, zeile in enumerate(inhalt.splitlines()):
+        for i, zeile in enumerate(zeilen_wie_grep(inhalt)):
             ohne_kommentar = zeile.split("#", 1)[0]
             # Jobnamen stehen auf Einrückungstiefe 2 unter `jobs:`.
             m = re.match(r"^  ([A-Za-z_][\w-]*):\s*$", ohne_kommentar)
@@ -1456,7 +1473,7 @@ def pruefe_persist_credentials(root: str, dateien: list[str],
                 continue
             # `with:` gehört zum Schritt; der Schritt endet beim nächsten `- ` auf
             # derselben oder geringerer Einrückung. 12 Zeilen reichen dafür weit.
-            block = "\n".join(inhalt.splitlines()[i:i + 12])
+            block = "\n".join(zeilen_wie_grep(inhalt)[i:i + 12])
             naechster = re.search(r"\n\s*- ", block)
             if naechster:
                 block = block[:naechster.start()]
@@ -1541,7 +1558,7 @@ def _host_kandidaten(inhalt: str, ist_python: bool) -> set[str]:
                 if k.value in schluessel:
                     continue
                 roh |= aus_text(k.value)
-        for zeile in inhalt.splitlines():
+        for zeile in zeilen_wie_grep(inhalt):
             if "#" in zeile:
                 roh |= aus_text(zeile.split("#", 1)[1])
         return roh
@@ -1676,6 +1693,11 @@ def pruefe_belegstellen_eng(root: str, dateien: list[str],
 # vergleicht die Tabelle gegen das Modul, damit auch das nicht am Vorsatz haengt.
 AUSGELIEFERTE_PRUEFUNGEN: list[tuple[str, str]] = [
     ("manifest", "pruefe"),
+    # Gefordert, weil sie nichts braucht als das Repo — und weil ihr Zuschnitt ueber ALLE acht
+    # Repos gemessen ist (2026-09-24): 7 sauber, einer rot, und der Rote ist ein echter,
+    # dokumentierter Befund. Die naheliegende weite Fassung ("jeder Job mit write-Rechten haengt
+    # am Tag") haette 7 von 9 heissen Jobs falsch gemeldet — Pages-Deploy, CI-Abbild, Cleanup.
+    ("hygiene", "pruefe_veroeffentlichen_am_tag"),
     # Die SAMMELFUNKTION, nicht ihre Teile — sie ist die ausgelieferte Schnittstelle.
     #
     # ⚠️ KORREKTUR 0.17.1, und die Lehre ist bitter, weil sie meine eigene ist: 0.17.0
@@ -1707,6 +1729,12 @@ AUSGELIEFERTE_PRUEFUNGEN: list[tuple[str, str]] = [
 # nicht die Bequemlichkeit des Repos ("haben wir noch nicht eingebaut") — das Zweite
 # gehoert als Ausnahme MIT Grund ins jeweilige Repo, wo es sichtbar bleibt.
 KIT_WERKZEUGE: list[tuple[str, str, str]] = [
+    ("hygiene", "pruefe_dateien_geschlossen",
+     ("prueft den Kit-Quelltext selbst, nicht das aufrufende Repo — sie gehoert in repokits "
+      "eigene Suite, und dort laeuft sie")),
+    ("hygiene", "pruefe_zeilennummern_wie_grep",
+     ("prueft den Kit-Quelltext selbst, nicht das aufrufende Repo — sie gehoert in repokits "
+      "eigene Suite, und dort laeuft sie")),
     ("headers", "pruefe_cookie_flags",
      "braucht geparste Set-Cookie-Koepfe einer echten Antwort"),
     ("headers", "pruefe_security_header",
@@ -1766,6 +1794,241 @@ def pruefe_policy_schluessel_gelesen(policy: dict,
                 f"oder verdrahten. Ein Wert, den niemand liest, ist eine Zusage, die nichts "
                 f"einloest; steht er an einer Stelle, die ein Repo nicht aendern DARF "
                 f"(Manifest), ist er ausserdem eine falsche Einladung.")
+    return treffer
+
+
+def pruefe_zeilennummern_wie_grep(kit_verzeichnis: str | None = None) -> list[str]:
+    """Keine Kit-Pruefung darf `splitlines()` benutzen, wo sie Zeilen zaehlt.
+
+    WARUM (Register 2026-09-23, behoben 2026-09-24): `splitlines()` trennt auch an U+2028,
+    U+2029, U+0085, ``\v``, ``\f`` und U+001C-1E. Ein einziges solches Zeichen in einer
+    Datei verschiebt JEDE danach gemeldete Zeilennummer — gemessen: gemeldet ``:1610``,
+    gemeint 1606. Zwoelf Stellen in diesem Modul waren betroffen, nicht eine; deshalb gibt
+    es [`zeilen_wie_grep`](#) und deshalb wird es hier erzwungen statt erinnert.
+
+    *Ein Waechter, der den Fundort falsch nennt, kostet genau das Vertrauen, das er
+    aufbauen soll — und man sucht an der falschen Stelle.*
+
+    Geprueft wird per **AST**, nicht im Zeilentext: ein `splitlines` im Docstring (dort
+    steht die Begruendung) ist kein Aufruf. Genau dieser Unterschied hat schon einmal einen
+    Fehlalarm erzeugt.
+    """
+    import ast as _ast
+    verz = kit_verzeichnis or os.path.dirname(os.path.abspath(__file__))
+    treffer: list[str] = []
+    for name in sorted(os.listdir(verz)):
+        if not name.endswith(".py") or name == "__init__.py":
+            continue
+        pfad = os.path.join(verz, name)
+        try:
+            # `with`, nicht `open(...).read()`: CodeQL meldet sonst `py/file-not-closed`,
+            # und zwar in JEDEM Repo, das diese Kopie traegt — gemeldet aus der
+            # TinySesam-Session am Tag der Auslieferung. Der Fix gehoert in die Quelle,
+            # nicht in sieben abgewiesene Alerts.
+            with open(pfad, encoding="utf-8") as fh:
+                baum = _ast.parse(fh.read())
+        except (OSError, SyntaxError) as fehler:
+            treffer.append(f"{name}: nicht lesbar ({fehler}) — nicht geprueft")
+            continue
+        for knoten in _ast.walk(baum):
+            if isinstance(knoten, _ast.Call) and isinstance(knoten.func, _ast.Attribute) \
+                    and knoten.func.attr == "splitlines":
+                treffer.append(f"{name}:{knoten.lineno}: splitlines() — "
+                               "zeilen_wie_grep() nehmen (U+2028 verschiebt die Nummer)")
+    return treffer
+
+
+# Was VEROEFFENTLICHT in einem Workflow? Erkannt an der HANDLUNG, nicht am Namen.
+#
+# Die Falle stammt aus der TinySesam-Session (2026-09-24): ihre erste Fassung erkannte den
+# PyPI-Job an `name: pypi` — und schlug bei `name: pypi-dist` an, einem ARTEFAKTNAMEN im
+# Bau-Job. *Ein Waechter, der am Namen erkennt, trifft alles, was aehnlich heisst.*
+_VEROEFFENTLICHT: list[tuple[str, str]] = [
+    (r"gh\s+release\s+create", "gh release create"),
+    (r"docker/login-action", "docker/login-action"),
+    (r"pypa/gh-action-pypi-publish", "pypi-publish"),
+    (r"actions/attest", "actions/attest*"),
+    (r"twine\s+upload", "twine upload"),
+    (r"docker/build-push-action", "build-push-action"),
+]
+_AM_TAG = re.compile(r"ref_type\s*==\s*'tag'|startsWith\(github\.ref,\s*'refs/tags")
+
+
+def _workflow_bloecke(inhalt: str) -> tuple[bool, list[dict]]:
+    """(ist_tag_workflow_mit_knopf, [{name, if, steps:[{text, if}]}]) — OHNE PyYAML.
+
+    Bewusst textuell: `yaml` liegt nur in `ci-ansible` und `ci-runner-tools`, NICHT in
+    `ci-python-web`, `ci-go` und `ci-php` (nachgemessen 2026-09-24). Eine Pruefung, die dort
+    mit ImportError endet oder sich ueberspringt, ist keine — "Skip ist kein Gruen".
+    """
+    zeilen = zeilen_wie_grep(inhalt)
+    tiefe = lambda z: len(z) - len(z.lstrip(" "))          # noqa: E731 — lokal, einzeilig
+
+    # --- on: … tags: + workflow_dispatch?
+    in_on = False
+    hat_tags = hat_knopf = False
+    for z in zeilen:
+        if re.match(r"^on:", z):
+            in_on = True
+            continue
+        if in_on:
+            if z.strip() and tiefe(z) == 0:
+                in_on = False
+            else:
+                if re.match(r"^\s+tags:", z):
+                    hat_tags = True
+                if re.match(r"^\s+workflow_dispatch:", z):
+                    hat_knopf = True
+    # Kurzform `on: [push]` traegt keine tags — dann greift die Pruefung nicht.
+
+    # --- jobs:
+    jobs: list[dict] = []
+    in_jobs = False
+    job: dict | None = None
+    job_tiefe = None
+    schritt: dict | None = None
+    for z in zeilen:
+        if re.match(r"^jobs:", z):
+            in_jobs = True
+            continue
+        if not in_jobs:
+            continue
+        if z.strip() and tiefe(z) == 0:                    # naechster Top-Level-Schluessel
+            break
+        m = re.match(r"^(\s+)([A-Za-z_][\w-]*):\s*$", z)
+        if m and (job_tiefe is None or len(m.group(1)) == job_tiefe):
+            job_tiefe = len(m.group(1))
+            job = {"name": m.group(2), "if": "", "steps": []}
+            jobs.append(job)
+            schritt = None
+            continue
+        if job is None:
+            continue
+        # Schritt-Anfang: "- " tiefer als der Jobname
+        if re.match(r"^\s+-\s", z) and tiefe(z) > job_tiefe:
+            schritt = {"text": z, "if": ""}
+            job["steps"].append(schritt)
+            continue
+        mif = re.match(r"^\s+if:\s*(.*)$", z)
+        if mif:
+            if schritt is not None:
+                schritt["if"] += " " + mif.group(1)
+            else:
+                job["if"] += " " + mif.group(1)
+            continue
+        if schritt is not None:
+            schritt["text"] += "\n" + z
+        else:
+            job["if"] += ""                                 # andere Job-Schluessel: uninteressant
+            if re.match(r"^\s+environment:", z):
+                job["environment"] = z.split(":", 1)[1].strip() or "?"
+    return (bool(hat_tags and hat_knopf), jobs)
+
+
+def pruefe_veroeffentlichen_am_tag(root: str, dateien: list[str] | None = None) -> list[str]:
+    """In einem tag-getriggerten Workflow MIT `workflow_dispatch`: nichts veroeffentlicht ohne Tag.
+
+    WARUM (Register 2026-09-23/24, Muster aus der TinySesam-Session): Ein Workflow mit
+    `on: push: tags` wird von der normalen CI nie beruehrt — er sieht gepflegt aus, weil das Repo
+    gruen ist, aber das Gruen kommt von einem anderen Workflow. Der Ausweg ist ein
+    `workflow_dispatch`-Trockenlauf. Genau dort lag die Falle: fuenf von sechs Repos hatten den
+    Knopf, keines hatte ihn je gedrueckt — und ein Druck haette **aus einem Branch heraus
+    veroeffentlicht** (`gh release create`, `docker push` nach ghcr), weil nur `--verify-tag` davor
+    stand. *Ein Notausgang, der beim Oeffnen klemmt oder ins Freie fuehrt, ist keiner.*
+
+    **Der Zuschnitt ist gemessen, nicht geraten** (ueber alle acht Repos der Flotte, 2026-09-24):
+    Die naheliegende Regel „jeder Job mit `write`-Rechten haengt am Tag" haette **7 von 9** heissen
+    Jobs falsch gemeldet — der Pages-Deploy (`pages`/`id-token: write`, veroeffentlicht bei JEDEM
+    Push auf main und soll das), das CI-Abbild eines Kundenrepos und ein Registry-Cleanup
+    (`packages: write`, beides gewollt). Deshalb: geprueft wird **nur in tag-getriggerten Workflows
+    mit Knopf**, und dort **die Handlung** (Release anlegen, Registry-Anmeldung, schiebender Bau,
+    PyPI, Beglaubigung) — nicht das Recht und nicht der Name.
+
+    Gedeckt ist eine Handlung, wenn der **Job** oder der **Schritt** ein `if` mit
+    `github.ref_type == 'tag'` bzw. `startsWith(github.ref, 'refs/tags…')` traegt.
+    """
+    treffer: list[str] = []
+    verz = os.path.join(root, ".github", "workflows")
+    if not os.path.isdir(verz):
+        return treffer
+    for name in sorted(os.listdir(verz)):
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        inhalt = _lies(root, os.path.join(".github", "workflows", name))
+        if inhalt is None:
+            continue
+        tag_workflow, jobs = _workflow_bloecke(inhalt)
+        if not tag_workflow:
+            continue
+        for job in jobs:
+            job_am_tag = bool(_AM_TAG.search(job.get("if", "")))
+            if job.get("environment") and not job_am_tag:
+                treffer.append(f".github/workflows/{name}:{job['name']}: `environment: "
+                               f"{job['environment']}` ohne Tag-Bedingung am Job")
+            for s in job["steps"]:
+                if job_am_tag or _AM_TAG.search(s.get("if", "")):
+                    continue
+                for muster, bezeichnung in _VEROEFFENTLICHT:
+                    if not re.search(muster, s["text"]):
+                        continue
+                    if bezeichnung == "build-push-action":
+                        # Ein Bau, der NICHT schiebt, veroeffentlicht nichts. `push:` mit einem
+                        # Ausdruck (`${{ github.ref_type == 'tag' }}`) ist genau die Loesung und
+                        # darf nicht als Befund gelten.
+                        # Die GANZE Zeile nach `push:` lesen, nicht das erste Wort: bei
+                        # `push: ${{ github.ref_type == 'tag' }}` faengt `\S+` nur `${{` und
+                        # meldete DashMyBoard falsch (aufgefallen, weil eine zweite,
+                        # unabhaengige Messung mit PyYAML widersprach — zwei Implementierungen,
+                        # die sich uneinig sind, sind billiger als ein Fehlalarm im Gate).
+                        mp = re.search(r"push:\s*(.*)$", s["text"], re.M)
+                        wert = (mp.group(1) if mp else "").strip().strip("\"'")
+                        if wert.lower() in ("false", "") or "ref_type" in wert or "refs/tags" in wert:
+                            continue
+                    treffer.append(f".github/workflows/{name}:{job['name']}: "
+                                   f"`{bezeichnung}` ohne Tag-Bedingung — ein Trockenlauf "
+                                   f"wuerde damit VEROEFFENTLICHEN")
+                    break
+    return treffer
+
+
+def pruefe_dateien_geschlossen(kit_verzeichnis: str | None = None) -> list[str]:
+    """Kein `open()` im Kit ausserhalb eines `with` — die Datei bliebe offen.
+
+    WARUM (2026-09-24, am Tag der Auslieferung von 0.21.6 gemeldet): `open(pfad).read()` in
+    einer frisch gebauten Pruefung liess CodeQL in TinySesam `py/file-not-closed` melden — und
+    weil das Kit als **Kopie** in jedes Repo wandert, haette derselbe Alert in jedem Repo mit
+    CodeQL aufgeschlagen. Sieben abgewiesene Alerts sind kein Fix; der Fix gehoert in die Quelle.
+
+    *Was das Kit ausliefert, vervielfaeltigt jeden Fehler — und jeden Fix.*
+
+    Geprueft wird per AST (ein `open(` im Docstring oder in einem Kommentar ist kein Aufruf).
+    CodeQL laeuft nur in den Repos, die es eingerichtet haben; diese Pruefung laeuft ueberall,
+    auch offline in `ci-local`.
+    """
+    import ast as _ast
+    verz = kit_verzeichnis or os.path.dirname(os.path.abspath(__file__))
+    treffer: list[str] = []
+    for name in sorted(os.listdir(verz)):
+        if not name.endswith(".py") or name == "__init__.py":
+            continue
+        pfad = os.path.join(verz, name)
+        try:
+            with open(pfad, encoding="utf-8") as fh:
+                baum = _ast.parse(fh.read())
+        except (OSError, SyntaxError) as fehler:
+            treffer.append(f"{name}: nicht lesbar ({fehler}) — nicht geprueft")
+            continue
+        im_with = set()
+        for knoten in _ast.walk(baum):
+            if isinstance(knoten, _ast.With):
+                for eintrag in knoten.items:
+                    for x in _ast.walk(eintrag.context_expr):
+                        im_with.add(id(x))
+        for knoten in _ast.walk(baum):
+            if isinstance(knoten, _ast.Call) and getattr(knoten.func, "id", None) == "open" \
+                    and id(knoten) not in im_with:
+                treffer.append(f"{name}:{knoten.lineno}: open() ohne `with` — die Datei bleibt "
+                               "offen (CodeQL: py/file-not-closed)")
     return treffer
 
 
@@ -1854,7 +2117,7 @@ FIXTURE_SAUBER = "fixture_geheimnis_sauber.txt"
 def _fixture_zeilen(kit_verzeichnis: str, name: str) -> list[str]:
     pfad = os.path.join(kit_verzeichnis, name)
     with open(pfad, encoding="utf-8") as fh:
-        return [z for z in fh.read().splitlines() if z and not z.startswith("#")]
+        return [z for z in zeilen_wie_grep(fh.read()) if z and not z.startswith("#")]
 
 
 def pruefe_fixture_deckt_muster(policy: dict,

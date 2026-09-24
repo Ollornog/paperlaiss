@@ -335,6 +335,13 @@ r.check("nichts wird von Dritten nachgeladen", not _fremd, " | ".join(_fremd[:3]
 _td = hygiene.pruefe_testdateien_gerufen(str(ROOT))
 r.check("jede Testdatei wird von einem Läufer gerufen", not _td, " | ".join(_td[:3]))
 
+# ---- Veröffentlichen hängt am Tag (Kit 0.21.8)
+# Ein tag-getriggerter Workflow MIT `workflow_dispatch` ist der einzige, den man vor dem Tag
+# prüfen kann — und genau dort lag die Falle: der Knopf war da, aber ein Druck hätte aus einem
+# BRANCH heraus ein Abbild geschoben und ein Release angelegt.
+_vt = hygiene.pruefe_veroeffentlichen_am_tag(str(ROOT))
+r.check("in tag-Workflows hängt jedes Veröffentlichen am Tag", not _vt, " | ".join(_vt[:3]))
+
 _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
 r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
         not _ng, " | ".join(_ng[:3]))
