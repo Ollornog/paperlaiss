@@ -1,0 +1,10 @@
+# Kleiner Kontext = sicherer Kontext. Diese Datei liegt im Build-KONTEXT (./panel) — nur dort
+# liest Docker sie. Bis 2026-09-24 gab es keine; tests/test_repo.py prüft seitdem, dass jeder
+# Build-Kontext eine hat.
+# Das Dockerfile kopiert gezielt; diese Liste ist die zweite Linie: was hier steht, erreicht den
+# Bau gar nicht erst.
+.env
+.env.*
+data
+**/__pycache__
+**/*.pyc

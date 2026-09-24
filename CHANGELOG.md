@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Build-Kontext ohne `.dockerignore`
+
+- **`panel/.dockerignore` neu.** Gebaut wird aus `./panel`, eine Ignore-Liste gab es dort nicht —
+  folgenlos nur, weil das Dockerfile jede Datei gezielt kopiert. Neuer Test: jeder Build-Kontext aus
+  den Workflows hat seine `.dockerignore` (mit `.env` und `**/__pycache__`), und keine liegt
+  außerhalb eines Kontexts, wo sie nie griffe.
+
 ### Geändert — Testbasis auf Kit 0.16.2 (Gleichstand)
 
 `repokit sync` verteilte bisher den **Arbeitsbaum** des Kit-Klons statt des freigegebenen
