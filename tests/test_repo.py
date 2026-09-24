@@ -368,4 +368,10 @@ _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
 r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
         not _ng, " | ".join(_ng[:3]))
 
+# Kit 0.22.0 (M-1, Stufe 3): Hat jede Prüfung davor etwas GESEHEN? Eine Prüfung über eine
+# leere Menge ist immer grün. Muss als LETZTE laufen, sie wertet die Fallzahlen davor aus.
+_ns = hygiene.pruefe_etwas_gesehen()
+r.check("jede Kit-Prüfung hat etwas gesehen (keine lief über eine leere Menge)",
+        not _ns, " | ".join(_ns[:3]))
+
 sys.exit(r.done())
