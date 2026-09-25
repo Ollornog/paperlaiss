@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Python-Untergrenze bewusst an die neueste stable Reihe gebunden (T-3)
+
+- `requires-python` folgt weiter der Testmatrix (die drei neuesten stable Reihen) — jetzt als
+  Entscheidung festgehalten statt als Nebenwirkung einer Kit-Prüfung. Mit Python 3.15 steigt die
+  Untergrenze auf 3.13. Gemessen läuft `classify.py` auch unter 3.8; zugesagt wird das nicht.
+
 ### Behoben — Build-Kontext ohne `.dockerignore`
 
 - **`panel/.dockerignore` neu.** Gebaut wird aus `./panel`, eine Ignore-Liste gab es dort nicht —

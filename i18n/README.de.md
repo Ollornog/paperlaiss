@@ -55,6 +55,8 @@ mandantenspezifisch.
    PAPERLESS_POST_CONSUME_SCRIPT=/pfad/classify.py
    ```
    (Paperless setzt `DOCUMENT_ID`.) Die Python-Standardbibliothek genügt — keine Extra-Pakete.
+   Unterstützt werden die drei neuesten stable Python-Reihen (derzeit 3.12–3.14); die
+   Untergrenze steigt mit jeder neuen Python-Reihe mit, und zwar bewusst.
 
 ## Manuell und testen
 
