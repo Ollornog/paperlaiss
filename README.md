@@ -56,6 +56,8 @@ tenant-specific.
    PAPERLESS_POST_CONSUME_SCRIPT=/path/to/classify.py
    ```
    (Paperless sets `DOCUMENT_ID`.) The Python standard library is enough — no extra packages.
+   Supported are the three most recent stable Python releases (currently 3.12–3.14); the minimum
+   rises with each new Python release on purpose.
 
 ## Manual runs and testing
 

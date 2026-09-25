@@ -3,6 +3,10 @@ name = "paperlaiss"
 version = "0.1.0"
 description = "Grounded document classifier for Paperless-ngx: type, correspondent, custom fields and OCR rescue via Mistral — a stdlib-only replacement for paperless-ai."
 readme = "README.md"
+# Bewusst an die Testmatrix gebunden (T-3, Entscheidung des Maintainers 2026-09-25): unterstützt
+# werden die drei neuesten stable Python-Reihen, wie in allen Projekten des Hauses. Mit einer
+# neuen Python-Reihe steigt die Untergrenze mit — gewollt, nicht versehentlich. Gemessen läuft
+# classify.py auch unter 3.8 (T-3), zugesagt wird das nicht.
 requires-python = ">=3.12"
 license = { text = "MIT" }
 keywords = ["paperless", "paperless-ngx", "document-classification", "mistral", "ocr", "self-hosted"]

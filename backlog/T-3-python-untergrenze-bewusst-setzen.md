@@ -2,7 +2,7 @@
 id: T-3
 type: Task
 title: Python-Untergrenze bewusst setzen statt von der Testmatrix schieben lassen
-status: offen
+status: erledigt
 milestone: M-1
 tags: [kompatibilitaet, release, wartbarkeit]
 created: 2026-09-23
@@ -74,3 +74,11 @@ Wichtig für jede Zahl unter der Matrix: Die Untergrenze muss dann selbst in der
 
 **Fertig, wenn** die Untergrenze eine begründete Zahl ist, die Begründung neben ihr steht, und
 das Erscheinen von Python 3.15 sie nicht von allein anhebt.
+
+## Entscheidung 2026-09-25 (Maintainer)
+
+**Die Untergrenze folgt bewusst der neuesten stable Reihe**, wie in allen Projekten des Hauses: Zugesagt
+werden die drei neuesten stable Python-Reihen, `requires-python` steigt mit der Testmatrix. Die
+Kopplung in der Kit-Prüfung ist damit ausdrücklich bestätigt, nicht abzuschalten (Schritt 3 entfällt).
+Festgehalten in `pyproject.toml` (Kommentar) und beiden READMEs; die Messung oben bleibt als Beleg,
+dass eine tiefere Zusage möglich wäre, falls sich das je ändert.
