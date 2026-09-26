@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Ablauf & Prompt im Panel (`/ablauf`)
+
+- Jeder Schritt eines Laufs mit den aktuellen Einstellungen (Auslöser, Schleifenschutz, OCR-Regeln,
+  Pass 0/1, OCR-Nachlauf, Schreiben, Nachbearbeitung) und darunter der **System-Prompt von Pass 1,
+  wie er gesendet wird**. Gebaut wird er von `classify.py` selbst (`CLASSIFY_PROMPT_VORSCHAU=1`,
+  gemeinsame Funktion `pass1_system()`); ein Test belegt, dass Vorschau und gesendeter Prompt
+  Zeichen für Zeichen gleich sind.
+
 ### Geändert — Neu klassifizieren schreibt direkt, immer mit OCR; Vorschlagsmodus entfernt
 
 - **Auslöser aus Paperless** (Tag bzw. Hinweisfeld) klassifiziert neu, **immer mit Mistral-OCR**,

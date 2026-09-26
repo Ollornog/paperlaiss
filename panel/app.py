@@ -440,7 +440,7 @@ button{cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:6px;p
   display:flex;gap:12px;align-items:center}
 .muted{color:#6b7280}.warn{color:#fcd34d}
 </style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Einstellungen</h1><a href="/">← Dashboard</a>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Einstellungen</h1><a href="/">← Dashboard</a><a href="/ablauf">Ablauf & Prompt</a>
   <span class=muted style="margin-left:auto;font-size:12px">classify-config.json</span></header>
 <div class=wrap><div id=z>lädt…</div>
   <div class=leiste><button onclick="sichern()">Speichern</button><span id=meld class=muted></span></div>
@@ -488,6 +488,77 @@ async function sichern(){
     } else { meld.textContent='✓ gespeichert'; }
   }catch(e){ meld.className='warn'; meld.textContent=String(e.message||e).slice(0,160); }
 }
+</script></body></html>"""
+
+
+ABLAUF_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Ablauf & Prompt</title><link rel=icon href="/logo.png">
+<style>
+:root{color-scheme:dark}
+body{background:#0f1115;color:#e6e6e6;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0}
+header{display:flex;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #20252f}
+h1{font-size:16px;margin:0}a{color:#60a5fa;text-decoration:none}
+h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
+.abmelden{margin-left:auto;font-size:13px}
+.wrap{max-width:900px;margin:20px auto;padding:0 16px}
+.schritt{background:#161a22;border:1px solid #303643;border-radius:10px;padding:12px 14px}
+.schritt .t{font-weight:600;margin-bottom:4px}.schritt .d{font-size:13px;color:#c9ced6}
+.pfeil{text-align:center;color:#6b7280;margin:4px 0}
+.zweig{color:#fcd34d}.aus{color:#6b7280}
+pre{background:#0b0d11;border:1px solid #303643;border-radius:8px;padding:10px 12px;white-space:pre-wrap;
+  word-break:break-word;font-size:12px;max-height:520px;overflow:auto}
+h2{font-size:14px;margin:26px 0 8px;color:#9aa4b2;text-transform:uppercase;letter-spacing:.04em}
+.muted{color:#6b7280}
+</style></head><body>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Ablauf & Prompt</h1><a href="/">← Dashboard</a><a href="/einstellungen">Einstellungen</a></header>
+<div class=wrap><div id=z>lädt…</div></div>
+<script>
+function txt(v){return String(v==null?'':v).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}
+function an(b){return b?'an':'<span class=aus>aus</span>'}
+function schritt(t,d){return `<div class=schritt><div class=t>${t}</div><div class=d>${d}</div></div><div class=pfeil>↓</div>`}
+fetch('/api/prompt-vorschau').then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(v=>{
+  const e=v.einstellungen||{}, o=v.ocr_regeln||{};
+  let h='';
+  h+=schritt('1 · Auslöser',
+    '<b>Automatisch:</b> Paperless ruft nach dem Import <b>classify.py</b> auf (Post-Consume).<br>'+
+    '<b>Manuell:</b> im Dashboard „Neu klassifizieren" bzw. „mit OCR erzwingen".<br>'+
+    `<b>Aus Paperless:</b> Tag <b>${txt(e.redo_tag)||'—'}</b> setzen oder Feld <b>${txt(e.hinweis_field)||'—'}</b> befüllen `+
+    '→ Webhook → <span class=zweig>immer mit Mistral-OCR</span>, der Hinweis geht in den Prompt.');
+  h+=schritt('2 · Vorprüfung & Schleifenschutz',
+    `Klassifizierer aktiv? · trägt das Dokument schon <b>${txt(e.marker_tag)}</b>? → überspringen. `+
+    '<span class=zweig>Manuelle und Paperless-Auslöser umgehen das.</span>');
+  h+=schritt('3 · OCR vor der Analyse — Regeln',
+    `OCR ${an(e.ocr_enabled)}, immer-OCR ${an(e.ocr_always)}. Neu gelesen (${txt(e.ocr_model)}), wenn der Text `+
+    `kürzer als <b>${txt(o.min_zeichen)}</b> Zeichen ist, weniger als <b>${txt(o.min_schluesselwoerter)}</b> bekannte Wörter hat, `+
+    `weniger als ein Wort je <b>${txt(o.max_zeichen_je_wort)}</b> Zeichen oder mehr als <b>${Math.round((o.max_muell_anteil||0)*100)} %</b> Zeichensalat.`);
+  h+=schritt('4 · Pass 0 — Absender & Kandidaten',
+    'Ein kurzer Aufruf zieht nur den Absender aus Titel und Textanfang; per Namensabgleich gegen alle Korrespondenten '+
+    'werden die wahrscheinlichsten Kandidaten samt Kontext an Pass 1 übergeben.');
+  h+=schritt('5 · Pass 1 — Analyse',
+    `Modell <b>${txt(e.model)}</b> (Temperatur ${txt(e.temperature)}), Text bis ${txt(e.content_max_len)} Zeichen. `+
+    `Ein Aufruf entscheidet Korrespondent, Dokumenttyp${e.tagging_enabled?', Tags':''}, Datum`+
+    `${e.summary_field?', Zusammenfassung':''} und je Feld: Wert / leeren / behalten. `+
+    `Prompt ${v.eigener_prompt?'aus der Konfiguration':'eingebaut'} — ${v.typen} Typen, ${v.tags} Tags, ${v.felder} Felder, unten vollständig.`);
+  h+=schritt('6 · OCR-Nachlauf',
+    `Meldet die KI unlesbaren Text (${an(o.nach_ki_meldung)}), fehlt der Typ (${an(o.wenn_kein_typ)}) `+
+    `oder der Korrespondent (${an(o.wenn_kein_korrespondent)}) → OCR und Pass 1 erneut, `+
+    '<span class=zweig>nur wenn in Schritt 3 noch kein OCR lief</span>.');
+  h+=schritt('7 · Zurückschreiben',
+    `Typ, Korrespondent, ${e.tagging_enabled?'Tags, ':''}Datum und Felder nach Paperless; `+
+    `nie angefasst: ${(e.manual_fields||[]).map(txt).join(', ')||'—'}. Marker <b>${txt(e.marker_tag)}</b>`+
+    `${e.redo_tag?`, Auslöser <b>${txt(e.redo_tag)}</b> entfernt`:''}. `+
+    'Lehnt Paperless einen Wert ab, korrigiert die KI in derselben Unterhaltung (mehrere Runden).');
+  h+=`<div class=schritt><div class=t>8 · Nachbearbeitung</div><div class=d>${e.nachbearbeitung?`Skript <b>${txt(e.nachbearbeitung)}</b> bekommt das Ergebnis.`:'<span class=aus>keine eingerichtet</span>'}</div></div>`;
+  h+='<h2>System-Prompt (Pass 1), wie er gesendet wird</h2><pre>'+txt(v.system)+'</pre>';
+  h+='<h2>Nachricht je Dokument (Aufbau)</h2><pre>'+txt(
+    '[NUTZER-HINWEIS — nur beim Auslöser aus Paperless mit Text]\\n'+
+    '[MÖGLICHE KORRESPONDENTEN — Kandidaten aus Pass 0, je mit Kontext]\\n'+
+    '[Mail-Kontext / Absender-Mail — wenn vorhanden]\\n'+
+    'METADATEN: Hinzugefügt am · aktuelles Dokumentdatum · Originaldateiname\\n'+
+    'VERFÜGBARE FELDER: '+(v.ki_felder||[]).join(', ')+'\\n'+
+    'TITEL: …\\n\\nINHALT:\\n… (bis '+e.content_max_len+' Zeichen)')+'</pre>';
+  document.getElementById('z').innerHTML=h;
+}).catch(e=>{document.getElementById('z').textContent='Vorschau nicht verfügbar: '+e.message});
 </script></body></html>"""
 
 
@@ -574,6 +645,27 @@ def trace_seite(doc_id: int, request: Request):
     """
     guard(request)
     return seite(TRACE_PAGE.replace("__ID__", str(int(doc_id))))
+
+
+@app.get("/ablauf", response_class=HTMLResponse)
+def ablauf_seite(request: Request):
+    guard(request)
+    return seite(ABLAUF_PAGE)
+
+
+@app.get("/api/prompt-vorschau")
+def api_prompt_vorschau(request: Request):
+    """Der fertig eingesetzte Prompt gegen den aktuellen Bestand — von classify.py selbst
+    gebaut, damit die Vorschau nie vom tatsaechlich gesendeten Prompt abweicht."""
+    guard(request)
+    env = dict(os.environ)
+    env.update({"CLASSIFY_PROMPT_VORSCHAU": "1", "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK,
+                "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG})
+    try:
+        r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=60)
+        return json.loads(r.stdout)
+    except Exception as e:
+        raise HTTPException(502, f"Vorschau fehlgeschlagen: {e!r}"[:300])
 
 
 @app.get("/api/config")
@@ -897,7 +989,7 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
 .auff.geloest{border-color:#059669;opacity:.55}
 .muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
 </style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><a href="/einstellungen" style="font-size:13px">Einstellungen</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><a href="/einstellungen" style="font-size:13px">Einstellungen</a><a href="/ablauf" style="font-size:13px">Ablauf & Prompt</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
 <div class=wrap>
   <div class=banner id=banner>…</div>
   <div class=cards id=cards></div>

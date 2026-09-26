@@ -75,6 +75,9 @@ Container im selben Docker-Netz, das sich das `scripts/`-Volume teilt:
   repariert / Fehler / übersprungen), ein Aktivitäts-Feed, in dem jede Doc-ID einen
   **Trace-Inspektor** öffnet.
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
+- **Ablauf & Prompt** (`/ablauf`) — jeder Schritt eines Laufs mit den aktuellen Einstellungen und der
+  System-Prompt von Pass 1 genau so, wie er gesendet wird (gebaut von `classify.py` selbst:
+  `CLASSIFY_PROMPT_VORSCHAU=1`).
 - **JSON-API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
   `/api/config` (GET/POST). Eine übergeordnete Plattform kann dieselben Endpunkte konsumieren.
 - **Anmeldung** (`PANEL_AUTH`):

@@ -657,6 +657,74 @@ def baue_system(tpl, types, taglines):
     return system
 
 
+def reservierte_tags(cfg):
+    """Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (normalisiert):
+    die konfigurierten plus Marker-, Unsicher- und Ausloeser-Tag."""
+    reserved = {norm(x) for x in (cfg.get("reserved_tags") or [])}
+    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag"), cfg.get("redo_tag")):
+        if extra:
+            reserved.add(norm(extra))
+    return reserved
+
+
+FELD_ANWEISUNG = (
+    "\nFülle im fields-Objekt JEDES unter VERFÜGBARE FELDER gelistete Feld mit GENAU einer Wahl: "
+    "(a) korrekter Wert passend zum Typ; (b) null = leeren (Feld trifft sicher nicht zu ODER bestehender Wert ist falsch); "
+    "(c) \"BEHALTEN\" = bestehenden Wert unverändert lassen, wenn du unsicher bist. "
+    "Bei Auswahl-Feldern exakt ein gelistetes Label. Zusätzlich document_date 'YYYY-MM-DD' = tatsächliches "
+    "Dokumentdatum (NICHT nur referenzierte Daten); null wenn unklar. "
+    "needs_ocr NUR true, wenn der INHALT wirklich unlesbar ist (Zeichensalat, leer, offensichtlich kaputtes OCR); "
+    "bei knappem, aber lesbarem Text (aus dem du Felder extrahieren konntest) IMMER false.")
+SUMMARY_ANWEISUNG = (
+    "\nGib ausserdem summary = TLDR, Länge an das Dokument angepasst: Rechnung/Beleg/kurzer Bescheid → 1 knapper Satz; "
+    "Vertrag/Brief → 2-3 Sätze; langer Bericht → 4-6 Sätze. Keine Floskeln, direkt zur Sache.")
+
+
+def pass1_system(cfg, types, tags_all, reserved, mit_summary):
+    """Der System-Prompt von Pass 1, genau so, wie er an das Modell geht.
+
+    Eine Funktion fuer den Lauf UND die Vorschau im Panel: zeigte die Vorschau einen selbst
+    nachgebauten Prompt, saehe man dort etwas anderes als das, was die KI bekommt.
+    """
+    if cfg.get("tagging_enabled"):
+        td = {**TAG_DESC, **(cfg.get("tag_descriptions") or {})}
+        taglines = "\n".join(f"- {t['name']}: {td.get(t['name'], t['name'])}"
+                             for t in tags_all if norm(t["name"]) not in reserved)
+    else:
+        taglines = None
+    tpl = cfg.get("system_prompt") or DEFAULT_PROMPT
+    system = baue_system(tpl, types, taglines)
+    if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
+        system += FELD_ANWEISUNG
+    if mit_summary:
+        system += SUMMARY_ANWEISUNG
+    return system
+
+
+def prompt_vorschau():
+    """Fuer das Panel: der fertig eingesetzte System-Prompt gegen den aktuellen Bestand,
+    plus die Einstellungen, die den Ablauf steuern. Liest nur, schreibt nichts."""
+    types = {t["name"]: t["id"] for t in get("/document_types/?page_size=1000")["results"]}
+    tags_all = get("/tags/?page_size=1000")["results"]
+    cfields = get("/custom_fields/?page_size=200")["results"]
+    summary_fid = resolve_field(cfields, CFG["summary_field"])
+    return {
+        "system": pass1_system(CFG, types, tags_all, reservierte_tags(CFG), bool(summary_fid)),
+        "eigener_prompt": bool(CFG.get("system_prompt")),
+        "typen": len(types), "tags": len(tags_all), "felder": len(cfields),
+        "ki_felder": [f["name"] for f in cfields
+                      if f["id"] != summary_fid and f["name"] not in (CFG.get("manual_fields") or [])
+                      and f.get("data_type") != "documentlink"
+                      and norm(f["name"]) not in {norm(CFG.get(k) or "") for k in
+                                                   ("hinweis_field", "mail_context_field", "mail_from_field")}],
+        "einstellungen": {k: CFG.get(k) for k in (
+            "model", "ocr_model", "temperature", "content_max_len", "ocr_enabled", "ocr_always",
+            "tagging_enabled", "marker_tag", "unsicher_tag", "redo_tag", "summary_field",
+            "hinweis_field", "manual_fields", "nachbearbeitung")},
+        "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
+    }
+
+
 def resolve_field(cfields, name):
     if not name:
         return None
@@ -693,11 +761,7 @@ def main():
         log(f"skip {did}: schon klassifiziert (Marker '{CFG['marker_tag']}')"); return
     mark_running(did, "Start")
 
-    # RESERVED: konfigurierte reserved_tags + Marker/Unsicher/Redo (nie vergeben, immer erhalten)
-    reserved = {norm(x) for x in (CFG.get("reserved_tags") or [])}
-    for extra in (CFG["marker_tag"], CFG["unsicher_tag"], CFG["redo_tag"]):
-        if extra:
-            reserved.add(norm(extra))
+    reserved = reservierte_tags(CFG)
 
     # --- OCR-Rescue: schwacher/Müll-Text → Mistral-OCR ---
     ocr_note = ""
@@ -824,28 +888,8 @@ def main():
             f"- Aktuelles Dokumentdatum (evtl. falsch): {(doc.get('created') or '')[:10]}\n"
             f"- Originaldateiname: {doc.get('original_file_name') or '—'}\n")
 
-    # Tag-Liste nur wenn Tagging aktiv
-    if CFG["tagging_enabled"]:
-        TD = {**TAG_DESC, **(CFG.get("tag_descriptions") or {})}
-        taglines = "\n".join(f"- {t['name']}: {TD.get(t['name'], t['name'])}"
-                             for t in tags_all if norm(t["name"]) not in reserved)
-    else:
-        taglines = None
-
     set_stage(did, "Pass 1")
-    tpl = CFG.get("system_prompt") or DEFAULT_PROMPT
-    system = baue_system(tpl, types, taglines)
-    if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
-        system += ("\nFülle im fields-Objekt JEDES unter VERFÜGBARE FELDER gelistete Feld mit GENAU einer Wahl: "
-                   "(a) korrekter Wert passend zum Typ; (b) null = leeren (Feld trifft sicher nicht zu ODER bestehender Wert ist falsch); "
-                   "(c) \"BEHALTEN\" = bestehenden Wert unverändert lassen, wenn du unsicher bist. "
-                   "Bei Auswahl-Feldern exakt ein gelistetes Label. Zusätzlich document_date 'YYYY-MM-DD' = tatsächliches "
-                   "Dokumentdatum (NICHT nur referenzierte Daten); null wenn unklar. "
-                   "needs_ocr NUR true, wenn der INHALT wirklich unlesbar ist (Zeichensalat, leer, offensichtlich kaputtes OCR); "
-                   "bei knappem, aber lesbarem Text (aus dem du Felder extrahieren konntest) IMMER false.")
-    if summary_fid:
-        system += ("\nGib ausserdem summary = TLDR, Länge an das Dokument angepasst: Rechnung/Beleg/kurzer Bescheid → 1 knapper Satz; "
-                   "Vertrag/Brief → 2-3 Sätze; langer Bericht → 4-6 Sätze. Keine Floskeln, direkt zur Sache.")
+    system = pass1_system(CFG, types, tags_all, reserved, bool(summary_fid))
     user_msg = (f"{hint_block}{corr_hint_block}{kand_block}{mail_block}{meta}\n"
                 f"VERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n{fieldspec}\n\n"
                 f"TITEL: {title}\n\nINHALT:\n{content[:CFG['content_max_len']]}")
@@ -1014,6 +1058,9 @@ def main():
 # Nur beim direkten Aufruf ausführen (Post-Consume / manuell / Panel). So bleibt das Modul
 # importierbar — die Tests prüfen die reinen Hilfsfunktionen, ohne main() oder sys.exit auszulösen.
 if __name__ == "__main__":
+    if os.environ.get("CLASSIFY_PROMPT_VORSCHAU") == "1":
+        print(json.dumps(prompt_vorschau(), ensure_ascii=False))
+        sys.exit(0)
     if os.environ.get("CLASSIFY_DUMP_DEFAULTS") == "1":
         print(json.dumps({"system_prompt": DEFAULT_PROMPT, "tag_descriptions": TAG_DESC,
                           "model": CFG["model"], "ocr_model": CFG["ocr_model"], "ocr_min_len": CFG["ocr_min_len"],
