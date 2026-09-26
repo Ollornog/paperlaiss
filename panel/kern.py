@@ -45,25 +45,6 @@ def doc_id_aus_webhook(rohtext):
     return None
 
 
-def doc_hat_sich_geaendert(vorschlag, doc):
-    """Hat sich das Dokument seit der Erzeugung des Vorschlags geaendert?
-
-    Ohne diese Pruefung ueberschreibt ein alter Vorschlag stillschweigend eine Korrektur, die
-    jemand zwischenzeitlich von Hand gemacht hat. Verglichen wird der `modified`-Zeitstempel;
-    fehlt er auf einer der beiden Seiten, die inhaltlichen Felder.
-    """
-    stand = vorschlag.get("stand") or {}
-    if stand.get("modified") and doc.get("modified"):
-        return stand["modified"] != doc["modified"]
-    jetzt = {"title": doc.get("title"), "correspondent": doc.get("correspondent"),
-             "document_type": doc.get("document_type"), "created": (doc.get("created") or "")[:10],
-             "tags": sorted(doc.get("tags") or [])}
-    vorher = {k: stand.get(k) for k in jetzt}
-    vorher["tags"] = sorted(vorher.get("tags") or [])
-    vorher["created"] = (vorher.get("created") or "")[:10]
-    return jetzt != vorher
-
-
 # Felder des Korrespondent-Stores, die beim Zusammenführen als Liste behandelt werden:
 # hier gehen Werte nicht verloren, sondern werden vereinigt.
 LISTENFELDER = ("domains", "aliase")

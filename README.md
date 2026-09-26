@@ -125,6 +125,7 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 | `enabled` | `true` | classifier on/off |
 | `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral models |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour |
+| `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |
 | `tagging_enabled` | `false` | AI assigns content tags (off: type/correspondent/fields only) |
 | `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal |
 | `unsicher_tag` / `redo_tag` | – | optional flag / redo tags (by name) |
@@ -133,6 +134,29 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |
 | `api_key_text` / `api_key_ocr` | – | empty = `MISTRAL_KEY` from the environment |
+
+### OCR fallback (`ocr_regeln`)
+
+Two gates decide whether a document is re-read by Mistral OCR:
+
+1. **Before the analysis — rules.** OCR runs if the text is shorter than `min_zeichen`
+   (default: `ocr_min_len`), contains fewer than `min_schluesselwoerter` of `schluesselwoerter`,
+   has fewer than one real word per `max_zeichen_je_wort` characters, or more than
+   `max_muell_anteil` of its visible characters are neither letters, digits nor ordinary
+   punctuation.
+2. **After the analysis — the AI and optional rules.** If the model reports unreadable text
+   (`nach_ki_meldung`, default on) or — when switched on — found no document type
+   (`wenn_kein_typ`) or no correspondent (`wenn_kein_korrespondent`), the document is read by
+   OCR and analysed again in the same conversation. Only if no OCR ran before, so a document is
+   never paid for twice.
+
+**Re-classifying from Paperless** (redo tag or hint field) always runs OCR. The reasons end up in
+the trace.
+
+```json
+"ocr_regeln": {"min_schluesselwoerter": 2, "max_muell_anteil": 0.25,
+               "nach_ki_meldung": true, "wenn_kein_typ": false}
+```
 
 ## Development
 

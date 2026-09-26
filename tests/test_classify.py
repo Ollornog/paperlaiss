@@ -43,6 +43,86 @@ _gut = ("Sehr geehrte Frau Muster, anbei die Rechnung Nummer 4711 mit Datum und 
         "Strasse. Mit freundlichen Grüßen, die Buchhaltung der Firma. " * 4)
 r.check("bad_ocr: brauchbarer Text ist nicht schlecht", classify.bad_ocr(_gut) is False)
 
+# ---- ocr_gruende(): das Regel-Gate VOR Pass 1, einstellbar über "ocr_regeln".
+_cfg = {"ocr_min_len": 300}
+r.check("OCR-Regel: brauchbarer Text → keine Gründe", classify.ocr_gruende(_gut, _cfg) == [])
+r.check("OCR-Regel: zu kurz nennt die Länge", classify.ocr_gruende("Rechnung", _cfg)[0].startswith("zu kurz"))
+_salat = ("Rechnung Datum Betrag " + "§$~^{}\\|~^°¬¦ ~^{}~^ " * 40)
+r.check("OCR-Regel: Zeichensalat erkannt",
+        any("Zeichensalat" in g for g in classify.ocr_gruende(_salat, _cfg)), str(classify.ocr_gruende(_salat, _cfg)))
+r.check("OCR-Regel: fremdsprachiger, sauberer Text ohne Schlüsselwörter → Grund Schlüsselwörter",
+        any("bekannte" in g for g in classify.ocr_gruende("Lorem ipsum dolor sit amet consectetur " * 12, _cfg)))
+r.check("OCR-Regel: Schwelle aus der Config", classify.ocr_gruende(
+    "Rechnung Datum Betrag " * 3, {"ocr_min_len": 300, "ocr_regeln": {"min_zeichen": 10}}) == [])
+r.check("OCR-Regel: eigene Schlüsselwörter", classify.ocr_gruende(
+    "Lorem ipsum dolor sit amet consectetur " * 12,
+    {"ocr_min_len": 300, "ocr_regeln": {"schluesselwoerter": ["lorem", "dolor"]}}) == [])
+r.check("OCR-Regel: altes ocr_min_len gilt weiter, wenn min_zeichen fehlt",
+        classify.ocr_regeln({"ocr_min_len": 123})["min_zeichen"] == 123)
+
+# ---- ocr_nachhol_gruende(): das Gate NACH Pass 1 — KI-Meldung und optionale Regeln.
+r.check("OCR-Nachlauf: KI meldet Müll", classify.ocr_nachhol_gruende({"needs_ocr": True}, {}) == ["KI meldet unlesbaren Text"])
+r.check("OCR-Nachlauf: KI-Meldung abschaltbar",
+        classify.ocr_nachhol_gruende({"needs_ocr": True}, {"ocr_regeln": {"nach_ki_meldung": False}}) == [])
+r.check("OCR-Nachlauf: kein Typ zählt nur, wenn eingeschaltet",
+        classify.ocr_nachhol_gruende({"document_type": None}, {}) == []
+        and classify.ocr_nachhol_gruende({"document_type": None}, {"ocr_regeln": {"wenn_kein_typ": True}}) == ["kein Dokumenttyp erkannt"])
+r.check("OCR-Nachlauf: kein Korrespondent, wenn eingeschaltet",
+        classify.ocr_nachhol_gruende({"correspondent": ""}, {"ocr_regeln": {"wenn_kein_korrespondent": True}}) == ["kein Korrespondent erkannt"])
+r.check("OCR-Nachlauf: alles erkannt → nichts", classify.ocr_nachhol_gruende(
+    {"document_type": "Rechnung", "correspondent": "X", "needs_ocr": False},
+    {"ocr_regeln": {"wenn_kein_typ": True, "wenn_kein_korrespondent": True}}) == [])
+
+# ---- Verdrahtung: main() fuehrt den OCR-Nachlauf WIRKLICH aus. Der alte Zweig war unerreichbar
+# und fiel in keinem Test auf, weil nur die Hilfsfunktionen geprueft wurden. Hier laeuft main()
+# gegen gefaelschte Paperless- und Mistral-Aufrufe (Trockenlauf, nichts wird geschrieben).
+import contextlib as _ctx, io as _io
+
+
+def _lauf(chat_antworten, force_ocr=False, text=_gut):
+    aufrufe = {"ocr": 0, "chat": []}
+    routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
+                                "custom_fields": [], "created": "2026-01-01"},
+              "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}]},
+              "/correspondents/": {"results": []}, "/custom_fields/": {"results": []}}
+
+    def get(pfad, raw=False):
+        return next(v for k, v in routen.items() if pfad.startswith(k))
+
+    def ocr(did):
+        aufrufe["ocr"] += 1
+        return "Neu gelesener Text " * 10
+    antworten = list(chat_antworten)
+
+    def chat(messages, max_tokens=900):
+        aufrufe["chat"].append(messages[-1]["content"])
+        return dict(antworten.pop(0)), "{}"
+    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR")}
+    classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
+    classify.mistral = lambda *a, **k: {}
+    classify.TOK, classify.DRY, classify.FORCE_OCR = "x", True, force_ocr
+    os.environ["CLASSIFY_DOC"] = "5"
+    try:
+        with _ctx.redirect_stdout(_io.StringIO()):
+            classify.main()
+    finally:
+        for n, v in alt.items():
+            setattr(classify, n, v)
+        os.environ.pop("CLASSIFY_DOC", None)
+    return aufrufe
+
+
+_ok = {"document_type": "Rechnung", "correspondent": "X", "fields": {}, "needs_ocr": False}
+_a = _lauf([{**_ok, "needs_ocr": True}, _ok])
+r.check("Verdrahtung: KI meldet Müll → genau ein OCR-Nachlauf", _a["ocr"] == 1, str(_a["ocr"]))
+r.check("Verdrahtung: danach Pass 1 erneut mit dem OCR-Text",
+        len(_a["chat"]) == 2 and "per OCR neu gelesene" in _a["chat"][1], str(len(_a["chat"])))
+_b = _lauf([_ok])
+r.check("Verdrahtung: alles lesbar → kein OCR", _b["ocr"] == 0 and len(_b["chat"]) == 1)
+_c = _lauf([{**_ok, "needs_ocr": True}], force_ocr=True)
+r.check("Verdrahtung: OCR lief schon vor Pass 1 → kein zweites Mal", _c["ocr"] == 1 and len(_c["chat"]) == 1,
+        f"ocr={_c['ocr']} chat={len(_c['chat'])}")
+
 # ---- is_null(): die vielen Schreibweisen von „leer"
 r.check("is_null: None", classify.is_null(None) is True)
 r.check("is_null: Leerstring", classify.is_null("  ") is True)

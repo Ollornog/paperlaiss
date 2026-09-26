@@ -26,8 +26,6 @@ Env-Schalter:
   CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
-  CLASSIFY_PROPOSE=1           nichts schreiben, sondern einen VORSCHLAG ablegen
-                               (proposals/<id>.json; Panel nimmt an oder verwirft)
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
   CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
@@ -45,7 +43,6 @@ CONFIG = os.environ.get("CLASSIFY_CONFIG", os.path.join(SCRIPT_DIR, "classify-co
 DRY = os.environ.get("CLASSIFY_DRY") == "1"
 FORCE = os.environ.get("CLASSIFY_FORCE") == "1"
 FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
-PROPOSE = os.environ.get("CLASSIFY_PROPOSE") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
@@ -175,7 +172,6 @@ if _CFG_FEHLER:
 
 TRACE_DIR = os.path.join(os.path.dirname(LOG), "traces")
 RUN_DIR = os.path.join(os.path.dirname(LOG), "running")
-PROP_DIR = os.path.join(os.path.dirname(LOG), "proposals")
 TRACE = {}
 
 
@@ -228,7 +224,7 @@ def nachbearbeiten(did, patch, erfolg, lesbar):
 
     Das Skript bekommt auf stdin:
       {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…}, "quelle": "redo",
-       "dry": false, "vorschlag": false}
+       "dry": false}
     Es laeuft mit denselben Umgebungsvariablen (PAPERLESS_TOKEN, PAPERLESS_API …), kann also
     selbst die API benutzen. Seine Ausgabe geht ins Log.
 
@@ -244,7 +240,7 @@ def nachbearbeiten(did, patch, erfolg, lesbar):
         return
     eingabe = json.dumps({"doc_id": int(did), "erfolg": bool(erfolg), "patch": patch,
                           "lesbar": lesbar, "quelle": SOURCE or "auto",
-                          "dry": DRY, "vorschlag": PROPOSE}, ensure_ascii=False)
+                          "dry": DRY}, ensure_ascii=False)
     try:
         r = subprocess.run([sys.executable, skript], input=eingabe, text=True,
                            capture_output=True, timeout=120, env=os.environ.copy())
@@ -258,47 +254,6 @@ def nachbearbeiten(did, patch, erfolg, lesbar):
         log(f"nachbearbeitung-timeout {did}: {skript} nach 120 s abgebrochen")
     except Exception as e:
         log(f"nachbearbeitung-fail {did}: {e!r}")
-
-
-def speichere_vorschlag(did, patch, doc, lesbar, hinweis=""):
-    """Den geplanten Patch ablegen, statt ihn zu schreiben.
-
-    Der Vorschlag traegt drei Dinge, die beim Annehmen gebraucht werden:
-      patch    — was geschrieben wuerde, unveraendert uebernehmbar
-      lesbar   — dieselben Angaben mit Namen statt IDs, fuer die Anzeige
-      stand    — der Dokumentstand bei der Erzeugung. Beim Annehmen wird geprueft, ob sich
-                 das Dokument seither geaendert hat; sonst ueberschreibt ein alter Vorschlag
-                 stillschweigend eine zwischenzeitliche Korrektur von Hand.
-
-    Gibt den Pfad zurueck oder None, wenn nichts geschrieben werden konnte.
-    """
-    if not did:
-        return None
-    try:
-        os.makedirs(PROP_DIR, exist_ok=True)
-        pfad = os.path.join(PROP_DIR, f"{did}.json")
-        schreibe_json(pfad, {
-            "id": int(did),
-            "ts": f"{datetime.datetime.now():%F %T}",
-            "quelle": SOURCE or "manual",
-            "hinweis": hinweis,
-            "patch": patch,
-            "lesbar": lesbar,
-            "stand": {
-                "modified": doc.get("modified"),
-                "title": doc.get("title"),
-                "correspondent": doc.get("correspondent"),
-                "document_type": doc.get("document_type"),
-                "created": (doc.get("created") or "")[:10],
-                "tags": sorted(doc.get("tags") or []),
-                "custom_fields": {str(c["field"]): c.get("value")
-                                  for c in (doc.get("custom_fields") or [])},
-            },
-        })
-        return pfad
-    except Exception as e:
-        log(f"vorschlag-fail {did}: {e!r}")
-        return None
 
 
 def mark_running(did, stage="Start"):
@@ -384,17 +339,69 @@ def ctoks(s):
     return [w for w in norm(s).split() if w and w not in LEGAL]
 
 
-def bad_ocr(content):
+# Regeln, nach denen ein Text als zu schwach gilt und per OCR neu gelesen wird. Einstellbar
+# unter "ocr_regeln" in der Config; fehlende Schluessel nehmen diese Vorgaben.
+OCR_REGELN_VORGABE = {
+    "min_zeichen": None,              # None = ocr_min_len (aeltere Configs)
+    "min_schluesselwoerter": 2,       # so viele Allerweltswoerter muessen vorkommen …
+    "schluesselwoerter": [t.strip() for t in TOKENS],
+    "max_zeichen_je_wort": 40,        # … und auf so viele Zeichen mindestens ein echtes Wort
+    "max_muell_anteil": 0.25,         # Anteil von Zeichen, die in keinem Text vorkommen (Zeichensalat)
+    # Nach Pass 1 (die KI hat den Text gesehen):
+    "nach_ki_meldung": True,          # KI meldet needs_ocr → OCR nachholen, Pass 1 wiederholen
+    "wenn_kein_typ": False,           # kein Dokumenttyp erkannt → ebenso
+    "wenn_kein_korrespondent": False, # kein Korrespondent erkannt → ebenso
+}
+_NORMALE_ZEICHEN = set(".,:;-–/()[]€$%&+'\"!?#*_@=<>|§°")
+
+
+def ocr_regeln(cfg):
+    r = {**OCR_REGELN_VORGABE, **(cfg.get("ocr_regeln") or {})}
+    if r["min_zeichen"] is None:
+        r["min_zeichen"] = cfg.get("ocr_min_len", 300)
+    return r
+
+
+def ocr_gruende(content, cfg):
+    """Warum der Text vor Pass 1 per OCR neu gelesen werden soll — leer heisst: gar nicht.
+
+    Die Gruende statt eines Ja/Nein, weil genau das im Trace stehen muss: „Text zu kurz"
+    fuehrt zu einer anderen Frage als „60 % Zeichensalat".
+    """
+    r = ocr_regeln(cfg)
     c = (content or "").strip()
-    if len(c) < CFG["ocr_min_len"]:
-        return True
+    if len(c) < r["min_zeichen"]:
+        return [f"zu kurz ({len(c)} < {r['min_zeichen']} Zeichen)"]
+    gruende = []
     cl = c.lower()
-    if sum(1 for t in TOKENS if t in cl) < 2:
-        return True
-    words = re.findall(r"[a-zA-ZäöüÄÖÜß]{3,}", c)
-    if len(words) < len(c) / 40:
-        return True
-    return False
+    treffer = sum(1 for t in r["schluesselwoerter"] if t and t.lower() in cl)
+    if treffer < r["min_schluesselwoerter"]:
+        gruende.append(f"zu wenig bekannte Wörter ({treffer} < {r['min_schluesselwoerter']})")
+    woerter = re.findall(r"[a-zA-ZäöüÄÖÜß]{3,}", c)
+    if len(woerter) < len(c) / r["max_zeichen_je_wort"]:
+        gruende.append(f"zu wenig Wörter ({len(woerter)} auf {len(c)} Zeichen)")
+    sichtbar = [z for z in c if not z.isspace()]
+    muell = sum(1 for z in sichtbar if not z.isalnum() and z not in _NORMALE_ZEICHEN)
+    if sichtbar and muell / len(sichtbar) > r["max_muell_anteil"]:
+        gruende.append(f"Zeichensalat ({muell * 100 // len(sichtbar)} % Sonderzeichen)")
+    return gruende
+
+
+def ocr_nachhol_gruende(prop, cfg):
+    """Warum nach Pass 1 doch noch OCR laufen soll: die KI meldet Muell, oder eine Regel greift."""
+    r = ocr_regeln(cfg)
+    gruende = []
+    if r["nach_ki_meldung"] and prop.get("needs_ocr"):
+        gruende.append("KI meldet unlesbaren Text")
+    if r["wenn_kein_typ"] and not prop.get("document_type"):
+        gruende.append("kein Dokumenttyp erkannt")
+    if r["wenn_kein_korrespondent"] and not prop.get("correspondent"):
+        gruende.append("kein Korrespondent erkannt")
+    return gruende
+
+
+def bad_ocr(content):
+    return bool(ocr_gruende(content, CFG))
 
 
 # Themen-Tag-Beschreibungen (nur relevant wenn tagging_enabled). Primär via Config gepflegt.
@@ -696,8 +703,13 @@ def main():
     ocr_note = ""
     set_stage(did, "OCR-Rescue")
     TRACE["ocr"] = {"triggered": False, "grund": "Text ausreichend"}
-    if CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or bad_ocr(content)):
-        grund = "manuell erzwungen" if FORCE_OCR else ("immer-OCR" if CFG["ocr_always"] else "Text schwach/kurz")
+    vorher = ocr_gruende(content, CFG)
+    ocr_versucht = False
+    if CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or vorher):
+        ocr_versucht = True
+        grund = ("neu klassifizieren aus Paperless" if FORCE_OCR and SOURCE == "redo"
+                 else "manuell erzwungen" if FORCE_OCR else "immer-OCR" if CFG["ocr_always"]
+                 else "; ".join(vorher))
         try:
             new = mistral_ocr(did)
             if FORCE_OCR or CFG["ocr_always"] or len(new) > max(len(content), 40) * 1.1 or (len(content) < 40 and len(new) > 40):
@@ -840,18 +852,38 @@ def main():
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200)
 
-    # Wenn die KI needs_ocr meldet, ist das eine DIAGNOSE, keine Aktion mehr.
-    # Bis 2026-09-21 stand hier ein zweiter OCR-Lauf, der nie stattfand: die Bedingung verlangte
-    # bad_ocr(content) UND not TRACE["ocr"]["triggered"] — der Rescue oben laeuft aber genau bei
-    # bad_ocr(content) und setzt triggered in ALLEN Ausgaengen (Erfolg, verworfen, Fehler).
-    # Beides zugleich ist unerreichbar; ein Durchlauf ueber alle 256 Flag-Kombinationen fand 0 Treffer,
-    # und in 931 produktiven Laeufen hat der Zweig kein einziges Mal gefeuert.
-    # Er waere auch redundant: der Rescue ersetzt den Text VOR Pass 1, die KI sieht ihn also nie roh.
-    # Statt einer toten Aktion steht der Widerspruch jetzt im Trace — sichtbar in der Panel-Ansicht,
-    # ohne einen zweiten teuren Modell- und OCR-Aufruf auszuloesen.
-    if prop.get("needs_ocr"):
-        TRACE["ocr"]["ki_meldet_unlesbar"] = True
-        TRACE["ocr"]["heuristik_stimmt_zu"] = bad_ocr(content)
+    # OCR-Nachlauf: die KI hat den Text gesehen und haelt ihn fuer Muell (oder eine Regel nach
+    # Pass 1 greift). Dann einmal per OCR neu lesen und Pass 1 in DERSELBEN Unterhaltung
+    # wiederholen. Nur, wenn vor Pass 1 noch kein OCR lief — sonst zahlte man zweimal fuer
+    # dasselbe Dokument. (Bis 2026-09-27 stand hier nur eine Meldung: der alte Zweig war
+    # unerreichbar, weil er denselben Schalter pruefte, den der Lauf davor immer setzte.)
+    nachher = ocr_nachhol_gruende(prop, CFG)
+    if nachher:
+        TRACE["ocr"]["nach_pass1"] = nachher
+    if nachher and not ocr_versucht and CFG["ocr_enabled"] and not NO_OCR:
+        set_stage(did, "OCR-Nachlauf")
+        try:
+            new = mistral_ocr(did)
+            if len(new) > 40:
+                if not DRY:
+                    send(f"/documents/{did}/", {"content": new}, "PATCH")
+                content = new
+                ocr_note = (ocr_note + " " if ocr_note else "") + f"OCR-nachgeholt({len(new)})"
+                TRACE["ocr"].update({"triggered": True, "grund": "nach Pass 1: " + "; ".join(nachher),
+                                     "chars": len(new), "excerpt": new[:600]})
+                log(f"OCR-nachgeholt {did}: {'; '.join(nachher)} → {len(new)} Zeichen")
+                messages.append({"role": "assistant", "content": assistant_raw})
+                messages.append({"role": "user", "content":
+                    "Der Text war unbrauchbar. Hier der per OCR neu gelesene INHALT:\n"
+                    f"{new[:CFG['content_max_len']]}\n"
+                    "Gib die vollständige Analyse (alle Felder, summary, document_date, correspondent, "
+                    "tags) mit diesem Text erneut."})
+                prop, assistant_raw = mistral_chat(messages, 1200)
+            else:
+                TRACE["ocr"]["nachlauf_verworfen"] = f"OCR lieferte nur {len(new)} Zeichen"
+        except Exception as e:
+            TRACE["ocr"]["nachlauf_fehler"] = repr(e)
+            log(f"OCR-nachgeholt-fail {did}: {e!r}")
     TRACE["pass1"] = {"system": system, "user": user_msg[:4000], "response": prop}
 
     # --- Korrespondent-Feedback-Loop ---
@@ -937,11 +969,8 @@ def main():
         patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
     code_flds = {}
-    if hinweis_fid and hinweis and not PROPOSE:
+    if hinweis_fid and hinweis:
         # Nutzer-Hinweis nach Gebrauch entfernen, sonst feuert der Redo-Trigger erneut.
-        # Im Vorschlagsmodus NICHT: dort raeumt der Anstoss (das Panel) Tag und Feld, bevor
-        # der Lauf startet. Wuerde der Lauf es tun, bliebe der Ausloeser bei einem verworfenen
-        # Vorschlag stehen und das naechste Update am Dokument feuerte erneut.
         code_flds[hinweis_fid] = None
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
@@ -949,29 +978,6 @@ def main():
                           "new_tags": new_tags, "correspondent": corr_info,
                           "fields_ki": field_log, "summary": summary,
                           "document_date": patch.get("created"), "date_change": date_note}
-
-    if PROPOSE:
-        # Vorschlagsmodus: nichts schreiben, sondern ablegen. Keine Reparaturschleife —
-        # die braucht eine echte Antwort von Paperless, und die gibt es erst beim Annehmen.
-        lesbar = {
-            "titel": doc.get("title"),
-            "dokumenttyp": dt,
-            "korrespondent": corr_info,
-            "tags": [tagname_by_id.get(i) for i in tag_ids],
-            "neue_tags": new_tags,
-            "felder": field_log,
-            "zusammenfassung": summary,
-            "datum": date_note,
-        }
-        pfad = speichere_vorschlag(did, patch, doc, lesbar, hinweis)
-        TRACE["writeback"]["modus"] = "vorschlag"
-        TRACE["_stage"] = "vorschlag abgelegt"
-        save_trace(did)
-        unmark_running(did)
-        log(f"VORSCHLAG {did} | {corr_info} | typ={dt} | felder={len(field_log)}"
-            + (f" | hinweis='{hinweis[:40]}'" if hinweis else "")
-            + ("" if pfad else " | ABLAGE FEHLGESCHLAGEN"))
-        return
 
     ok, err = patch_doc(did, patch)
     TRACE["repair"] = []; rounds = 0

@@ -39,31 +39,6 @@ r.check("Webhook: leerer Rumpf ergibt None", kern.doc_id_aus_webhook("") is None
 r.check("Webhook: Unsinn ergibt None statt Absturz",
         kern.doc_id_aus_webhook("{{{ kaputt") is None)
 
-# ---- doc_hat_sich_geaendert(): schützt davor, dass ein alter Vorschlag eine zwischenzeitliche
-# Handkorrektur stillschweigend überschreibt.
-_V = {"stand": {"modified": "2026-09-21T01:00:00Z", "title": "Rechnung",
-                "correspondent": 5, "document_type": 2, "created": "2026-05-02", "tags": [1, 2]}}
-
-r.check("Abgleich: gleicher Zeitstempel = unverändert",
-        kern.doc_hat_sich_geaendert(_V, {"modified": "2026-09-21T01:00:00Z"}) is False)
-r.check("Abgleich: anderer Zeitstempel = geändert",
-        kern.doc_hat_sich_geaendert(_V, {"modified": "2026-09-21T02:00:00Z"}) is True)
-
-# Ohne modified-Zeitstempel wird inhaltlich verglichen.
-_ohne = {"stand": {k: v for k, v in _V["stand"].items() if k != "modified"}}
-_gleich = {"title": "Rechnung", "correspondent": 5, "document_type": 2,
-           "created": "2026-05-02T00:00:00Z", "tags": [2, 1]}
-r.check("Abgleich ohne Zeitstempel: gleicher Inhalt (Tag-Reihenfolge egal)",
-        kern.doc_hat_sich_geaendert(_ohne, _gleich) is False)
-r.check("Abgleich ohne Zeitstempel: anderer Korrespondent = geändert",
-        kern.doc_hat_sich_geaendert(_ohne, {**_gleich, "correspondent": 9}) is True)
-r.check("Abgleich ohne Zeitstempel: neuer Tag = geändert",
-        kern.doc_hat_sich_geaendert(_ohne, {**_gleich, "tags": [1, 2, 3]}) is True)
-
-# Ein Vorschlag ohne Stand ist nicht vertrauenswürdig — im Zweifel „geändert".
-r.check("Abgleich: Vorschlag ohne Stand gilt als geändert",
-        kern.doc_hat_sich_geaendert({}, _gleich) is True)
-
 # ---- merge_metadaten(): zwei Korrespondenten zusammenführen, ohne Kundendaten zu verlieren.
 #
 # Die Namen sind NEUTRAL (RFC 2606, `.example`), nicht aus einem echten Mandanten.

@@ -20,10 +20,10 @@ ENV:
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
 """
 import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, urllib.request, urllib.error
-from fastapi import FastAPI, Request, UploadFile, File, Form, Header, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
-from kern import (auffaelligkeiten, auth_einstellungen, config_uebernehmen, doc_hat_sich_geaendert,
+from kern import (auffaelligkeiten, auth_einstellungen, config_uebernehmen,
                   doc_id_aus_webhook, feld_typ, merge_metadaten, verlauf)
 
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
@@ -96,7 +96,6 @@ def schreibe_json(pfad, daten):
         raise
 
 
-PROP_DIR = os.path.join(os.path.dirname(LOG), "proposals")
 # Eigenes Geheimnis fuer den Webhook — NICHT PANEL_TOKEN. Regel: ein Geheimnis, ein Bereich.
 # Wer den Webhook kennt, soll damit nicht die Panel-API bedienen koennen.
 REDO_SECRET = os.environ.get("REDO_SECRET", "")
@@ -109,25 +108,12 @@ def _cfg():
         return {}
 
 
-def lade_vorschlaege():
-    """Alle abgelegten Vorschlaege, neueste zuerst."""
-    out = []
-    for pfad in glob.glob(os.path.join(PROP_DIR, "*.json")):
-        try:
-            out.append(json.load(open(pfad, encoding="utf-8")))
-        except Exception:
-            continue          # eine kaputte Datei darf die Liste nicht sprengen
-    out.sort(key=lambda v: v.get("ts", ""), reverse=True)
-    return out
-
-
 def raeume_ausloeser(doc_id, doc=None):
-    """Ausloeser-Tag und Hinweisfeld entfernen — der Schleifenschutz des Vorschlagsmodus.
+    """Ausloeser-Tag und Hinweisfeld entfernen, BEVOR der Lauf startet — der Schleifenschutz.
 
-    Im Direktmodus macht das der Klassifizierer beim Schreiben. Im Vorschlagsmodus schreibt er
-    nicht, also muss der ANSTOSS raeumen: sonst bleiben Tag und Feld stehen, und jedes weitere
-    Update am Dokument loest den Webhook erneut aus. Gibt den gelesenen Hinweistext zurueck,
-    damit er nicht verloren geht.
+    Der Lauf dauert mit OCR leicht eine Minute. Stuenden Tag und Feld so lange noch am Dokument,
+    loeste jede Bearbeitung in dieser Zeit den Webhook erneut aus. Gibt den gelesenen Hinweistext
+    zurueck, damit er dem Lauf mitgegeben werden kann.
     """
     cfg = _cfg()
     doc = doc or api_get(f"/documents/{doc_id}/")
@@ -280,7 +266,7 @@ def running_jobs():
 
 
 # ---------- classify.py Re-Trigger ----------
-def run_classify(doc, force=True, force_ocr=False, source="manual", propose=False, hinweis=""):
+def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis=""):
     env = dict(os.environ)
     env.update({"CLASSIFY_DOC": str(doc), "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK,
                 "MISTRAL_KEY": MISTRAL_KEY, "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG,
@@ -289,8 +275,6 @@ def run_classify(doc, force=True, force_ocr=False, source="manual", propose=Fals
         env["CLASSIFY_FORCE"] = "1"
     if force_ocr:
         env["CLASSIFY_FORCE_OCR"] = "1"
-    if propose:
-        env["CLASSIFY_PROPOSE"] = "1"
     if hinweis:
         env["CLASSIFY_HINWEIS"] = hinweis
     try:
@@ -353,17 +337,18 @@ async def reclassify(request: Request):
     return {"ok": rc == 0, "doc": doc, "mode": mode, "output": out[-1500:]}
 
 
-# ---------- Vorschlagsmodus ----------
+# ---------- Neu klassifizieren aus Paperless ----------
 # Die reine Logik steht in kern.py — dort ist sie ohne FastAPI testbar.
 
 
-@app.post("/redo")
-async def redo(request: Request, x_redo_secret: str = Header(None)):
-    """Webhook-Ziel fuer den Paperless-Workflow: erzeugt einen VORSCHLAG statt zu schreiben.
+@app.post("/redo", status_code=202)
+async def redo(request: Request, hintergrund: BackgroundTasks, x_redo_secret: str = Header(None)):
+    """Webhook-Ziel fuer den Paperless-Workflow: neu klassifizieren, IMMER mit Mistral-OCR.
 
-    Reihenfolge ist der Schleifenschutz: erst Ausloeser-Tag und Hinweisfeld raeumen (und den
-    Hinweistext dabei mitnehmen), dann klassifizieren. Andersherum blieben Tag und Feld bei
-    einem verworfenen Vorschlag stehen und jedes weitere Update feuerte den Webhook erneut.
+    Wer den Knopf drueckt, will genau dieses Dokument neu gelesen haben — also OCR, auch wenn
+    der vorhandene Text den Regeln genuegt. Der optionale Hinweis geht als Zusatz in den Prompt.
+    Geschrieben wird direkt. Der Lauf startet im Hintergrund (202): mit OCR dauert er laenger,
+    als Paperless auf die Antwort eines Webhooks wartet.
     """
     if not REDO_SECRET:
         raise HTTPException(503, "REDO_SECRET nicht gesetzt — der Webhook ist nicht konfiguriert.")
@@ -397,41 +382,9 @@ async def redo(request: Request, x_redo_secret: str = Header(None)):
         raise HTTPException(400, "keine Dokument-ID im Webhook gefunden "
                                  "(weder Query-Parameter noch Rumpf enthielten eine)")
     hinweis = raeume_ausloeser(doc_id)
-    rc, out = run_classify(doc_id, force=True, source="redo", propose=True, hinweis=hinweis)
-    return {"ok": rc == 0, "doc": doc_id, "hinweis": bool(hinweis), "output": out[-800:]}
-
-
-@app.get("/api/proposals")
-def get_proposals(request: Request):
-    guard(request)
-    return {"vorschlaege": lade_vorschlaege()}
-
-
-@app.post("/api/proposals/{doc_id}/annehmen")
-def annehmen(doc_id: int, request: Request):
-    """Den abgelegten Patch ausfuehren — aber nur, wenn das Dokument sich nicht geaendert hat."""
-    guard(request)
-    pfad = os.path.join(PROP_DIR, f"{doc_id}.json")
-    if not os.path.exists(pfad):
-        raise HTTPException(404, "kein Vorschlag zu diesem Dokument")
-    vorschlag = json.load(open(pfad, encoding="utf-8"))
-    doc = api_get(f"/documents/{doc_id}/")
-    if doc_hat_sich_geaendert(vorschlag, doc):
-        raise HTTPException(409, "Das Dokument wurde seit dem Vorschlag geändert. "
-                                 "Bitte neu klassifizieren, damit nichts überschrieben wird.")
-    api_send(f"/documents/{doc_id}/", vorschlag["patch"], "PATCH")
-    os.remove(pfad)
-    return {"ok": True, "doc": doc_id, "angewendet": sorted(vorschlag["patch"].keys())}
-
-
-@app.post("/api/proposals/{doc_id}/verwerfen")
-def verwerfen(doc_id: int, request: Request):
-    guard(request)
-    pfad = os.path.join(PROP_DIR, f"{doc_id}.json")
-    if not os.path.exists(pfad):
-        raise HTTPException(404, "kein Vorschlag zu diesem Dokument")
-    os.remove(pfad)
-    return {"ok": True, "doc": doc_id}
+    hintergrund.add_task(run_classify, doc_id, force=True, force_ocr=True, source="redo",
+                         hinweis=hinweis)
+    return {"ok": True, "doc": doc_id, "hinweis": bool(hinweis), "gestartet": True}
 
 
 def _log_zeilen(max_zeilen=20000):
@@ -602,8 +555,7 @@ fetch('/api/trace/'+ID).then(r=>r.json()).then(d=>{
      `<dl><dt>Vorschlag</dt><dd>${txt(k.vorschlag)}</dd><dt>Ergebnis</dt><dd>${txt(k.ergebnis)}</dd></dl>`+
      (k.pass2?`<div class=muted>Rückfrage ans Modell</div>${pre(k.pass2)}`:''), true);
   const w=d.writeback||{};
-  h+=schritt('5 · Zurückgeschrieben', [w.modus==='vorschlag'?'als Vorschlag':'geschrieben',
-     w.modus==='vorschlag'?'warn':'ok'], pre(w), true);
+  h+=schritt('5 · Zurückgeschrieben', ['geschrieben','ok'], pre(w), true);
   const rep=d.repair||[];
   if(rep.length) h+=schritt(`6 · Reparatur (${rep.length} Runden)`,
      [rep[rep.length-1].ok?'gelöst':'gescheitert', rep[rep.length-1].ok?'ok':'warn'], pre(rep), true);
@@ -943,12 +895,6 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
 .legende b{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
 .auff{font-size:12px;border-left:2px solid #dc2626;padding:4px 10px;margin:4px 0;background:#161a22}
 .auff.geloest{border-color:#059669;opacity:.55}
-.vk{background:#161a22;border:1px solid #303643;border-radius:10px;padding:14px;margin-bottom:10px}
-.vk h3{margin:0 0 4px;font-size:15px}
-.vk .hinweis{background:#1f2937;border-left:3px solid #2563eb;padding:8px 10px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
-.vk dl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:8px 0 0;font-size:13px}
-.vk dt{color:#9aa4b2}.vk dd{margin:0}
-.vk .akt{display:flex;gap:8px;margin-top:12px;align-items:center}
 .muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
 </style></head><body>
 <header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><a href="/einstellungen" style="font-size:13px">Einstellungen</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
@@ -965,8 +911,6 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
     <button class=sec onclick="rc('ocr')">mit OCR erzwingen</button>
     <span id=rcout style="font-size:12px;color:#9aa4b2"></span>
   </div>
-  <h2>Vorschläge <span class=pill id=vzahl style="display:none"></span></h2>
-  <div id=vorschlaege><div class=muted style="font-size:13px">Keine offenen Vorschläge.</div></div>
 
   <h2>Aktivität</h2>
   <table id=feed></table>
@@ -1006,54 +950,6 @@ async function ladeVerlauf(){
     `<div class=bars>${h}</div>`+(auff?`<div style="margin-top:10px">${auff}</div>`:'');
 }
 
-async function ladeVorschlaege(){
-  let d;
-  try{ d = await j('/api/proposals'); }catch(e){ return; }
-  const v = d.vorschlaege||[];
-  const zahl=document.getElementById('vzahl');
-  zahl.style.display = v.length ? '' : 'none';
-  zahl.textContent = v.length;
-  const ziel=document.getElementById('vorschlaege');
-  if(!v.length){ ziel.innerHTML='<div class=muted style="font-size:13px">Keine offenen Vorschläge.</div>'; return; }
-  ziel.innerHTML = v.map(p=>{
-    const L=p.lesbar||{};
-    const felder=Object.entries(L.felder||{}).filter(([k,w])=>w!=='behalten');
-    return `<div class=vk id="vk${p.id}">
-      <h3>#${p.id} · ${txt(L.titel)}</h3>
-      <div class=muted style="font-size:12px">${txt(p.ts)} · ausgelöst durch ${txt(p.quelle)}</div>
-      ${p.hinweis?`<div class=hinweis>Dein Hinweis: „${txt(p.hinweis)}"</div>`:''}
-      <dl>
-        ${L.korrespondent?`<dt>Korrespondent</dt><dd>${txt(L.korrespondent)}</dd>`:''}
-        ${L.dokumenttyp?`<dt>Dokumenttyp</dt><dd>${txt(L.dokumenttyp)}</dd>`:''}
-        ${L.datum?`<dt>Datum</dt><dd>${txt(L.datum)}</dd>`:''}
-        ${(L.neue_tags||[]).length?`<dt>neue Tags</dt><dd>${(L.neue_tags||[]).map(txt).join(', ')}</dd>`:''}
-        ${felder.length?`<dt>Felder</dt><dd>${felder.map(([k,w])=>`${txt(k)} = <b>${txt(w)}</b>`).join('<br>')}</dd>`:''}
-        ${L.zusammenfassung?`<dt>Zusammenfassung</dt><dd>${txt(L.zusammenfassung)}</dd>`:''}
-      </dl>
-      <div class=akt>
-        <button onclick="entscheide(${p.id},'annehmen')">Übernehmen</button>
-        <button class=sec onclick="entscheide(${p.id},'verwerfen')">Verwerfen</button>
-        <span class=muted id="vm${p.id}" style="font-size:12px"></span>
-      </div></div>`;
-  }).join('');
-}
-
-async function entscheide(id, was){
-  const meld=document.getElementById('vm'+id);
-  meld.textContent='…';
-  try{
-    await j(`/api/proposals/${id}/${was}`,{method:'POST'});
-    document.getElementById('vk'+id).remove();
-    await ladeVorschlaege(); await load();
-  }catch(e){
-    // 409 = das Dokument hat sich seit dem Vorschlag geaendert. Das ist kein Fehler,
-    // sondern der Schutz davor, eine Handkorrektur stillschweigend zu ueberschreiben.
-    // Zeichenklassen ausgeschrieben statt als Kurzform: dieser HTML-Block ist ein
-    // normaler Python-String, Kurzformen mit Rueckstrich loesen dort eine SyntaxWarning aus.
-    meld.textContent = String(e.message||e).replace(/^[0-9]+[ ]*/,'').slice(0,160);
-  }
-}
-
 async function load(){
   try{
     const s=await j('/api/stats');
@@ -1085,8 +981,8 @@ async function rc(mode){
   catch(e){document.getElementById('rcout').textContent='✗ '+e.message}
 }
 
-load(); ladeVorschlaege(); ladeVerlauf();
-setInterval(ladeVorschlaege, 15000);setInterval(ladeVerlauf, 60000);setInterval(load,6000);
+load(); ladeVerlauf();
+setInterval(ladeVerlauf, 60000);setInterval(load,6000);
 </script></body></html>"""
 
 

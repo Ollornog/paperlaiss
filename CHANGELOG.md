@@ -6,6 +6,25 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Neu klassifizieren schreibt direkt, immer mit OCR; Vorschlagsmodus entfernt
+
+- **Auslöser aus Paperless** (Tag bzw. Hinweisfeld) klassifiziert neu, **immer mit Mistral-OCR**,
+  und schreibt direkt. Der Lauf startet im Hintergrund (`/redo` antwortet 202), weil er mit OCR
+  länger dauert, als Paperless auf einen Webhook wartet.
+- **Vorschlagsmodus entfernt** (`CLASSIFY_PROPOSE`, Ablage `proposals/`, Annehmen/Verwerfen im
+  Panel). paperlaiss ist Middleware; entschieden wird in Paperless.
+- `deploy/vorschlagsmodus-einrichten.py` heißt jetzt `deploy/neu-klassifizieren-einrichten.py`.
+
+### Hinzugefügt — OCR-Fallback mit Regeln und KI-Meldung (`ocr_regeln`)
+
+- **Vor Pass 1:** einstellbare Regeln statt fest verdrahteter Heuristik, neu mit Zeichensalat-Anteil.
+  Die Gründe stehen im Trace. Am Testbett (632 Dokumente) greifen die Regeln bei 33, Zeichensalat
+  bei keinem sauberen Dokument.
+- **Nach Pass 1:** meldet die KI unlesbaren Text (oder, wenn eingeschaltet, fehlt Typ bzw.
+  Korrespondent), wird per OCR neu gelesen und erneut analysiert. Dieser Zweig war seit dem
+  Aufräumen am 2026-09-21 nur noch eine Meldung — der alte Code dazu war unerreichbar. Ein Test
+  lässt `main()` jetzt gegen gefälschte Aufrufe laufen und belegt die Verdrahtung.
+
 ### Hinzugefügt — Anmeldeseite für das Panel (TinySesam)
 
 - **`PANEL_AUTH=tinysesam`:** eigene Anmeldeseite statt nur Bearer-Token. OIDC (PocketID) über

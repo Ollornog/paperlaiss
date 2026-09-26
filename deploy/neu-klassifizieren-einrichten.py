@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Richtet den Vorschlagsmodus in einer Paperless-Instanz ein — idempotent.
+"""Richtet „neu klassifizieren aus Paperless" in einer Instanz ein — idempotent.
 
 Legt an, was der Zauberstab-Weg braucht, und traegt es in die classify-config.json ein:
 
@@ -28,7 +28,7 @@ SECRET = os.environ["REDO_SECRET"]
 CONFIG = os.environ.get("CLASSIFY_CONFIG", "/scripts/classify-config.json")
 TAG_NAME = os.environ.get("REDO_TAG", "KI-neu")
 FELD_NAME = os.environ.get("HINWEIS_FELD", "KI-Hinweis")
-WF_NAME = os.environ.get("WORKFLOW_NAME", "paperlaiss — Vorschlag anfordern")
+WF_NAME = os.environ.get("WORKFLOW_NAME", "paperlaiss — neu klassifizieren")
 
 
 def ruf(pfad, daten=None, methode="GET"):
@@ -52,7 +52,7 @@ def hole_oder_lege_an(pfad, name, felder):
 
 
 def main():
-    print("Vorschlagsmodus einrichten")
+    print("Neu klassifizieren einrichten")
     tag_id = hole_oder_lege_an("/tags/", TAG_NAME, {"color": "#a020f0", "matching_algorithm": 0})
     feld_id = hole_oder_lege_an("/custom_fields/", FELD_NAME, {"data_type": "string"})
 
@@ -100,8 +100,8 @@ def main():
     with open(CONFIG, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     print(f"  config          redo_tag='{TAG_NAME}', hinweis_field='{FELD_NAME}' in {CONFIG}")
-    print("\nFertig. Tag an ein Dokument hängen oder einen Hinweis eintragen —")
-    print("der Vorschlag erscheint im Panel unter „Vorschläge\".")
+    print("\nFertig. Tag an ein Dokument hängen oder einen Hinweis eintragen und speichern —")
+    print("paperlaiss liest das Dokument per OCR neu und klassifiziert es mit dem Hinweis.")
 
 
 if __name__ == "__main__":
