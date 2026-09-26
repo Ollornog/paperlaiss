@@ -126,6 +126,7 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 | `enabled` | `true` | Klassifizierer an/aus |
 | `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral-Modelle |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR-Rescue-Verhalten |
+| `ocr_regeln` | siehe unten | wann ein Text als zu schwach gilt und per OCR neu gelesen wird |
 | `tagging_enabled` | `false` | KI vergibt inhaltliche Tags (aus: nur Typ/Korrespondent/Felder) |
 | `marker_tag` | `ai-processed` | Tag, das gesetzt wird + als „schon erledigt"-Signal dient |
 | `unsicher_tag` / `redo_tag` | – | optionale Flag-/Redo-Tags (per Name) |
@@ -134,6 +135,29 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |
 | `api_key_text` / `api_key_ocr` | – | leer = `MISTRAL_KEY` aus der Umgebung |
+
+### OCR-Fallback (`ocr_regeln`)
+
+Zwei Tore entscheiden, ob ein Dokument per Mistral-OCR neu gelesen wird:
+
+1. **Vor der Analyse — Regeln.** OCR läuft, wenn der Text kürzer als `min_zeichen` ist
+   (Vorgabe: `ocr_min_len`), weniger als `min_schluesselwoerter` aus `schluesselwoerter` enthält,
+   weniger als ein echtes Wort je `max_zeichen_je_wort` Zeichen hat oder mehr als
+   `max_muell_anteil` seiner sichtbaren Zeichen weder Buchstaben, Ziffern noch übliche
+   Satzzeichen sind.
+2. **Nach der Analyse — die KI und optionale Regeln.** Meldet das Modell unlesbaren Text
+   (`nach_ki_meldung`, Vorgabe an) oder — wenn eingeschaltet — keinen Dokumenttyp
+   (`wenn_kein_typ`) bzw. keinen Korrespondenten (`wenn_kein_korrespondent`), wird per OCR neu
+   gelesen und in derselben Unterhaltung erneut analysiert. Nur, wenn vorher noch kein OCR lief —
+   ein Dokument wird nie doppelt bezahlt.
+
+**Neu klassifizieren aus Paperless** (Auslöser-Tag oder Hinweisfeld) läuft immer mit OCR. Die
+Gründe stehen im Trace.
+
+```json
+"ocr_regeln": {"min_schluesselwoerter": 2, "max_muell_anteil": 0.25,
+               "nach_ki_meldung": true, "wenn_kein_typ": false}
+```
 
 ## Entwicklung
 

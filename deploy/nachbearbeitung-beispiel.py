@@ -11,7 +11,7 @@ Einrichten: in `classify-config.json` den Pfad eintragen —
 
 Das Skript bekommt auf stdin:
     {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…},
-     "quelle": "redo|manual|bulk|auto", "dry": false, "vorschlag": false}
+     "quelle": "redo|manual|bulk|auto", "dry": false}
 
 Es läuft mit denselben Umgebungsvariablen wie der Klassifizierer (PAPERLESS_API,
 PAPERLESS_TOKEN …), kann also selbst die API benutzen. Was es ausgibt, landet im Log.
@@ -29,10 +29,6 @@ daten = json.load(sys.stdin)
 doc_id = daten["doc_id"]
 erfolg = daten["erfolg"]
 lesbar = daten.get("lesbar") or {}
-
-# Ein Vorschlag wurde noch nicht geschrieben — hier gibt es nichts nachzubereiten.
-if daten.get("vorschlag"):
-    sys.exit(0)
 
 if not erfolg:
     print(f"Writeback für {doc_id} schlug fehl — nichts nachzubereiten")
