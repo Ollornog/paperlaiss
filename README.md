@@ -121,7 +121,7 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 | `unsicher_tag` / `redo_tag` | – | optional flag / redo tags (by name) |
 | `summary_field` / `hinweis_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
-| `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted) |
+| `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |
 | `api_key_text` / `api_key_ocr` | – | empty = `MISTRAL_KEY` from the environment |
 

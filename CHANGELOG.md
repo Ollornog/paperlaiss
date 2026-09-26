@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Bestandsprompts verloren still Tags und Zusammenfassung
+
+Aufgefallen beim Umstieg einer Installation vom älteren Stand auf den Repo-Stand: der Lauf sah
+normal aus, vergab aber keinen einzigen Tag und ließ das Zusammenfassungsfeld leer.
+
+- **Platzhalter `{TAGS}` wird wieder ersetzt.** Der Code kannte nur noch `{TAGBLOCK}`; ein
+  `system_prompt` mit dem älteren `{TAGS}` bekam keine Tag-Liste. Neu: `{TAGS}` erhält die reine
+  Liste, `{TAGBLOCK}` den ganzen Block, und bei aktivem Tagging ohne beide Platzhalter wird der
+  Block angehängt statt verschluckt (`baue_system()`).
+- **Zusammenfassung auch aus `summary_long`/`summary_short`.** Ältere Prompts verlangen diese
+  Schlüssel, und das Modell hält sich daran (`summary_aus()`).
+
 ### Geändert — Python-Untergrenze bewusst an die neueste stable Reihe gebunden (T-3)
 
 - `requires-python` folgt weiter der Testmatrix (die drei neuesten stable Reihen) — jetzt als

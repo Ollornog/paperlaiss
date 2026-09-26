@@ -81,6 +81,33 @@ _p = classify.DEFAULT_PROMPT.lower()
 r.check("Default-Prompt ist mandantenneutral", not any(w in _p for w in ("salzburg", "autohaus")))
 r.check("Default-Prompt behält die Platzhalter", "{TYPES}" in classify.DEFAULT_PROMPT and "{TAGBLOCK}" in classify.DEFAULT_PROMPT)
 
+# ---- baue_system(): beide Generationen von Tag-Platzhaltern. Ein Bestandsprompt mit {TAGS}
+# bekam bis 2026-09-27 still keine Tag-Liste — der Lauf sah normal aus, nur ohne Tags.
+_typen = {"Rechnung": 1, "Brief": 2}
+_liste = "- Finanzen: Geld\n- Wohnen: Miete"
+_alt = classify.baue_system("Typen: {TYPES}\nTags: {TAGS}\nEnde", _typen, _liste)
+r.check("baue_system: {TAGS} wird durch die Tag-Liste ersetzt",
+        "- Finanzen: Geld" in _alt and "{TAGS}" not in _alt, _alt)
+r.check("baue_system: {TAGS} bekommt nur die Liste, nicht den ganzen Block", "new_tags" not in _alt)
+_neu = classify.baue_system("Typen: {TYPES}\n{TAGBLOCK}Ende", _typen, _liste)
+r.check("baue_system: {TAGBLOCK} bekommt den ganzen Block",
+        "- Wohnen: Miete" in _neu and "new_tags" in _neu and "{TAGBLOCK}" not in _neu)
+_ohne = classify.baue_system("Typen: {TYPES}", _typen, _liste)
+r.check("baue_system: ohne Platzhalter wird der Block angehängt statt verschluckt", "- Finanzen: Geld" in _ohne)
+_aus = classify.baue_system("Typen: {TYPES}\nTags: {TAGS}{TAGBLOCK}", _typen, None)
+r.check("baue_system: Tagging aus → keine Tags, keine Platzhalterreste",
+        "Finanzen" not in _aus and "{TAG" not in _aus, _aus)
+r.check("baue_system: Typen sortiert eingesetzt", "Typen: Brief, Rechnung" in _aus)
+
+# ---- summary_aus(): Bestandsprompts verlangen summary_long/summary_short statt summary.
+r.check("summary_aus: summary hat Vorrang",
+        classify.summary_aus({"summary": "A", "summary_long": "B"}) == "A")
+r.check("summary_aus: summary_long, wenn summary fehlt",
+        classify.summary_aus({"summary_long": " Lang. ", "summary_short": "Kurz"}) == "Lang.")
+r.check("summary_aus: summary_short als letzter Rückfall", classify.summary_aus({"summary_short": "Kurz"}) == "Kurz")
+r.check("summary_aus: leer/null/kein String → leer",
+        classify.summary_aus({"summary": "  ", "summary_long": None, "summary_short": 3}) == "")
+
 
 # ---- build_cfs(): die Funktion, die entscheidet WAS geschrieben wird.
 # Bis 2026-09-21 ungetestet — und genau dort steckten zwei Fehler, die der

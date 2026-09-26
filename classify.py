@@ -610,6 +610,46 @@ def resolve_tag(tagid_by_norm, name):
     return tagid_by_norm.get(norm(name)) if name else None
 
 
+def summary_aus(prop):
+    """Die Zusammenfassung aus der KI-Antwort — auch unter den Schluesseln aelterer Prompts.
+
+    Der eingebaute Prompt verlangt `summary`. Bestandsprompts verlangen `summary_long` bzw.
+    `summary_short`, und das Modell haelt sich an den Prompt. Ohne den Rueckfall bleibt das
+    Zusammenfassungsfeld bei ihnen still leer (bis 2026-09-27 so im Repo).
+    """
+    for k in ("summary", "summary_long", "summary_short"):
+        v = prop.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def baue_system(tpl, types, taglines):
+    """Setzt Typen und Tags in den System-Prompt ein. taglines=None heisst: Tagging aus.
+
+    Zwei Platzhalter fuer die Tags, weil es zwei Generationen von Prompts gibt: {TAGBLOCK}
+    (der ganze Block samt Anweisung) und das aeltere {TAGS} (nur die Liste, die Anweisung steht
+    im Prompt selbst). Bis 2026-09-27 kannte der Code nur {TAGBLOCK} — ein Prompt mit {TAGS}
+    lief weiter, bekam aber still keine Tag-Liste, und die KI vergab keinen einzigen Tag.
+    Enthaelt ein Prompt bei aktivem Tagging keinen der beiden, wird der Block angehaengt,
+    statt das Tagging wortlos ausfallen zu lassen.
+    """
+    if taglines is None:
+        tagblock = ""
+        taglines = ""
+    else:
+        tagblock = ("TAGS — nutze NUR exakte Namen aus dieser Liste, 1-3 wirklich zutreffende, den spezifischsten:\n"
+                    + taglines + "\n"
+                    "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
+                    "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
+    platz = "{TAGBLOCK}" in tpl or "{TAGS}" in tpl
+    system = (tpl.replace("{TYPES}", ", ".join(sorted(types)))
+                 .replace("{TAGBLOCK}", tagblock).replace("{TAGS}", taglines))
+    if tagblock and not platz:
+        system += "\n" + tagblock
+    return system
+
+
 def resolve_field(cfields, name):
     if not name:
         return None
@@ -772,21 +812,17 @@ def main():
             f"- Aktuelles Dokumentdatum (evtl. falsch): {(doc.get('created') or '')[:10]}\n"
             f"- Originaldateiname: {doc.get('original_file_name') or '—'}\n")
 
-    # Tag-Block nur wenn Tagging aktiv
+    # Tag-Liste nur wenn Tagging aktiv
     if CFG["tagging_enabled"]:
         TD = {**TAG_DESC, **(CFG.get("tag_descriptions") or {})}
         taglines = "\n".join(f"- {t['name']}: {TD.get(t['name'], t['name'])}"
                              for t in tags_all if norm(t["name"]) not in reserved)
-        tagblock = ("TAGS — nutze NUR exakte Namen aus dieser Liste, 1-3 wirklich zutreffende, den spezifischsten:\n"
-                    + taglines + "\n"
-                    "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
-                    "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
     else:
-        tagblock = ""
+        taglines = None
 
     set_stage(did, "Pass 1")
     tpl = CFG.get("system_prompt") or DEFAULT_PROMPT
-    system = tpl.replace("{TYPES}", ", ".join(sorted(types))).replace("{TAGBLOCK}", tagblock)
+    system = baue_system(tpl, types, taglines)
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
         system += ("\nFülle im fields-Objekt JEDES unter VERFÜGBARE FELDER gelistete Feld mit GENAU einer Wahl: "
                    "(a) korrekter Wert passend zum Typ; (b) null = leeren (Feld trifft sicher nicht zu ODER bestehender Wert ist falsch); "
@@ -873,7 +909,7 @@ def main():
 
     dt = prop.get("document_type")
     dt_id = types.get(dt) or (next((v for k, v in types.items() if norm(k) == norm(dt)), None) if dt else None)
-    summary = (prop.get("summary") or "").strip() if summary_fid else ""
+    summary = summary_aus(prop) if summary_fid else ""
     if new_tags and summary_fid:
         summary = (summary + f"\n\n[KI-Tag-Vorschlag: {', '.join(new_tags)}]").strip()
 
