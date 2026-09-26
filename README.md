@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/paperlaiss.png" alt="paperlaiss" width="250" height="250"></p>
+<p align="center"><img src="panel/paperlaiss.png" alt="paperlaiss" width="250" height="250"></p>
 
 <h1 align="center">paperlaiss</h1>
 
@@ -77,8 +77,17 @@ container in the same Docker network, sharing the `scripts/` volume:
 - **Classify manually** — a document ID, reclassified or forced through OCR.
 - **JSON API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
   `/api/config` (GET/POST). A higher-level platform can consume the same endpoints.
-- **Protection**: an optional `PANEL_TOKEN` (bearer/cookie). Otherwise put a reverse proxy with
-  forward-auth or OIDC in front of it in production.
+- **Sign-in** (`PANEL_AUTH`):
+  - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.
+  - `none` — no sign-in of its own, because one sits in front of it (reverse proxy with forward-auth).
+  - `tinysesam` — its own sign-in page via [TinySesam](https://github.com/Ollornog/TinySesam):
+    OIDC (e.g. PocketID) through `PANEL_OIDC_ISSUER`, `PANEL_OIDC_CLIENT_ID`,
+    `PANEL_OIDC_CLIENT_SECRET` (optional `PANEL_OIDC_GROUPS`, `PANEL_OIDC_NAME`); username + password
+    only with `PANEL_PASSWORD_LOGIN=1` (meant for a test instance), first account from
+    `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`. Required: `PANEL_BASE_URL` (the address browsers
+    use); the user store lives in `PANEL_AUTH_DB` (default `/auth/tinysesam.db`, mount it as a
+    volume). A half-configured OIDC or no sign-in method at all stops the container with a message.
+    A set `PANEL_TOKEN` stays valid for scripts.
 
 ## Ingest API
 

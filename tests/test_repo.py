@@ -64,7 +64,7 @@ PFLICHT = [
     "scripts/check.sh", "scripts/_residue_check.sh", ".githooks/pre-push",
     ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/dependabot.yml",
     "tests/_kit/hygiene.py", "tests/_kit/backlog.py", "tests/_kit/manifest.py",
-    "scripts/_backlog.py", "backlog/README-KONVENTION.md", "tests/run_all.py", "docs/paperlaiss.png",
+    "scripts/_backlog.py", "backlog/README-KONVENTION.md", "tests/run_all.py", "panel/paperlaiss.png",
 ]
 fehlt = hygiene.pruefe_pflichtdateien(str(ROOT), PFLICHT)
 r.check("alle Pflichtdateien vorhanden", not fehlt, " | ".join(fehlt))

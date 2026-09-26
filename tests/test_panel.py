@@ -197,4 +197,38 @@ _vorher = kern.auffaelligkeiten([
     "2026-09-03 08:00:00 patch-fail 9 R1: kaputt"])
 r.check("auffaelligkeiten: ein früherer Erfolg löst nichts", _vorher[0]["geloest"] is False)
 
+# ---- auth_einstellungen(): welche Anmeldung das Panel faehrt. Eine Fehlkonfiguration muss den
+# Start verhindern, statt still offen oder unbenutzbar zu laufen.
+_ae = kern.auth_einstellungen
+r.check("Anmeldung: ohne PANEL_AUTH bleibt es beim Token", _ae({})["modus"] == "" and _ae({})["tinysesam"] is None)
+r.check("Anmeldung: unbekannter Modus ist ein Fehler", _ae({"PANEL_AUTH": "tinyauth"})["fehler"])
+_basis = {"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "http://192.0.2.10:8400"}
+r.check("Anmeldung: tinysesam ohne Anmeldeweg startet nicht", _ae(_basis)["fehler"])
+r.check("Anmeldung: tinysesam ohne Basisadresse startet nicht",
+        _ae({"PANEL_AUTH": "tinysesam", "PANEL_PASSWORD_LOGIN": "1"})["fehler"])
+_pw = _ae({**_basis, "PANEL_PASSWORD_LOGIN": "1", "PANEL_ADMIN_USER": "admin", "PANEL_ADMIN_PASSWORD": "x"})
+r.check("Anmeldung: Passwort-Login zum Debuggen", not _pw["fehler"] and _pw["tinysesam"]["password_enabled"] is True
+        and _pw["tinysesam"]["oidc_enabled"] is False, str(_pw))
+r.check("Anmeldung: über http kein Secure-Cookie", _pw["tinysesam"]["cookie_secure"] is False
+        and _pw["tinysesam"]["https_mode"] == "off")
+r.check("Anmeldung: Origin und rp_id aus der Basisadresse",
+        _pw["tinysesam"]["origin"] == "http://192.0.2.10:8400" and _pw["tinysesam"]["rp_id"] == "192.0.2.10")
+r.check("Anmeldung: keine Selbstregistrierung", _pw["tinysesam"]["allow_signup"] is False)
+r.check("Anmeldung: Seite trägt den Projektnamen", _pw["tinysesam"]["rp_name"] == "paperlaiss")
+r.check("Anmeldung: Erst-Admin wird übergeben", _pw["admin"] == ("admin", "x"))
+_oidc = _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example.com/",
+             "PANEL_OIDC_ISSUER": "https://id.example.com", "PANEL_OIDC_CLIENT_ID": "c",
+             "PANEL_OIDC_CLIENT_SECRET": "s", "PANEL_OIDC_GROUPS": "buero, chef"})
+r.check("Anmeldung: Produktion = nur PocketID, Passwort aus", not _oidc["fehler"]
+        and _oidc["tinysesam"]["oidc_enabled"] is True and _oidc["tinysesam"]["password_enabled"] is False, str(_oidc))
+r.check("Anmeldung: über https Secure-Cookie", _oidc["tinysesam"]["cookie_secure"] is True
+        and _oidc["tinysesam"]["base_url"] == "https://panel.example.com")
+r.check("Anmeldung: Gruppenfilter aus Kommaliste", _oidc["tinysesam"]["oidc_allowed_groups"] == ["buero", "chef"])
+r.check("Anmeldung: halbe OIDC-Konfiguration ist ein Fehler",
+        _ae({**_basis, "PANEL_PASSWORD_LOGIN": "1", "PANEL_OIDC_ISSUER": "https://id.example.com"})["fehler"])
+r.check("Anmeldung: Admin-Konto ohne Passwort-Login ist ein Fehler",
+        _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example.com",
+             "PANEL_OIDC_ISSUER": "https://id.example.com", "PANEL_OIDC_CLIENT_ID": "c",
+             "PANEL_OIDC_CLIENT_SECRET": "s", "PANEL_ADMIN_USER": "a", "PANEL_ADMIN_PASSWORD": "b"})["fehler"])
+
 sys.exit(r.done())
