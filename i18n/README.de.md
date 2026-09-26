@@ -1,4 +1,4 @@
-<p align="center"><img src="../docs/paperlaiss.png" alt="paperlaiss" width="250" height="250"></p>
+<p align="center"><img src="../panel/paperlaiss.png" alt="paperlaiss" width="250" height="250"></p>
 
 <h1 align="center">paperlaiss</h1>
 
@@ -77,8 +77,18 @@ Container im selben Docker-Netz, das sich das `scripts/`-Volume teilt:
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
 - **JSON-API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
   `/api/config` (GET/POST). Eine übergeordnete Plattform kann dieselben Endpunkte konsumieren.
-- **Schutz**: optional ein `PANEL_TOKEN` (Bearer/Cookie). Sonst in Prod einen Reverse-Proxy mit
-  Forward-Auth oder OIDC davorsetzen.
+- **Anmeldung** (`PANEL_AUTH`):
+  - leer (Vorgabe) — Bearer-Token bzw. Cookie `PANEL_TOKEN`; ohne Token antwortet das Panel mit 503.
+  - `none` — keine eigene Anmeldung, weil eine davorhängt (Reverse-Proxy mit Forward-Auth).
+  - `tinysesam` — eigene Anmeldeseite über [TinySesam](https://github.com/Ollornog/TinySesam):
+    OIDC (z. B. PocketID) über `PANEL_OIDC_ISSUER`, `PANEL_OIDC_CLIENT_ID`,
+    `PANEL_OIDC_CLIENT_SECRET` (optional `PANEL_OIDC_GROUPS`, `PANEL_OIDC_NAME`); Benutzername +
+    Passwort nur mit `PANEL_PASSWORD_LOGIN=1` (gedacht für ein Testsystem), erstes Konto aus
+    `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`. Pflicht: `PANEL_BASE_URL` (die Adresse, unter der
+    der Browser das Panel aufruft); die Benutzer liegen in `PANEL_AUTH_DB` (Vorgabe
+    `/auth/tinysesam.db`, als Volume einhängen). Eine halbe OIDC-Konfiguration oder gar kein
+    Anmeldeweg beendet den Container mit einer Meldung. Ein gesetzter `PANEL_TOKEN` gilt weiter für
+    Skripte.
 
 ## Ingest-API
 

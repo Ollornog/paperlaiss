@@ -13,14 +13,17 @@ ENV:
   PAPERLESS_API   http://webserver:8000/api
   PAPERLESS_TOKEN / MISTRAL_KEY   an classify.py durchgereicht (Re-Trigger + Ingest)
   CLASSIFY_DIR    Verzeichnis mit classify.py/-config/-log (default /scripts)
-  PANEL_TOKEN     optional: Bearer-Token schützt die UI/API (leer = offen, für Prod TinyAuth/OIDC davor)
+  PANEL_TOKEN     Bearer-Token (bzw. Cookie panel_token) für UI/API; fehlt er, antwortet das Panel 503
+  PANEL_AUTH      leer = PANEL_TOKEN · none = Anmeldung hängt davor · tinysesam = eigene Anmeldeseite
+                  (PocketID/OIDC über PANEL_OIDC_*, Passwort nur mit PANEL_PASSWORD_LOGIN=1;
+                  alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
 """
 import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, urllib.request, urllib.error
 from fastapi import FastAPI, Request, UploadFile, File, Form, Header, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
-from kern import (auffaelligkeiten, config_uebernehmen, doc_hat_sich_geaendert,
+from kern import (auffaelligkeiten, auth_einstellungen, config_uebernehmen, doc_hat_sich_geaendert,
                   doc_id_aus_webhook, feld_typ, merge_metadaten, verlauf)
 
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
@@ -49,7 +52,21 @@ GEHEIM_FELDER = ("api_key_text", "api_key_ocr")
 
 app = FastAPI(title="paperlaiss")
 
-if not PANEL_TOKEN and PANEL_AUTH != "none":
+AUTH = auth_einstellungen(os.environ)
+if AUTH["fehler"]:
+    sys.exit("paperlaiss-panel: Anmeldung falsch konfiguriert — " + "; ".join(AUTH["fehler"]))
+SESAM = None
+if AUTH["modus"] == "tinysesam":
+    # Erst hier importiert: wer PANEL_AUTH nicht auf tinysesam stellt, braucht das Paket nicht.
+    from tinysesam import TinySesam, TinySesamConfig
+    os.makedirs(os.path.dirname(os.path.abspath(AUTH["tinysesam"]["db_path"])), exist_ok=True)
+    SESAM = TinySesam(TinySesamConfig(**AUTH["tinysesam"]))
+    if AUTH["admin"]:
+        # Legt das Konto nur an, solange die Datenbank leer ist — ein spaeter geaendertes
+        # Passwort in der Umgebung ueberschreibt also nichts.
+        SESAM.ensure_admin(*AUTH["admin"])
+    app.include_router(SESAM.router())
+elif not PANEL_TOKEN and PANEL_AUTH != "none":
     print("paperlaiss-panel: PANEL_TOKEN fehlt — alle API-Aufrufe antworten mit 503. "
           "Token setzen, oder PANEL_AUTH=none wenn eine Anmeldung davorhaengt.", file=sys.stderr)
 
@@ -153,18 +170,37 @@ def guard(request: Request):
     ohne jede Anmeldung im LAN, mit Lesezugriff auf die Korrespondent-Kontaktdaten und
     Schreibzugriff auf system_prompt (= Prompt-Injektion in jede kuenftige Klassifizierung).
     """
+    if SESAM is not None:
+        # Ein gesetzter PANEL_TOKEN bleibt als Zugang fuer Skripte gueltig.
+        if PANEL_TOKEN and _token_passt(request):
+            return
+        SESAM.require_user(request)     # Browser → Anmeldeseite, API-Aufrufe → 401
+        return
     if not PANEL_TOKEN:
         if PANEL_AUTH == "none":
             return                      # bewusst offen, Anmeldung haengt davor
         raise HTTPException(503, "Panel nicht konfiguriert: PANEL_TOKEN fehlt "
                                  "(oder PANEL_AUTH=none setzen, wenn eine Anmeldung davorhaengt).")
-    auth = request.headers.get("authorization", "")
-    cookie = request.cookies.get("panel_token", "")
-    erwartet = f"Bearer {PANEL_TOKEN}"
-    # compare_digest statt ==: gleiche Laufzeit unabhaengig davon, ab welchem Zeichen es abweicht
-    if hmac.compare_digest(auth, erwartet) or hmac.compare_digest(cookie, PANEL_TOKEN):
+    if _token_passt(request):
         return
     raise HTTPException(401, "Panel-Token nötig")
+
+
+def seite(html):
+    """Eine Panel-Seite ausliefern — mit Abmelde-Link, wenn das Panel selbst anmeldet."""
+    if SESAM is None:
+        return html
+    return html.replace("</header>", '<a class=abmelden href="/auth/logout">Abmelden</a></header>', 1)
+
+
+def _token_passt(request: Request) -> bool:
+    if not PANEL_TOKEN:
+        return False                    # sonst passt ein fehlendes Cookie auf einen leeren Token
+    auth = request.headers.get("authorization", "")
+    cookie = request.cookies.get("panel_token", "")
+    # compare_digest statt ==: gleiche Laufzeit unabhaengig davon, ab welchem Zeichen es abweicht
+    return (hmac.compare_digest(auth, f"Bearer {PANEL_TOKEN}")
+            or hmac.compare_digest(cookie, PANEL_TOKEN))
 
 
 # ---------- Paperless-API ----------
@@ -265,6 +301,13 @@ def run_classify(doc, force=True, force_ocr=False, source="manual", propose=Fals
 
 
 # ---------- Endpoints ----------
+@app.get("/logo.png")
+def logo():
+    # Ohne guard(): die Anmeldeseite zeigt das Bild, bevor jemand angemeldet ist.
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "paperlaiss.png"),
+                        media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "config": os.path.exists(CONFIG), "classify": os.path.exists(CLASSIFY_PY)}
@@ -423,12 +466,14 @@ def config_schema(request: Request):
 
 
 EINST_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Einstellungen</title>
+<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Einstellungen</title><link rel=icon href="/logo.png">
 <style>
 :root{color-scheme:dark}
 body{background:#0f1115;color:#e6e6e6;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0}
 header{display:flex;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #20252f}
 h1{font-size:16px;margin:0}a{color:#60a5fa;text-decoration:none}
+h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
+.abmelden{margin-left:auto;font-size:13px}
 .wrap{max-width:860px;margin:20px auto;padding:0 16px}
 .f{background:#161a22;border:1px solid #303643;border-radius:10px;padding:12px 14px;margin-bottom:10px}
 .f label{display:block;font-size:13px;color:#e6e6e6;margin-bottom:6px;font-weight:600}
@@ -442,7 +487,7 @@ button{cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:6px;p
   display:flex;gap:12px;align-items:center}
 .muted{color:#6b7280}.warn{color:#fcd34d}
 </style></head><body>
-<header><h1>Einstellungen</h1><a href="/">← Dashboard</a>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Einstellungen</h1><a href="/">← Dashboard</a>
   <span class=muted style="margin-left:auto;font-size:12px">classify-config.json</span></header>
 <div class=wrap><div id=z>lädt…</div>
   <div class=leiste><button onclick="sichern()">Speichern</button><span id=meld class=muted></span></div>
@@ -496,16 +541,18 @@ async function sichern(){
 @app.get("/einstellungen", response_class=HTMLResponse)
 def einstellungen(request: Request):
     guard(request)
-    return EINST_PAGE
+    return seite(EINST_PAGE)
 
 
 TRACE_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Lauf __ID__</title>
+<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Lauf __ID__</title><link rel=icon href="/logo.png">
 <style>
 :root{color-scheme:dark}
 body{background:#0f1115;color:#e6e6e6;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0}
 header{display:flex;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #20252f}
 h1{font-size:16px;margin:0}a{color:#60a5fa;text-decoration:none}
+h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
+.abmelden{margin-left:auto;font-size:13px}
 .wrap{max-width:1000px;margin:20px auto;padding:0 16px}
 .schritt{background:#161a22;border:1px solid #303643;border-radius:10px;margin-bottom:12px;overflow:hidden}
 .schritt>summary{padding:12px 14px;cursor:pointer;font-weight:600;list-style:none;display:flex;gap:10px;align-items:center}
@@ -521,7 +568,7 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
 dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:8px 0;font-size:13px}
 dt{color:#9aa4b2}dd{margin:0}
 </style></head><body>
-<header><h1>Lauf __ID__</h1><a href="/">← Dashboard</a><span class=muted id=ts></span></header>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Lauf __ID__</h1><a href="/">← Dashboard</a><span class=muted id=ts></span></header>
 <div class=wrap id=z>lädt…</div>
 <script>
 const ID=__ID__;
@@ -574,7 +621,7 @@ def trace_seite(doc_id: int, request: Request):
     ein 4000-Zeichen-Block.
     """
     guard(request)
-    return TRACE_PAGE.replace("__ID__", str(int(doc_id)))
+    return seite(TRACE_PAGE.replace("__ID__", str(int(doc_id))))
 
 
 @app.get("/api/config")
@@ -755,12 +802,14 @@ async def merge_correspondents(request: Request):
 
 
 CORR_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Korrespondenten</title>
+<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Korrespondenten</title><link rel=icon href="/logo.png">
 <style>
 :root{color-scheme:light dark}
 body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
 header{padding:14px 20px;background:#161a22;border-bottom:1px solid #262b36;display:flex;align-items:center;gap:14px}
 header h1{font-size:18px;margin:0;font-weight:600}a{color:#7dd3fc;text-decoration:none}
+h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
+.abmelden{margin-left:auto;font-size:13px}
 .wrap{max-width:1000px;margin:0 auto;padding:18px 20px}
 input,textarea{background:#0f1115;color:#e6e6e6;border:1px solid #303643;border-radius:6px;padding:7px 9px;font-family:inherit;width:100%;box-sizing:border-box}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -771,7 +820,7 @@ dialog{background:#161a22;color:#e6e6e6;border:1px solid #303643;border-radius:1
 label{display:block;font-size:12px;color:#9aa4b2;margin:10px 0 3px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 </style></head><body>
-<header><h1>🧠 paperlaiss</h1><a href="/">← Dashboard</a><span class=muted>Korrespondenten</span></header>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/">← Dashboard</a><span class=muted>Korrespondenten</span></header>
 <div class=wrap>
   <div class=row style="margin-bottom:12px">
     <input id=q placeholder="filtern…" oninput="render()" style="max-width:280px">
@@ -853,18 +902,20 @@ load();
 @app.get("/korrespondenten", response_class=HTMLResponse)
 def corr_page(request: Request):
     guard(request)
-    return CORR_PAGE
+    return seite(CORR_PAGE)
 
 
 # ---------- Dashboard ----------
 PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
-<title>paperlaiss</title>
+<title>paperlaiss</title><link rel=icon href="/logo.png">
 <style>
 :root{color-scheme:light dark}
 body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
 header{padding:14px 20px;background:#161a22;border-bottom:1px solid #262b36;display:flex;align-items:center;gap:12px}
 header h1{font-size:18px;margin:0;font-weight:600}
+h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
+.abmelden{margin-left:auto;font-size:13px}
 .wrap{max-width:1000px;margin:0 auto;padding:18px 20px}
 .banner{padding:10px 14px;border-radius:8px;background:#1b2130;margin-bottom:16px;font-size:14px}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:20px}
@@ -900,7 +951,7 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115
 .vk .akt{display:flex;gap:8px;margin-top:12px;align-items:center}
 .muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
 </style></head><body>
-<header><h1>🧠 paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><a href="/einstellungen" style="font-size:13px">Einstellungen</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
+<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><a href="/einstellungen" style="font-size:13px">Einstellungen</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
 <div class=wrap>
   <div class=banner id=banner>…</div>
   <div class=cards id=cards></div>
@@ -1042,4 +1093,4 @@ setInterval(ladeVorschlaege, 15000);setInterval(ladeVerlauf, 60000);setInterval(
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     guard(request)
-    return PAGE
+    return seite(PAGE)

@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Anmeldeseite für das Panel (TinySesam)
+
+- **`PANEL_AUTH=tinysesam`:** eigene Anmeldeseite statt nur Bearer-Token. OIDC (PocketID) über
+  `PANEL_OIDC_*`, Benutzername + Passwort nur mit `PANEL_PASSWORD_LOGIN=1` (Testsystem), keine
+  Selbstregistrierung. Fehlkonfiguration (kein Anmeldeweg, halbe OIDC-Angaben, Admin-Konto ohne
+  Passwort-Login) beendet den Start mit einer Meldung, statt offen oder unbenutzbar zu laufen.
+  Abmelde-Link in jeder Panel-Seite; `PANEL_TOKEN` bleibt für Skripte gültig. Neue Abhängigkeit
+  des Panels: `tinysesam[oidc,argon2]==0.20.1`.
+- **Projektbild im Panel:** groß über der Anmeldeseite (mit Bildnachweis), klein in jedem
+  Seitenkopf, als Favicon. Die Datei liegt jetzt unter `panel/paperlaiss.png` (vorher `docs/`),
+  weil nur `panel/` ins Abbild gebaut wird — eine Quelle statt einer Kopie.
+
 ### Behoben — Bestandsprompts verloren still Tags und Zusammenfassung
 
 Aufgefallen beim Umstieg einer Installation vom älteren Stand auf den Repo-Stand: der Lauf sah
