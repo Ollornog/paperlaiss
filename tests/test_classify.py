@@ -96,6 +96,7 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut):
 
     def chat(messages, max_tokens=900):
         aufrufe["chat"].append(messages[-1]["content"])
+        aufrufe.setdefault("system", messages[0]["content"])
         return dict(antworten.pop(0)), "{}"
     alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR")}
     classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
@@ -109,6 +110,7 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut):
         for n, v in alt.items():
             setattr(classify, n, v)
         os.environ.pop("CLASSIFY_DOC", None)
+    aufrufe["get"] = get
     return aufrufe
 
 
@@ -122,6 +124,17 @@ r.check("Verdrahtung: alles lesbar → kein OCR", _b["ocr"] == 0 and len(_b["cha
 _c = _lauf([{**_ok, "needs_ocr": True}], force_ocr=True)
 r.check("Verdrahtung: OCR lief schon vor Pass 1 → kein zweites Mal", _c["ocr"] == 1 and len(_c["chat"]) == 1,
         f"ocr={_c['ocr']} chat={len(_c['chat'])}")
+
+# Die Vorschau im Panel muss GENAU den Prompt zeigen, den die KI bekommt — nicht einen Nachbau.
+_alt_get = classify.get
+classify.get = _b["get"]
+try:
+    _vorschau = classify.prompt_vorschau()
+finally:
+    classify.get = _alt_get
+r.check("Prompt-Vorschau = tatsächlich gesendeter System-Prompt", _vorschau["system"] == _b["system"])
+r.check("Prompt-Vorschau: Typen eingesetzt, keine Platzhalter übrig",
+        "Rechnung" in _vorschau["system"] and "{TYPES}" not in _vorschau["system"])
 
 # ---- is_null(): die vielen Schreibweisen von „leer"
 r.check("is_null: None", classify.is_null(None) is True)

@@ -75,6 +75,8 @@ container in the same Docker network, sharing the `scripts/` volume:
 - **Dashboard** (`/`) — live status ("running now"), counters (classified / OCR rescues / repaired
   / errors / skipped), an activity feed where every document ID opens a **trace inspector**.
 - **Classify manually** — a document ID, reclassified or forced through OCR.
+- **Flow & prompt** (`/ablauf`) — every step of a run with the current settings, and the Pass-1 system
+  prompt exactly as it is sent (built by `classify.py` itself: `CLASSIFY_PROMPT_VORSCHAU=1`).
 - **JSON API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
   `/api/config` (GET/POST). A higher-level platform can consume the same endpoints.
 - **Sign-in** (`PANEL_AUTH`):
