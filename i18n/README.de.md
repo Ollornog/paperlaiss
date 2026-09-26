@@ -121,7 +121,7 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 | `unsicher_tag` / `redo_tag` | – | optionale Flag-/Redo-Tags (per Name) |
 | `summary_field` / `hinweis_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
-| `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt) |
+| `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |
 | `api_key_text` / `api_key_ocr` | – | leer = `MISTRAL_KEY` aus der Umgebung |
 
