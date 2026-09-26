@@ -26,9 +26,11 @@ Env-Schalter:
   CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
+  CLASSIFY_NUR_OCR=1           nur den Text per Mistral-OCR neu lesen, NICHT klassifizieren
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
   CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
+  CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
 """
 import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile, subprocess
 
@@ -44,6 +46,7 @@ DRY = os.environ.get("CLASSIFY_DRY") == "1"
 FORCE = os.environ.get("CLASSIFY_FORCE") == "1"
 FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
+NUR_OCR = os.environ.get("CLASSIFY_NUR_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
 # --- Config (vom Panel schreibbar, mit Defaults) ---
@@ -61,6 +64,7 @@ CFG = {
     "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
     "unsicher_tag": "",                # optional: Flag-Tag bei Unsicherheit / KI-Tag-Vorschlag
     "redo_tag": "",                    # optional: Redo-Auslöser-Tag (wird nach Verarbeitung entfernt)
+    "ocr_tag": "",                     # optional: Auslöser „nur Text per OCR neu lesen" (Panel entfernt ihn)
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
     "hinweis_field": "",               # optional: Nutzer-Feedback-Feld für Redo (nach Gebrauch geleert)
     "mail_context_field": "",          # optional: Herkunft-Kontext (Mail-/Chat-Anschreiben) fürs Prompt
@@ -657,11 +661,64 @@ def baue_system(tpl, types, taglines):
     return system
 
 
+def nur_ocr(did, doc):
+    """Nur den Text neu lesen (OCR-Knopf in Paperless) — Metadaten bleiben, wie sie sind.
+
+    Der OCR-Tag geht erst mit dem Ergebnis weg, in DEMSELBEN Schreibvorgang: daran erkennt der
+    Knopf, dass der Lauf fertig ist — auch wenn der neue Text dem alten gleicht. Auch bei einem
+    Fehler kommt er weg, sonst haengt der Knopf bis zur Zeitueberschreitung.
+    """
+    content = doc.get("content") or ""
+    mark_running(did, "OCR")
+    TRACE["trigger"] = "OCR aus Paperless (nur Text)"
+    patch = {}
+    ocr_name = norm(CFG.get("ocr_tag") or "")
+    if ocr_name:
+        ocr_id = next((t["id"] for t in get("/tags/?page_size=1000")["results"]
+                       if norm(t["name"]) == ocr_name), None)
+        if ocr_id in (doc.get("tags") or []):
+            patch["tags"] = [t for t in doc["tags"] if t != ocr_id]
+    try:
+        new = mistral_ocr(did)
+    except Exception as e:
+        new = ""
+        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "error": repr(e)}
+        log(f"OCR-neu-fail {did}: {e!r}")
+    if len(new) > 40:
+        patch["content"] = new
+        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "chars": len(new),
+                        "vorher": len(content), "excerpt": new[:600]}
+        log(f"OCR-neu {did}: {len(content)} → {len(new)} Zeichen")
+    elif "ocr" not in TRACE:
+        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen",
+                        "verworfen": f"OCR lieferte nur {len(new)} Zeichen"}
+        log(f"OCR-neu-fail {did}: OCR lieferte nur {len(new)} Zeichen, Text bleibt")
+    if patch and not DRY:
+        send(f"/documents/{did}/", patch, "PATCH")
+    TRACE["_stage"] = "fertig"
+    save_trace(did)
+
+
+def typ_setzen(dt_id, bisher, ausdruecklich):
+    """Welchen Dokumenttyp schreiben — oder keinen (None).
+
+    Automatisch nur, wenn noch keiner gesetzt ist: den Typ vergeben oft Paperless-Workflows
+    („Rechnung erkennen") oder ein Mensch, und die soll ein Hintergrundlauf nicht ueberstimmen.
+    Beim ausdruecklichen Neu-Klassifizieren (Knopf in Paperless, Panel) darf die KI ihn aendern —
+    genau dafuer drueckt man den Knopf, oft mit dem Hinweis „das ist eine Gutschrift".
+    """
+    if not dt_id or dt_id == bisher:
+        return None
+    if bisher and not ausdruecklich:
+        return None
+    return dt_id
+
+
 def reservierte_tags(cfg):
     """Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (normalisiert):
     die konfigurierten plus Marker-, Unsicher- und Ausloeser-Tag."""
     reserved = {norm(x) for x in (cfg.get("reserved_tags") or [])}
-    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag"), cfg.get("redo_tag")):
+    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag"), cfg.get("redo_tag"), cfg.get("ocr_tag")):
         if extra:
             reserved.add(norm(extra))
     return reserved
@@ -748,6 +805,9 @@ def main():
     content = doc.get("content") or ""
     title = doc.get("title") or ""
     tag_ids_on = list(doc.get("tags", []))
+
+    if NUR_OCR:
+        return nur_ocr(did, doc)
 
     tags_all = get("/tags/?page_size=1000")["results"]
     tagname_by_id = {t["id"]: t["name"] for t in tags_all}
@@ -1003,8 +1063,9 @@ def main():
     patch = {"tags": [t for t in dict.fromkeys(keep_tags) if not (redo_id and t == redo_id)]}
     if corr_id:
         patch["correspondent"] = corr_id
-    if dt_id and not doc.get("document_type"):
-        patch["document_type"] = dt_id
+    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), SOURCE in ("redo", "manual"))
+    if neuer_typ:
+        patch["document_type"] = neuer_typ
 
     flds = prop.get("fields") or {}
     date_note = None

@@ -206,4 +206,43 @@ r.check("Anmeldung: Admin-Konto ohne Passwort-Login ist ein Fehler",
              "PANEL_OIDC_ISSUER": "https://id.example.com", "PANEL_OIDC_CLIENT_ID": "c",
              "PANEL_OIDC_CLIENT_SECRET": "s", "PANEL_ADMIN_USER": "a", "PANEL_ADMIN_PASSWORD": "b"})["fehler"])
 
+# ---- ausloeser_auswerten(): welcher Knopf in Paperless gedrückt wurde, und was vorher weg muss.
+_aw = kern.ausloeser_auswerten
+_hf = [{"field": 39, "value": "  bitte Typ Rechnung  "}, {"field": 2, "value": "EUR1"}]
+m, h, pt = _aw([1, 239], [], 239, 240, 39)
+r.check("Auslöser: Tag neu → neu klassifizieren, Tag entfernt", m == "neu" and pt == {"tags": [1]}, str((m, pt)))
+m, h, pt = _aw([1], _hf, 239, 240, 39)
+r.check("Auslöser: Hinweis → neu, Text gelesen, nur das Hinweisfeld entfernt",
+        m == "neu" and h == "bitte Typ Rechnung" and pt == {"custom_fields": [{"field": 2, "value": "EUR1"}]}, str((m, h, pt)))
+m, h, pt = _aw([240], [], 239, 240, 39)
+r.check("Auslöser: Tag OCR → nur OCR, Tag bleibt (der Lauf entfernt ihn am Ende)", m == "nur_ocr" and pt == {}, str((m, pt)))
+m, h, pt = _aw([239, 240], [], 239, 240, 39)
+r.check("Auslöser: beide Tags → neu gewinnt, beide entfernt", m == "neu" and pt == {"tags": []}, str((m, pt)))
+m, h, pt = _aw([1, 5], [{"field": 39, "value": ""}], 239, 240, 39)
+r.check("Auslöser: nichts gesetzt (auch leeres Hinweisfeld) → kein Lauf, nichts zu entfernen",
+        m is None and pt == {}, str((m, pt)))
+m, h, pt = _aw([1], [], None, None, None)
+r.check("Auslöser: nichts konfiguriert → kein Lauf", m is None and pt == {})
+m, h, pt = _aw([1, 239, 77], [], 239, 240, 39, marker_id=77)
+r.check("Auslöser: neu → Marker geht mit weg (Fertig-Signal für den Knopf)", m == "neu" and pt == {"tags": [1]}, str(pt))
+m, h, pt = _aw([1, 240, 77], [], 239, 240, 39, marker_id=77)
+r.check("Auslöser: nur OCR → Marker bleibt", m == "nur_ocr" and pt == {}, str(pt))
+m, h, pt = _aw([1, 77], [], 239, 240, 39, marker_id=77)
+r.check("Auslöser: nichts ausgelöst → Marker bleibt, nichts zu tun", m is None and pt == {}, str(pt))
+r.check("log_art: OCR-Nachlauf und Nur-OCR zählen als OCR, ihre Fehler als Fehler",
+        kern.log_art("OCR-nachgeholt 5: x") == "ocr" and kern.log_art("OCR-neu 5: 1 → 2") == "ocr"
+        and kern.log_art("OCR-neu-fail 5: x") == "fehler" and kern.log_art("OCR-nachgeholt-fail 5") == "fehler")
+
+# ---- Knöpfe in Paperless: Browser-Skript und Init-Skript müssen dieselben Platzhalter kennen,
+# sonst landet „%%OCR_TAG%%" wörtlich im Browser und der Knopf sucht einen Tag, den es nicht gibt.
+import re as _re
+_knopf = (ROOT / "deploy/paperless-knoepfe/paperlaiss-knoepfe.js").read_text(encoding="utf-8")
+_init = (ROOT / "deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh").read_text(encoding="utf-8")
+_im_js = set(_re.findall(r"%%([A-Z_]+)%%", _knopf))
+_ersetzt = set(_re.findall(r"s/%%([A-Z_]+)%%/", _init))
+r.check("Knöpfe: jeder Platzhalter im Browser-Skript wird ersetzt",
+        _im_js and _im_js == _ersetzt, f"js={sorted(_im_js)} init={sorted(_ersetzt)}")
+r.check("Knöpfe: Init-Skript bricht Paperless nie ab (endet immer mit exit 0)",
+        _init.rstrip().endswith("exit 0") and "exit 1" not in _init)
+
 sys.exit(r.done())

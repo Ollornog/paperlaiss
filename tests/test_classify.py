@@ -73,13 +73,20 @@ r.check("OCR-Nachlauf: alles erkannt → nichts", classify.ocr_nachhol_gruende(
     {"document_type": "Rechnung", "correspondent": "X", "needs_ocr": False},
     {"ocr_regeln": {"wenn_kein_typ": True, "wenn_kein_korrespondent": True}}) == [])
 
+# ---- typ_setzen(): automatisch nur leere Typen füllen, beim Knopf auch ändern.
+r.check("Typ: leer → gesetzt", classify.typ_setzen(3, None, False) == 3)
+r.check("Typ: automatisch vorhandenen NICHT überschreiben", classify.typ_setzen(3, 5, False) is None)
+r.check("Typ: beim Neu-Klassifizieren überschreiben", classify.typ_setzen(3, 5, True) == 3)
+r.check("Typ: gleich oder nichts erkannt → nichts schreiben",
+        classify.typ_setzen(5, 5, True) is None and classify.typ_setzen(None, 5, True) is None)
+
 # ---- Verdrahtung: main() fuehrt den OCR-Nachlauf WIRKLICH aus. Der alte Zweig war unerreichbar
 # und fiel in keinem Test auf, weil nur die Hilfsfunktionen geprueft wurden. Hier laeuft main()
 # gegen gefaelschte Paperless- und Mistral-Aufrufe (Trockenlauf, nichts wird geschrieben).
 import contextlib as _ctx, io as _io
 
 
-def _lauf(chat_antworten, force_ocr=False, text=_gut):
+def _lauf(chat_antworten, force_ocr=False, text=_gut, nur_ocr=False):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
                                 "custom_fields": [], "created": "2026-01-01"},
@@ -98,10 +105,10 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut):
         aufrufe["chat"].append(messages[-1]["content"])
         aufrufe.setdefault("system", messages[0]["content"])
         return dict(antworten.pop(0)), "{}"
-    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR")}
+    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR", "NUR_OCR")}
     classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
     classify.mistral = lambda *a, **k: {}
-    classify.TOK, classify.DRY, classify.FORCE_OCR = "x", True, force_ocr
+    classify.TOK, classify.DRY, classify.FORCE_OCR, classify.NUR_OCR = "x", True, force_ocr, nur_ocr
     os.environ["CLASSIFY_DOC"] = "5"
     try:
         with _ctx.redirect_stdout(_io.StringIO()):
@@ -124,6 +131,9 @@ r.check("Verdrahtung: alles lesbar → kein OCR", _b["ocr"] == 0 and len(_b["cha
 _c = _lauf([{**_ok, "needs_ocr": True}], force_ocr=True)
 r.check("Verdrahtung: OCR lief schon vor Pass 1 → kein zweites Mal", _c["ocr"] == 1 and len(_c["chat"]) == 1,
         f"ocr={_c['ocr']} chat={len(_c['chat'])}")
+_d = _lauf([], nur_ocr=True)
+r.check("Verdrahtung: Nur-OCR liest neu und klassifiziert NICHT", _d["ocr"] == 1 and _d["chat"] == [],
+        f"ocr={_d['ocr']} chat={len(_d['chat'])}")
 
 # Die Vorschau im Panel muss GENAU den Prompt zeigen, den die KI bekommt — nicht einen Nachbau.
 _alt_get = classify.get

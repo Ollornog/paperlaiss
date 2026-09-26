@@ -10,6 +10,10 @@ services:
     # ... euer bestehender paperless-ngx-Service (image, db, redis, …) ...
     volumes:
       - ./scripts:/scripts
+      # Optional: KI-/OCR-Knöpfe in der Dokumentansicht (kein Fork, siehe README).
+      # Beide Dateien müssen root gehören und dürfen für andere nicht schreibbar sein.
+      - ./paperless-knoepfe/10-paperlaiss-knoepfe.sh:/custom-cont-init.d/10-paperlaiss-knoepfe.sh:ro
+      - ./paperless-knoepfe/paperlaiss-knoepfe.js:/paperlaiss-knoepfe/paperlaiss-knoepfe.js:ro
     environment:
       PAPERLESS_POST_CONSUME_SCRIPT: /scripts/classify.py
       CLASSIFY_CONFIG: /scripts/classify-config.json

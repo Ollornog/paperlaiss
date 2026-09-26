@@ -5,6 +5,7 @@ Legt an, was der Zauberstab-Weg braucht, und traegt es in die classify-config.js
 
   1. Auslöser-Tag      (Standard „KI-neu")      — dranhängen = neu verarbeiten lassen
   2. Hinweis-Feld      (Standard „KI-Hinweis")  — optionaler Freitext für den Lauf
+  2b. OCR-Tag          (Standard „KI-OCR")      — nur den Text per OCR neu lesen
   3. Paperless-Workflow „Document Updated" mit zwei Auslösern (Tag bzw. Feld befüllt),
      Aktion = Webhook auf das Panel
 
@@ -28,6 +29,7 @@ SECRET = os.environ["REDO_SECRET"]
 CONFIG = os.environ.get("CLASSIFY_CONFIG", "/scripts/classify-config.json")
 TAG_NAME = os.environ.get("REDO_TAG", "KI-neu")
 FELD_NAME = os.environ.get("HINWEIS_FELD", "KI-Hinweis")
+OCR_TAG_NAME = os.environ.get("OCR_TAG", "KI-OCR")
 WF_NAME = os.environ.get("WORKFLOW_NAME", "paperlaiss — neu klassifizieren")
 
 
@@ -55,6 +57,7 @@ def main():
     print("Neu klassifizieren einrichten")
     tag_id = hole_oder_lege_an("/tags/", TAG_NAME, {"color": "#a020f0", "matching_algorithm": 0})
     feld_id = hole_oder_lege_an("/custom_fields/", FELD_NAME, {"data_type": "string"})
+    ocr_tag_id = hole_oder_lege_an("/tags/", OCR_TAG_NAME, {"color": "#0ea5e9", "matching_algorithm": 0})
 
     # Der Workflow: zwei Auslöser, damit BEIDE Wege funktionieren — Tag dranhängen ODER
     # nur einen Hinweis eintippen. Ohne den zweiten müsste man immer auch den Tag setzen.
@@ -65,6 +68,7 @@ def main():
         "triggers": [
             {"type": 3, "filter_has_tags": [tag_id]},
             {"type": 3, "filter_custom_field_query": json.dumps([feld_id, "exists", True])},
+            {"type": 3, "filter_has_tags": [ocr_tag_id]},
         ],
         "actions": [{
             "type": 4,
@@ -97,9 +101,11 @@ def main():
         cfg = {}
     cfg["redo_tag"] = TAG_NAME
     cfg["hinweis_field"] = FELD_NAME
+    cfg["ocr_tag"] = OCR_TAG_NAME
     with open(CONFIG, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-    print(f"  config          redo_tag='{TAG_NAME}', hinweis_field='{FELD_NAME}' in {CONFIG}")
+    print(f"  config          redo_tag='{TAG_NAME}', hinweis_field='{FELD_NAME}', "
+          f"ocr_tag='{OCR_TAG_NAME}' in {CONFIG}")
     print("\nFertig. Tag an ein Dokument hängen oder einen Hinweis eintragen und speichern —")
     print("paperlaiss liest das Dokument per OCR neu und klassifiziert es mit dem Hinweis.")
 
