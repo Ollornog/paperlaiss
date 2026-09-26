@@ -153,8 +153,12 @@ LOG_ARTEN = (
     ("pass0-fail", "fehler"),
     ("nachbearbeitung-fail", "fehler"),
     ("trace-fail", "fehler"),
+    ("OCR-nachgeholt-fail", "fehler"),
+    ("OCR-neu-fail", "fehler"),
     ("FEHLER", "fehler"),
     ("OCR-rescue", "ocr"),
+    ("OCR-nachgeholt", "ocr"),
+    ("OCR-neu", "ocr"),
     ("repariert", "repariert"),
     ("VORSCHLAG", "vorschlag"),
     ("skip", "uebersprungen"),
@@ -329,3 +333,44 @@ def auth_einstellungen(env):
                                  "PANEL_PASSWORD_LOGIN aus — das Konto könnte sich nie anmelden")
         out["admin"] = (name, pw)
     return out
+
+
+def ausloeser_auswerten(tags, custom_fields, redo_id, ocr_id, hinweis_fid, marker_id=None):
+    """Was hat der Nutzer in Paperless ausgeloest, und was muss vor dem Lauf weg?
+
+    Drei Auslöser: Tag „neu klassifizieren", Hinweisfeld mit Text, Tag „nur OCR".
+    Rueckgabe (modus, hinweis, patch):
+      modus  "neu"      — neu klassifizieren (mit OCR); gewinnt, wenn mehrere gesetzt sind,
+                          denn der Lauf liest ohnehin per OCR neu
+             "nur_ocr"  — nur den Text neu lesen
+             None       — nichts ausgeloest (der Webhook kam von einer anderen Aenderung)
+      patch  — entfernt BEIDE Tags und das Hinweisfeld, sonst loest die naechste Bearbeitung
+               erneut aus. Leer, wenn nichts zu entfernen ist.
+
+    Beim reinen OCR bleibt der OCR-Tag stehen: der Lauf entfernt ihn erst zusammen mit dem
+    neuen Text, und das ist das Fertig-Signal fuer den Knopf (ein unveraenderter Text aendert
+    das Dokument sonst gar nicht). Beim Neu-Klassifizieren geht auch der Marker-Tag mit weg; der Lauf setzt ihn am Ende wieder.
+    Daran erkennt der KI-Knopf in Paperless, dass das ERGEBNIS da ist — „das Dokument hat sich
+    geaendert" genuegt nicht, denn der OCR-Text wird schon vorher geschrieben.
+    """
+    tags = list(tags or [])
+    cfs = list(custom_fields or [])
+    hinweis = ""
+    if hinweis_fid:
+        for c in cfs:
+            if c.get("field") == hinweis_fid:
+                hinweis = str(c.get("value") or "").strip()
+    neu = bool(redo_id) and redo_id in tags
+    ocr = bool(ocr_id) and ocr_id in tags
+    patch = {}
+    if neu or hinweis:
+        weg = {x for x in (redo_id, ocr_id, marker_id) if x}
+    else:
+        weg = set()
+    rest = [t for t in tags if t not in weg]
+    if len(rest) != len(tags):
+        patch["tags"] = rest
+    if hinweis:
+        patch["custom_fields"] = [c for c in cfs if c.get("field") != hinweis_fid]
+    modus = "neu" if (neu or hinweis) else "nur_ocr" if ocr else None
+    return modus, hinweis, patch

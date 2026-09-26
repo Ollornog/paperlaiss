@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — KI- und OCR-Knopf in Paperless (ohne Fork)
+
+- `deploy/paperless-knoepfe/`: Init-Skript für `/custom-cont-init.d` + Browser-Skript. **KI**
+  (optionaler Hinweis → neu klassifizieren mit OCR), **OCR** (nur Text neu lesen). Die Knöpfe
+  nutzen nur die Paperless-API mit der Sitzung des Nutzers; ausgelöst wird über den vorhandenen
+  Workflow. Fertig-Signal: der Lauf setzt den Marker-Tag wieder bzw. entfernt den OCR-Tag erst
+  mit dem Text — danach lädt die Seite neu.
+- **Nur-OCR-Modus** (`CLASSIFY_NUR_OCR=1`, Auslöser-Tag `ocr_tag`), Einrichtungsskript legt Tag
+  und dritten Workflow-Auslöser an.
+- **Beim ausdrücklichen Neu-Klassifizieren** (Knopf, Panel) darf die KI einen vorhandenen
+  Dokumenttyp ändern; automatisch weiterhin nur einen leeren setzen (`typ_setzen()`).
+
 ### Hinzugefügt — Ablauf & Prompt im Panel (`/ablauf`)
 
 - Jeder Schritt eines Laufs mit den aktuellen Einstellungen (Auslöser, Schleifenschutz, OCR-Regeln,

@@ -23,7 +23,7 @@ import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, urll
 from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
-from kern import (auffaelligkeiten, auth_einstellungen, config_uebernehmen,
+from kern import (auffaelligkeiten, auth_einstellungen, ausloeser_auswerten, config_uebernehmen,
                   doc_id_aus_webhook, feld_typ, merge_metadaten, verlauf)
 
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
@@ -109,38 +109,33 @@ def _cfg():
 
 
 def raeume_ausloeser(doc_id, doc=None):
-    """Ausloeser-Tag und Hinweisfeld entfernen, BEVOR der Lauf startet — der Schleifenschutz.
+    """Auslöser lesen und entfernen, BEVOR der Lauf startet — der Schleifenschutz.
 
     Der Lauf dauert mit OCR leicht eine Minute. Stuenden Tag und Feld so lange noch am Dokument,
-    loeste jede Bearbeitung in dieser Zeit den Webhook erneut aus. Gibt den gelesenen Hinweistext
-    zurueck, damit er dem Lauf mitgegeben werden kann.
+    loeste jede Bearbeitung in dieser Zeit den Webhook erneut aus. Gibt (modus, hinweis) zurueck;
+    die Entscheidung steht in kern.ausloeser_auswerten().
     """
     cfg = _cfg()
     doc = doc or api_get(f"/documents/{doc_id}/")
-    hinweis = ""
-    patch = {}
 
-    redo_name = (cfg.get("redo_tag") or "").strip()
-    if redo_name:
-        tags = api_get("/tags/?page_size=1000")["results"]
-        redo_id = next((t["id"] for t in tags if t["name"].strip().lower() == redo_name.lower()), None)
-        if redo_id and redo_id in (doc.get("tags") or []):
-            patch["tags"] = [t for t in doc["tags"] if t != redo_id]
+    def tag_id(name):
+        name = (name or "").strip().lower()
+        if not name:
+            return None
+        return next((t["id"] for t in api_get("/tags/?page_size=1000")["results"]
+                     if t["name"].strip().lower() == name), None)
 
-    hinweis_name = (cfg.get("hinweis_field") or "").strip()
+    hinweis_fid = None
+    hinweis_name = (cfg.get("hinweis_field") or "").strip().lower()
     if hinweis_name:
-        felder = api_get("/custom_fields/?page_size=1000")["results"]
-        hid = next((f["id"] for f in felder if f["name"].strip().lower() == hinweis_name.lower()), None)
-        if hid:
-            for c in (doc.get("custom_fields") or []):
-                if c["field"] == hid:
-                    hinweis = str(c.get("value") or "").strip()
-            if hinweis:
-                patch["custom_fields"] = [c for c in (doc.get("custom_fields") or [])
-                                          if c["field"] != hid]
+        hinweis_fid = next((f["id"] for f in api_get("/custom_fields/?page_size=1000")["results"]
+                            if f["name"].strip().lower() == hinweis_name), None)
+    modus, hinweis, patch = ausloeser_auswerten(doc.get("tags"), doc.get("custom_fields"),
+                                                tag_id(cfg.get("redo_tag")), tag_id(cfg.get("ocr_tag")),
+                                                hinweis_fid, tag_id(cfg.get("marker_tag")))
     if patch:
         api_send(f"/documents/{doc_id}/", patch, "PATCH")
-    return hinweis
+    return modus, hinweis
 
 
 def _cfg_oeffentlich():
@@ -266,7 +261,7 @@ def running_jobs():
 
 
 # ---------- classify.py Re-Trigger ----------
-def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis=""):
+def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis="", nur_ocr=False):
     env = dict(os.environ)
     env.update({"CLASSIFY_DOC": str(doc), "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK,
                 "MISTRAL_KEY": MISTRAL_KEY, "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG,
@@ -277,6 +272,8 @@ def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis=""):
         env["CLASSIFY_FORCE_OCR"] = "1"
     if hinweis:
         env["CLASSIFY_HINWEIS"] = hinweis
+    if nur_ocr:
+        env["CLASSIFY_NUR_OCR"] = "1"
     try:
         r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=300)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
@@ -381,10 +378,14 @@ async def redo(request: Request, hintergrund: BackgroundTasks, x_redo_secret: st
               f"body={roh[:200]!r}", file=sys.stderr)
         raise HTTPException(400, "keine Dokument-ID im Webhook gefunden "
                                  "(weder Query-Parameter noch Rumpf enthielten eine)")
-    hinweis = raeume_ausloeser(doc_id)
+    modus, hinweis = raeume_ausloeser(doc_id)
+    if modus is None:
+        # Der Workflow feuert bei JEDER Aenderung, die zu einem Ausloeser passt — auch bei der,
+        # mit der wir die Ausloeser gerade selbst entfernt haben. Dann gibt es nichts zu tun.
+        return {"ok": True, "doc": doc_id, "gestartet": False}
     hintergrund.add_task(run_classify, doc_id, force=True, force_ocr=True, source="redo",
-                         hinweis=hinweis)
-    return {"ok": True, "doc": doc_id, "hinweis": bool(hinweis), "gestartet": True}
+                         hinweis=hinweis, nur_ocr=(modus == "nur_ocr"))
+    return {"ok": True, "doc": doc_id, "modus": modus, "hinweis": bool(hinweis), "gestartet": True}
 
 
 def _log_zeilen(max_zeilen=20000):

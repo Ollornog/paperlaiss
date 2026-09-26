@@ -120,6 +120,24 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 `./scripts` volume, `POST_CONSUME` and the `CLASSIFY_*` variables, and add the `panel` service.
 `scripts/` must be writable by both containers.
 
+### Buttons in Paperless (optional)
+
+Two buttons next to Paperless' own *Suggest* in the document view — without a fork:
+
+- **KI** (magic wand) — an optional hint for the AI, then re-classify (always with Mistral OCR).
+- **OCR** — only re-read the text with Mistral OCR; metadata stays as it is.
+
+Paperless runs scripts from `/custom-cont-init.d` on every container start (documented under
+*Custom Container Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` copies
+`paperlaiss-knoepfe.js` into the static directory and adds one `<script>` line to the start page —
+again after every update, nothing to merge. The buttons only talk to the **Paperless API with the
+user's own session**: they set the redo tag / hint field or the OCR tag, and the existing workflow
+calls paperlaiss. Set up tag, field and workflow once with `deploy/neu-klassifizieren-einrichten.py`.
+Names: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` in the Paperless
+container (defaults `KI-neu`, `KI-OCR`, `KI-Hinweis`). If Paperless changes its page, the buttons
+are missing — Paperless itself keeps working. After the run the page reloads, so Paperless does
+not save its stale state back over the result.
+
 ## Configuration (`classify-config.json`)
 
 | Key | Default | Meaning |

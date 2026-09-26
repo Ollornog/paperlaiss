@@ -122,6 +122,24 @@ Siehe [`deploy/docker-compose.example.yml`](../deploy/docker-compose.example.yml
 `./scripts`-Volume, `POST_CONSUME` und die `CLASSIFY_*`-Variablen erweitern und den `panel`-Service
 ergänzen. `scripts/` muss für beide Container schreibbar sein.
 
+### Knöpfe in Paperless (optional)
+
+Zwei Knöpfe neben Paperless' eigenem *Suggest* in der Dokumentansicht — ohne Fork:
+
+- **KI** (Zauberstab) — optional ein Hinweis für die KI, dann neu klassifizieren (immer mit Mistral-OCR).
+- **OCR** — nur den Text per Mistral-OCR neu lesen; die Metadaten bleiben.
+
+Paperless führt bei jedem Containerstart Skripte aus `/custom-cont-init.d` aus (dokumentiert unter
+*Custom Container Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` kopiert
+`paperlaiss-knoepfe.js` ins Static-Verzeichnis und hängt eine `<script>`-Zeile in die Startseite —
+nach jedem Update erneut, nichts zu mergen. Die Knöpfe sprechen nur die **Paperless-API mit der
+Sitzung des Nutzers** an: sie setzen Auslöser-Tag/Hinweisfeld bzw. OCR-Tag, und der vorhandene
+Workflow ruft paperlaiss. Tag, Feld und Workflow einmal mit `deploy/neu-klassifizieren-einrichten.py`
+anlegen. Namen: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` im
+Paperless-Container (Vorgaben `KI-neu`, `KI-OCR`, `KI-Hinweis`). Baut Paperless seine Seite um,
+fehlen die Knöpfe — Paperless selbst läuft weiter. Nach dem Lauf lädt die Seite neu, damit Paperless
+nicht seinen alten Stand über das Ergebnis speichert.
+
 ## Konfiguration (`classify-config.json`)
 
 | Key | Default | Bedeutung |
