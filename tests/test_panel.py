@@ -223,4 +223,9 @@ r.check("Adressbuch: Werte getrimmt, leere Felder fallen weg", _neu.get("kontext
 r.check("Adressbuch: Import-Herkunft bleibt erhalten", _neu.get("quelle") == "import" and _neu.get("extern_id") == "K-7")
 r.check("Adressbuch: unbekannte Eingaben werden nicht übernommen", "unbekannt" not in _neu)
 
+r.check("Aktivität: Trockenlauf ist eine eigene Art, keine Info",
+        kern.eintrag_lesen("2026-09-20 19:52:14 DRY DRY 918 | exakt='X' | typ=Rechnung |")["art"] == "trockenlauf")
+r.check("Aktivität: unbekannte Zeile ist ein Hinweis",
+        kern.eintrag_lesen("2026-09-20 19:52:14 nachbearbeitung 5: ok")["art"] == "hinweis")
+
 sys.exit(r.done())

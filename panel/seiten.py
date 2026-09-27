@@ -118,7 +118,7 @@ def aktivitaet() -> str:
         '<nav id="seiten" role="navigation" aria-label="Seitennavigation" data-pagination '
         'class="mt-4 flex w-full justify-center"></nav>')
     lauf = dialog("lauf", "Lauf", '<div id="lauf-schritte" class="grid gap-2"></div>')
-    arten_js = "{" + ",".join(f"'{a}':['{t}','{v}']" for a, t, _, v in ARTEN) + ",'info':['Info','outline'],'vorschlag':['Vorschlag','outline']}"
+    arten_js = "{" + ",".join(f"'{a}':['{t}','{v}']" for a, t, _, v in ARTEN) + ",'trockenlauf':['Trockenlauf','outline'],'hinweis':['Hinweis','outline'],'vorschlag':['Vorschlag','outline']}"
     return (
         kopf("Aktivität", "Was der Klassifizierer getan hat. Kästen und Verlauf filtern, eine Zeile öffnet den Lauf.",
              manuell)
@@ -156,7 +156,7 @@ async function laden(){
   tb.innerHTML = d.eintraege.length ? d.eintraege.map(e=>{
     const typ = e.typ ? (TYPEN[e.typ]||e.typ) : '';
     const korr = e.korrespondent ? txt(e.korrespondent)+(e.korrespondent_neu?' <span class="badge" data-variant="warning">neu</span>':'') : '';
-    const hinweis = e.ocr ? 'mit OCR' : (e.art==='fehler'||e.art==='info'||e.art==='ocr'||e.art==='uebersprungen' ? txt(e.text.replace(/^\S+\s+\d+:?\s*\|?\s*/,'')).slice(0,90) : '');
+    const hinweis = e.ocr ? 'mit OCR' : (e.art==='fehler'||e.art==='hinweis'||e.art==='ocr'||e.art==='uebersprungen' ? txt(e.text.replace(/^\S+\s+\d+:?\s*\|?\s*/,'')).slice(0,90) : '');
     return '<tr class="cursor-pointer hover:bg-muted" onclick="lauf('+(e.doc||0)+')">'+
       '<td class="whitespace-nowrap tabular-nums text-muted-foreground">'+txt(e.ts)+'</td>'+
       '<td class="tabular-nums">'+(e.doc?'#'+e.doc:'—')+'</td><td>'+badge(e.art)+'</td>'+

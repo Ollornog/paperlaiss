@@ -334,7 +334,9 @@ def eintrag_lesen(zeile):
     if len(zeile) < 20 or zeile[4] != "-" or zeile[7] != "-" or zeile[13] != ":":
         return None
     rest = zeile[20:].strip()
-    art = log_art(rest) or "info"
+    # Trockenläufe (DRY) haben nichts geschrieben — eigene Art, damit man sie nicht für Fehler
+    # oder echte Läufe hält. Alles Übrige ohne bekanntes erstes Wort ist ein Hinweis.
+    art = "trockenlauf" if rest.startswith("DRY") else (log_art(rest) or "hinweis")
     m = re.match(r"^(?:DRY\s+)?[A-Za-z-]+\s+(\d+)\b", rest)
     doc = int(m.group(1)) if m else None
     korr = re.search(r"(exakt|NEU|kandidat\w*)='([^']*)'", rest)

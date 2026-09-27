@@ -14,6 +14,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   schon beim OCR-Nachlauf und der Selbstkorrektur. Test belegt die Verdrahtung (Mutation rot).
 - Ablauf: Regeln als Tabelle „Wenn → Dann" in normaler Schrift, der aktuelle Stand der
   Einstellungen getrennt darunter (vorher Plaketten mit gemischtem Text).
+- Aktivität: „Info" hieß in Wahrheit „Trockenlauf" (DRY, nichts geschrieben) — jetzt so
+  benannt; sonstige unbekannte Zeilen heißen „Hinweis".
 - Lauf-Popup: nur noch die Schritte, die in diesem Lauf passiert sind (kein OCR-Schritt ohne OCR).
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
