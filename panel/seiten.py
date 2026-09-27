@@ -365,7 +365,8 @@ KNOTEN_FELDER = {
                                              ("eigene_kennungen.email", "Eigene Mail-Adressen")]),
     "pass1": ("Pass 1 — Analyse", [("system_prompt", "System-Prompt (leer = eingebaut; {TYPES}, {TAGBLOCK}/{TAGS})"),
                                    ("model", "Modell"), ("temperature", "Temperatur"),
-                                   ("content_max_len", "Text bis (Zeichen)")]),
+                                   ("content_max_len", "Text bis (Zeichen, gesamt)"),
+                                   ("content_end_len", "Davon am Ende (Zeichen)")]),
     "nachlauf": ("Text lesbar laut KI?", [("ocr_regeln.nach_ki_meldung", "Wenn die KI unlesbaren Text meldet"),
                                           ("ocr_regeln.wenn_kein_typ", "Wenn kein Dokumenttyp erkannt"),
                                           ("ocr_regeln.wenn_kein_korrespondent", "Wenn kein Korrespondent erkannt")]),
@@ -429,7 +430,7 @@ function zeichnen(){
       stand:[['eigene USt-IDs',((CFG.eigene_kennungen||{}).ustid||[]).length],['eigene IBANs',((CFG.eigene_kennungen||{}).iban||[]).length],['eigene Domains',((CFG.eigene_kennungen||{}).domains||[]).length],['eigene Adressen',((CFG.eigene_kennungen||{}).email||[]).length]]},
     {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Dokument analysieren',knopf:knopf('pass1'),
       was:'Die Hauptanfrage: Die KI liest den Text und bestimmt Dokumenttyp, Absender, Datum, Felder, Zusammenfassung und Tags. '+
-          'Modell <b>'+txt(CFG.model)+'</b>, Temperatur '+txt(CFG.temperature)+', Text bis '+txt(CFG.content_max_len)+' Zeichen.',
+          'Modell <b>'+txt(CFG.model)+'</b>, Temperatur '+txt(CFG.temperature)+', Text bis '+txt(CFG.content_max_len)+' Zeichen (bei längeren Dokumenten Anfang + die letzten '+txt(CFG.content_end_len??1000)+'). Die Antwort ist per JSON-Schema festgelegt (Dokumenttyp nur aus der Liste).',
       klappen:[['Eingabe — Anweisung (System-Prompt)',promptEditor()],
                ['Eingabe — Nachricht je Dokument',teileHtml(V.nachricht_teile)],
                ['Ausgabe',tabelle({document_type:'Dokumenttyp aus der Liste, oder leer',correspondent:'Name des Absenders, oder leer',
@@ -603,8 +604,12 @@ EINSTELLUNGEN = {
     "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 1 und 2)."),
     "temperature": ("KI-Modell & Prompt", "Temperatur",
                     "Wie frei das Modell antwortet: 0 = immer gleich, höher = kreativer. Für Klassifizierung niedrig halten (0–0,2)."),
-    "content_max_len": ("KI-Modell & Prompt", "Text bis (Zeichen)",
-                        "So viel vom Dokumenttext geht an die KI. Mehr kostet mehr und ist selten nötig."),
+    "content_max_len": ("KI-Modell & Prompt", "Text bis (Zeichen, gesamt)",
+                        "So viel vom Dokumenttext geht an die KI — bei längeren Dokumenten der Anfang plus das Ende "
+                        "(siehe unten). Mehr kostet mehr und ist selten nötig."),
+    "content_end_len": ("KI-Modell & Prompt", "Davon am Ende (Zeichen)",
+                        "Ist ein Dokument länger als die Gesamtlänge, bekommt die KI den Anfang und diese Zahl "
+                        "Zeichen vom Ende — dort stehen oft Summe, Fälligkeit und Bankverbindung."),
     "system_prompt": ("KI-Modell & Prompt", "System-Prompt",
                       "Die Anweisung an die KI. Leer = eingebauter Prompt. Platzhalter: {TYPES} (Dokumenttypen), "
                       "{TAGBLOCK} oder {TAGS} (Tag-Liste). Fertig eingesetzt zu sehen unter „Ablauf & Prompt“."),

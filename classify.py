@@ -57,7 +57,8 @@ CFG = {
     "ocr_always": False,
     "ocr_min_len": 300,
     "temperature": 0.1,
-    "content_max_len": 7000,
+    "content_max_len": 10000,          # Zeichen Dokumenttext an die KI, gesamt (Anfang + Ende)
+    "content_end_len": 1000,           # davon am Ende des Dokuments (Summe, Fälligkeit)
     # Defaults:
     "tagging_enabled": False,          # KI vergibt KEINE inhaltlichen Tags (Firmen-DMS: Tags sind manuelle Status/Richtung)
     "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
@@ -540,14 +541,82 @@ def send(path, data, method="PATCH"):
     return json.load(urllib.request.urlopen(req, timeout=45))
 
 
-def mistral_chat(messages, max_tokens=900):
+# Cache-Schlüssel für Mistrals Prompt-Caching (`prompt_cache_key`): zwischengespeicherte
+# Präfix-Tokens kosten 10 % (https://docs.mistral.ai/studio-api/conversations/advanced/prompt-caching).
+# Ein Schlüssel je System-Prompt —
+# so trifft der Cache über Dokumente hinweg (gleicher System-Prompt) und innerhalb einer
+# Unterhaltung (Pass 1 → OCR-Nachlauf → Pass 2 → Korrektur schicken denselben Anfang erneut).
+CACHE_KEY = ""
+# Nutzung je Aufruf (prompt/cached/completion) — fürs Trace, damit man sieht, ob der Cache trifft.
+NUTZUNG = []
+
+
+def mistral_chat(messages, max_tokens=900, schema=None, name="antwort"):
+    """Ein Chat-Aufruf mit JSON-Antwort. Mit `schema` erzwingt Mistral dessen Aufbau
+    (`response_format: json_schema`, strict) — nicht nur „irgendein JSON" wie `json_object`."""
+    rf = ({"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}}
+          if schema else {"type": "json_object"})
     body = {"model": MODEL, "temperature": CFG["temperature"], "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"}, "messages": messages}
+            "response_format": rf, "messages": messages}
+    if CACHE_KEY:
+        body["prompt_cache_key"] = CACHE_KEY
     req = urllib.request.Request(MISTRAL_URL, data=json.dumps(body).encode("utf-8"),
         headers={"Authorization": f"Bearer {KEY_TEXT}", "Content-Type": "application/json"})
     r = json.load(urllib.request.urlopen(req, timeout=120))
+    u = r.get("usage") or {}
+    NUTZUNG.append({"name": name, "prompt": u.get("prompt_tokens"), "completion": u.get("completion_tokens"),
+                    "cached": (u.get("prompt_tokens_details") or {}).get("cached_tokens")})
     raw = r["choices"][0]["message"]["content"]
     return json.loads(raw), raw
+
+
+_NULLBAR = lambda t: {"type": [t, "null"]}
+
+
+def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary):
+    """JSON-Schema der Pass-1-Antwort. Dokumenttyp als Auswahlliste (plus null), Felder als
+    bekannte Schlüssel. `additionalProperties` bleibt offen: eigene Prompts verlangen teils
+    weitere Schlüssel (summary_long, korrespondent_kontext), die sonst wegfielen. Ein gültiges
+    Schema heisst nicht, dass die Werte stimmen — es garantiert den Aufbau."""
+    wert = {"type": ["string", "number", "boolean", "null"]}
+    props = {
+        "document_type": {"type": ["string", "null"], "enum": sorted(typen) + [None]},
+        "correspondent": _NULLBAR("string"),
+        "fields": {"type": "object", "properties": {f: wert for f in feldnamen}, "additionalProperties": True},
+        "document_date": _NULLBAR("string"),
+        "needs_ocr": {"type": "boolean"},
+    }
+    pflicht = ["document_type", "correspondent", "fields", "needs_ocr"]
+    if mit_summary:
+        props["summary"] = _NULLBAR("string")
+    if mit_tags:
+        props["tags"] = {"type": "array", "items": {"type": "string"}}
+        props["new_tags"] = {"type": "array", "items": {"type": "string"}}
+    if mit_absender:
+        props["absender"] = {"type": "object", "additionalProperties": False, "properties": {
+            k: _NULLBAR("string") for k in ("ustid", "iban", "email", "telefon", "adresse", "kundennummer")}}
+        pflicht.append("absender")
+    return {"type": "object", "properties": props, "required": pflicht, "additionalProperties": True}
+
+
+def pass2_schema(kandidaten):
+    """Pass 2 darf nur einen der Kandidaten nennen — oder null."""
+    return {"type": "object", "properties": {"match": {"type": ["string", "null"], "enum": list(kandidaten) + [None]}},
+            "required": ["match"], "additionalProperties": False}
+
+
+def text_kuerzen(text, gesamt, ende):
+    """Den Dokumenttext auf `gesamt` Zeichen bringen: Anfang UND Ende behalten.
+
+    Summe, Fälligkeit und Bankverbindung stehen oft am Schluss; nur den Anfang zu schicken
+    verlor sie bei langen Dokumenten ganz (PO 2026-09-27: 9000 + 1000 Zeichen)."""
+    text = str(text or "")
+    if len(text) <= gesamt:
+        return text
+    ende = max(0, min(ende, gesamt // 2))
+    kopf = gesamt - ende
+    weg = len(text) - kopf - ende
+    return (text[:kopf] + f"\n\n[… {weg} Zeichen ausgelassen …]\n\n" + (text[-ende:] if ende else "")).rstrip()
 
 
 def mistral_ocr(did):
@@ -1093,7 +1162,8 @@ def prompt_vorschau():
         "- " + bsp("Name") + " (auch: " + bsp("Aliase") + ") [Kontext: " + bsp("Kontext") + "] [gefunden: " + bsp("USt-ID …, Name im Text") + "]\n- …",
         bsp("Text der Mail"), bsp("JJJJ-MM-TT"), bsp("JJJJ-MM-TT"), bsp("Dateiname"),
         "- " + bsp("Feld") + " (" + bsp("Art") + "), aktuell: " + bsp("Wert") + "\n- …",
-        bsp("Titel"), bsp(f"Text des Dokuments, bis {CFG['content_max_len']} Zeichen"))
+        bsp("Titel"), bsp(f"Text des Dokuments, bis {CFG['content_max_len']} Zeichen: Anfang und die letzten "
+                          f"{CFG.get('content_end_len', 1000)}"))
     return {
         "system": "".join(t for t, _ in sys_teile),
         "system_teile": sys_teile,
@@ -1262,12 +1332,18 @@ def main():
 
     set_stage(did, "Pass 1")
     system = pass1_system(CFG, types, tags_all, reserved, bool(summary_fid))
+    global CACHE_KEY
+    CACHE_KEY = "paperlaiss-" + __import__("hashlib").sha256(system.encode("utf-8")).hexdigest()[:16]
+    NUTZUNG.clear()
+    TRACE["ki_nutzung"] = NUTZUNG
+    schema1 = pass1_schema(types, [f["name"] for f in ai_flds], CFG["tagging_enabled"],
+                           CFG.get("stammdaten_erfassen", True), bool(summary_fid))
     user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
         (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
-        fieldspec, title, content[:CFG['content_max_len']]))
+        fieldspec, title, text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000))))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
-    prop, assistant_raw = mistral_chat(messages, 1200)
+    prop, assistant_raw = mistral_chat(messages, 1200, schema1, "pass1")
 
     # OCR-Nachlauf: die KI hat den Text gesehen und haelt ihn fuer Muell (oder eine Regel nach
     # Pass 1 greift). Dann einmal per OCR neu lesen und Pass 1 in DERSELBEN Unterhaltung
@@ -1292,10 +1368,10 @@ def main():
                 messages.append({"role": "assistant", "content": assistant_raw})
                 messages.append({"role": "user", "content":
                     "Der Text war unbrauchbar. Hier der per OCR neu gelesene INHALT:\n"
-                    f"{new[:CFG['content_max_len']]}\n"
+                    f"{text_kuerzen(new, CFG['content_max_len'], CFG.get('content_end_len', 1000))}\n"
                     "Gib die vollständige Analyse (alle Felder, summary, document_date, correspondent, "
                     "tags) mit diesem Text erneut."})
-                prop, assistant_raw = mistral_chat(messages, 1200)
+                prop, assistant_raw = mistral_chat(messages, 1200, schema1, "pass1_nach_ocr")
             else:
                 TRACE["ocr"]["nachlauf_verworfen"] = f"OCR lieferte nur {len(new)} Zeichen"
         except Exception as e:
@@ -1331,7 +1407,7 @@ def main():
                 p2_usr = pass2_frage(corr_name, [c["name"] for c in cands], bsp_txt)
                 messages.append({"role": "assistant", "content": assistant_raw})
                 messages.append({"role": "user", "content": p2_usr})
-                pick, assistant_raw = mistral_chat(messages, 200)
+                pick, assistant_raw = mistral_chat(messages, 200, pass2_schema(list(dict.fromkeys(c["name"] for c in cands))), "pass2")
                 pass2 = {"user": p2_usr, "response": pick, "im_gespraech": True}
                 m = pick.get("match")
                 if m:
@@ -1427,7 +1503,7 @@ def main():
             f"Beim Speichern nach Paperless kam dieser Fehler:\n{fehler_mit_feldnamen(err, cfs, cfields)}\n"
             "Korrigiere die betroffenen Feldwerte (nicht korrigierbare auf null) und gib NUR das JSON "
             "{\"fields\": {<Feldname>: <Wert|null>}} mit denselben Feldnamen zurück."})
-        fix, assistant_raw = mistral_chat(messages, 900)
+        fix, assistant_raw = mistral_chat(messages, 900, name="korrektur")
         flds = {**flds, **(fix.get("fields") or {})}
         cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
         patch["custom_fields"] = cfs

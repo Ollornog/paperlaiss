@@ -6,6 +6,20 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — KI-Antwort per JSON-Schema, Prompt-Caching, Anfang + Ende
+
+- **Pass 1 und Pass 2 antworten nach JSON-Schema** (`response_format: json_schema`, strict) statt nur
+  „irgendein JSON" (`json_object`): Dokumenttyp nur aus der Liste oder null, Felder, Absender-Daten
+  und — bei Pass 2 — nur einer der Kandidaten. Zusatzschlüssel eigener Prompts bleiben erlaubt.
+  Ein gültiges Schema garantiert den Aufbau, nicht die Richtigkeit der Werte.
+- **Prompt-Caching** (`prompt_cache_key`, ein Schlüssel je System-Prompt): zwischengespeicherte
+  Tokens kosten 10 %. Auf dem Testbett kamen ab dem zweiten Dokument 640–870 Token des Prompts aus
+  dem Cache, beim OCR-Nachlauf 4034 von 7030. Die Nutzung je Aufruf steht im Trace (`ki_nutzung`).
+- **Lange Dokumente: Anfang und Ende.** `content_max_len` (neu 10000) ist die Gesamtlänge, davon
+  `content_end_len` (1000) vom Schluss — Summe und Fälligkeit stehen oft dort. Bisher gingen nur die
+  ersten 7000 Zeichen an die KI. Stichprobe (13 Dokumente, darunter eines mit 38 800 Zeichen):
+  Zuordnungen unverändert.
+
 ### Geändert — Gegenüber-Regel aufgeweicht, Bankdaten keine Kandidaten
 
 - „correspondent ist nie die eigene Firma" war zu hart: Bei internen Dokumenten (Lohnabrechnung,

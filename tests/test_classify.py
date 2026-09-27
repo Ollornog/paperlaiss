@@ -103,7 +103,8 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
         return "Neu gelesener Text " * 10
     antworten = list(chat_antworten)
 
-    def chat(messages, max_tokens=900):
+    def chat(messages, max_tokens=900, schema=None, name=""):
+        aufrufe.setdefault("schemas", []).append(schema)
         aufrufe["chat"].append(messages[-1]["content"])
         aufrufe.setdefault("laengen", []).append(len(messages))
         aufrufe.setdefault("system", messages[0]["content"])
@@ -137,6 +138,8 @@ r.check("Verdrahtung: OCR lief schon vor Pass 1 → kein zweites Mal", _c["ocr"]
 # Pass 2 hängt an die Pass-1-Unterhaltung an: die KI sieht das Dokument, nicht nur den Namen.
 _e = _lauf([{**_ok, "correspondent": "Mustr Autoteile"}, {"match": "Muster Autoteile GmbH"}],
            korrespondenten=[{"id": 7, "name": "Muster Autoteile GmbH"}, {"id": 8, "name": "Anderes Haus"}])
+r.check("Pass 2: Schema lässt nur die Kandidaten zu",
+        (_e.get("schemas") or [None, None])[1] and "Muster Autoteile GmbH" in _e["schemas"][1]["properties"]["match"]["enum"])
 r.check("Pass 2: zweiter Aufruf in derselben Unterhaltung (Dokument + Analyse + Frage)",
         len(_e["chat"]) == 2 and _e["laengen"] == [2, 4] and "Muster Autoteile GmbH" in _e["chat"][1],
         f"{len(_e['chat'])} Aufrufe, Längen {_e.get('laengen')}")
@@ -317,6 +320,8 @@ _s = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "
            text=_gut + " UID ATU99988777", korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
 classify.CORR_META.clear()
 r.check("Verdrahtung: nur ein KI-Aufruf (Pass 1), kein Pass 0", len(_s["chat"]) == 1, str(len(_s["chat"])))
+r.check("Verdrahtung: Pass 1 läuft mit Schema (Dokumenttyp aus der Liste)",
+        (_s.get("schemas") or [None])[0] and "Rechnung" in _s["schemas"][0]["properties"]["document_type"]["enum"])
 r.check("Verdrahtung: Treffer steht mit Begründung in der Nachricht an Pass 1",
         "Beispiel Software" in _s["chat"][0] and "gefunden: USt-ID ATU99988777" in _s["chat"][0])
 r.check("Verdrahtung: Trockenlauf zeigt die Stammdaten, schreibt sie nicht",
@@ -354,6 +359,44 @@ r.check("Mail bestätigt: Domain steht im Dokument, kein anderer Korrespondent h
 r.check("Portal: zugeordnet wird die Firma, die Pass 1 nennt, nicht das Portal",
         "exakt='Nord Autoteile GmbH'" in (classify.TRACE.get("correspondent") or {}).get("ergebnis", ""),
         str(classify.TRACE.get("correspondent")))
+
+# ---- KI-Aufrufe: Kürzung (Anfang + Ende), JSON-Schema, Prompt-Caching (PO 2026-09-27)
+_lang = "A" * 9500 + "MITTE" + "x" * 3000 + "ENDE-SUMME 123,45"
+_k = classify.text_kuerzen(_lang, 10000, 1000)
+r.check("Kürzung: kurzer Text bleibt ganz", classify.text_kuerzen("kurz", 10000, 1000) == "kurz")
+r.check("Kürzung: Anfang 9000 + Ende 1000, dazwischen ein Hinweis, Summe am Ende bleibt",
+        _k.startswith("A" * 9000) and _k.endswith("ENDE-SUMME 123,45") and "Zeichen ausgelassen" in _k
+        and "MITTE" not in _k and len(_k) < 10100, str(len(_k)))
+_s1 = classify.pass1_schema({"Rechnung": 1, "Brief": 2}, ["Betrag", "IBAN"], False, True, True)
+r.check("Schema Pass 1: Dokumenttyp nur aus der Liste oder null, Felder und Absender vorgegeben",
+        _s1["properties"]["document_type"]["enum"] == ["Brief", "Rechnung", None]
+        and set(_s1["properties"]["fields"]["properties"]) == {"Betrag", "IBAN"}
+        and "absender" in _s1["required"] and "summary" in _s1["properties"] and "tags" not in _s1["properties"])
+r.check("Schema Pass 1: offen für Zusatzschlüssel eigener Prompts (summary_long …)",
+        _s1["additionalProperties"] is True)
+r.check("Schema Pass 2: nur Kandidaten oder null", classify.pass2_schema(["A", "B"])["properties"]["match"]["enum"] == ["A", "B", None])
+
+# Was tatsächlich an Mistral geht: response_format json_schema (strict) und prompt_cache_key.
+import urllib.request as _ur
+_gesendet = []
+class _Antwort:
+    def __init__(self): self._d = json.dumps({"choices": [{"message": {"content": "{\"match\": null}"}}],
+                                             "usage": {"prompt_tokens": 100, "completion_tokens": 5,
+                                                       "prompt_tokens_details": {"cached_tokens": 80}}}).encode()
+    def read(self, *a): return self._d
+_alt_open, _alt_key = _ur.urlopen, classify.CACHE_KEY
+_ur.urlopen = lambda req, timeout=0: (_gesendet.append(json.loads(req.data)), _Antwort())[1]
+try:
+    classify.CACHE_KEY = "paperlaiss-test"; classify.NUTZUNG.clear()
+    classify.mistral_chat([{"role": "user", "content": "x"}], 50, classify.pass2_schema(["A"]), "pass2")
+    classify.mistral_chat([{"role": "user", "content": "x"}], 50, name="korrektur")
+finally:
+    _ur.urlopen, classify.CACHE_KEY = _alt_open, _alt_key
+r.check("Mistral-Aufruf: Schema als response_format json_schema, strict",
+        _gesendet[0]["response_format"]["type"] == "json_schema" and _gesendet[0]["response_format"]["json_schema"]["strict"] is True)
+r.check("Mistral-Aufruf: ohne Schema weiter json_object", _gesendet[1]["response_format"] == {"type": "json_object"})
+r.check("Mistral-Aufruf: prompt_cache_key wird mitgeschickt", all(g.get("prompt_cache_key") == "paperlaiss-test" for g in _gesendet))
+r.check("Mistral-Aufruf: zwischengespeicherte Tokens landen im Trace", classify.NUTZUNG[0]["cached"] == 80)
 
 # ---- is_null(): die vielen Schreibweisen von „leer"
 r.check("is_null: None", classify.is_null(None) is True)
