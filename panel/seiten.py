@@ -51,8 +51,8 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, PFEIL_K=%PFEILK%;
-const ART={paperless:['Paperless','info'],code:['Schritt','secondary'],ki:['KI',''],entscheidung:['Entscheidung','outline'],grenze:['','']};
+const CHEV=%CHEV%, PFEIL_K=%PFEILK%, SYM=%SYM%;
+const ART={paperless:['Paperless','info','inbox'],code:['Schritt','secondary','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Lesbar statt Code: Text mit Absätzen und Zeilenumbrüchen in normaler Schrift, Objekte als Tabelle.
 function prosa(t){
   const abs=String(t||'').trim().split(/\n\s*\n/).map(a=>'<p>'+txt(a).replace(/\n/g,'<br>')+'</p>').join('');
@@ -73,7 +73,7 @@ function klapp(titel,inhalt,offen){return '<details class="min-w-0"'+(offen?' op
 function schritt(o){
   if(o.art==='grenze') return '<div class="mx-auto w-fit rounded-full border bg-muted/40 px-6 py-2 text-center text-sm font-medium">'+txt(o.titel)+'</div>';
   const a=ART[o.art]||['',''];
-  const badge='<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
+  const badge='<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+(SYM[a[2]]||'')+a[0]+'</span>';
   const erg=o.ergebnis?'<span class="badge" data-variant="'+(o.variante||'secondary')+'">'+txt(o.ergebnis)+'</span>':'';
   // Regeln als Tabelle „Wenn → Dann" in normaler Schrift — Plaketten mit Text waren schwer zu lesen.
   const regeln=(o.regeln||[]).length?'<div class="overflow-x-auto"><table class="table"><thead><tr><th>Wenn</th><th>Dann</th></tr></thead><tbody>'+
@@ -82,7 +82,7 @@ function schritt(o){
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
   const klappen=(o.klappen||[]).length?'<div class="accordion min-w-0" data-multiple>'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
   return '<div class="card" data-size="sm"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-2">'+
-    '<h2 class="flex items-center gap-2"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
+    '<h2 class="flex items-center gap-2 text-lg font-semibold"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
     '<div class="flex items-center gap-2">'+erg+(o.knopf||'')+'</div></header>'+
     '<section class="grid min-w-0 gap-3 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
 }
@@ -93,7 +93,7 @@ function kette(liste){let n=0;return liste.map(o=>schritt(o.art==='grenze'?o:{..
 # ---------------------------------------------------------------- Aktivität
 def aktivitaet() -> str:
     karten = "".join(
-        f'<button type="button" class="card min-w-48 flex-1 cursor-pointer text-left hover:border-ring" data-size="sm" '
+        f'<button type="button" class="card min-w-0 flex-1 cursor-pointer text-left hover:border-ring" data-size="sm" '
         f'data-art="{art}" onclick="setzeFilter({{art:\'{art}\'}})">'
         f'<header><h2 class="flex items-center gap-2">{symbol(sym, "size-4")}{titel}</h2></header>'
         f'<section><span class="text-2xl font-semibold tabular-nums" id="kz-{art}">…</span></section></button>'
@@ -123,8 +123,9 @@ def aktivitaet() -> str:
         kopf("Aktivität", "Was der Klassifizierer getan hat. Kästen und Verlauf filtern, eine Zeile öffnet den Lauf.",
              manuell)
         + '<div id="laufend" class="mb-4"></div>'
-        + f'<div class="flex flex-wrap gap-4">{karten}</div>'
-        + abschnitt("Verlauf (30 Tage) — Klick auf einen Tag filtert", '<div id="verlauf" class="mx-auto w-full max-w-2xl"></div>')
+        # Eine Reihe mit fünf: min-w-0 statt Mindestbreite (sonst bricht die fünfte um).
+        + f'<div class="flex gap-4">{karten}</div>'
+        + abschnitt("Verlauf (60 Tage) — Klick auf einen Tag filtert", '<div id="verlauf" class="w-full"></div>')
         + filterleiste
         + abschnitt("Einträge", tabelle, '<span id="anzahl" class="text-muted-foreground text-sm"></span>')
         + lauf
@@ -142,7 +143,8 @@ function setzeFilter(neu, ersetzen){
   F=f; laden();
 }
 window.addEventListener('popstate',()=>{F=Object.fromEntries(new URLSearchParams(location.search));laden()});
-function badge(art){const a=ARTEN[art]||[art,'outline'];return '<span class="badge" data-variant="'+a[1]+'">'+txt(a[0])+'</span>'}
+const ART_SYM={klassifiziert:'circle-check',ocr:'file-text',repariert:'refresh-ccw',fehler:'circle-alert',uebersprungen:'clock',trockenlauf:'eye',hinweis:'info'};
+function badge(art){const a=ARTEN[art]||[art,'outline'];return '<span class="badge" data-variant="'+a[1]+'">'+(SYM[ART_SYM[art]]||'')+txt(a[0])+'</span>'}
 async function laden(){
   const q=new URLSearchParams({...F}); let d;
   try{ d=await holen('/api/aktivitaet?'+q); }catch(e){ document.getElementById('zeilen').innerHTML='<tr><td colspan="6">'+txt(e.message)+'</td></tr>'; return; }
@@ -175,16 +177,26 @@ function seiten(s,n){
   if(s<n) h+='<li><a href="#" class="btn" data-variant="ghost" onclick="event.preventDefault();setzeFilter({...F,seite:'+(s+1)+'})">Weiter</a></li>';
   nav.innerHTML=h+'</ul>';
 }
+// Verlauf als flache Balkenreihe über die volle Breite. Das C22-Diagramm hat ein festes
+// Seitenverhältnis (320×180): voll breit würde es riesig hoch und die Beschriftung überlappte.
+// Sonderweg aus C22-Farben (bg-success/info/destructive/muted) — Diagramm mit einstellbarer
+// Höhe ist im C22-Backlog gemeldet. Die Höhen sind Daten (style), keine Gestaltung.
+const SERIEN=[['klassifiziert','Klassifiziert','bg-success'],['ocr','OCR','bg-info'],['fehler','Fehler','bg-destructive'],['uebersprungen','Übersprungen','bg-muted-foreground']];
 async function verlauf(){
-  let d; try{ d=await holen('/api/verlauf?tage=30'); }catch(e){ return; }
-  const tage=d.verlauf||[]; const el=document.getElementById('verlauf');
-  const serien=[['klassifiziert','Klassifiziert'],['ocr','OCR'],['fehler','Fehler'],['uebersprungen','Übersprungen']];
-  // Nur jeden fünften Tag beschriften — 30 Datumsangaben überlappen auf der Achse.
-  el.dataset.chart=JSON.stringify({type:'stacked',legend:true,labels:tage.map((t,i)=>(i%5===0||i===tage.length-1)?t.tag.slice(8)+'.'+t.tag.slice(5,7)+'.':''),
-    series:serien.map(([k,n])=>({name:n,data:tage.map(t=>t[k]||0)}))});
-  delete el.dataset.c22ChartWired; if(window.C22&&C22.wireChart) C22.wireChart(el);
-  // Klick auf einen Tag: C22 legt je Kategorie eine Trefferfläche rect[data-hit=i] über das Diagramm.
-  el.onclick=ev=>{const h=ev.target.closest('[data-hit]'); if(h&&tage[+h.dataset.hit]) setzeFilter({...F,tag:tage[+h.dataset.hit].tag});};
+  let d; try{ d=await holen('/api/verlauf?tage=60'); }catch(e){ return; }
+  const tage=d.verlauf||[], el=document.getElementById('verlauf');
+  const max=Math.max(1,...tage.map(t=>SERIEN.reduce((a,[k])=>a+(t[k]||0),0)));
+  const saeulen=tage.map((t,i)=>{
+    const teile=SERIEN.filter(([k])=>t[k]).map(([k,n,c])=>'<div class="'+c+'" style="height:'+(t[k]/max*100)+'%"></div>').join('');
+    const summe=SERIEN.reduce((a,[k])=>a+(t[k]||0),0);
+    const titel=t.tag+': '+(summe?SERIEN.filter(([k])=>t[k]).map(([k,n])=>n+' '+t[k]).join(', '):'nichts');
+    return '<button type="button" class="flex h-full flex-1 cursor-pointer flex-col justify-end rounded-t-sm hover:bg-muted" title="'+txt(titel)+'" onclick="setzeFilter({...F,tag:\''+t.tag+'\'})">'+teile+'</button>';
+  }).join('');
+  const achse=tage.map((t,i)=>'<span class="flex-1 text-center text-muted-foreground text-xs">'+((i%7===0||i===tage.length-1)?t.tag.slice(8)+'.'+t.tag.slice(5,7)+'.':'')+'</span>').join('');
+  const legende=SERIEN.map(([k,n,c])=>'<span class="flex items-center gap-1"><span class="size-2 rounded-sm '+c+'"></span>'+n+'</span>').join('');
+  el.innerHTML='<div class="flex h-40 w-full items-end gap-0.5 border-b">'+saeulen+'</div>'+
+    '<div class="mt-1 flex w-full gap-0.5">'+achse+'</div>'+
+    '<div class="mt-3 flex flex-wrap justify-center gap-4 text-muted-foreground text-xs">'+legende+'</div>';
 }
 async function laufend(){
   try{ const d=await holen('/api/running'); const el=document.getElementById('laufend');
@@ -206,7 +218,7 @@ async function lauf(doc){
   const L=[{art:'grenze',titel:(t.trigger||'automatisch')+' · '+(t.ts||'')}];
   if(t.hinweis) L.push({art:'code',titel:'Hinweis vom Knopf',text:txt(t.hinweis)});
   // Nur Schritte, die in DIESEM Lauf passiert sind: was fehlt, lief nicht.
-  if(o.triggered) L.push({art:'entscheidung',titel:'Text brauchbar? — sonst Mistral-OCR',
+  if(o.triggered) L.push({art:'ocr',titel:'Text neu lesen',
     ergebnis:o.triggered?(o.error?'OCR-Fehler':o.verworfen?'OCR verworfen':'OCR gelesen'):'Paperless-Text',
     variante:o.error?'destructive':o.triggered?'info':'success',
     text:txt(o.grund||'')+(o.chars?' · '+o.chars+' Zeichen':'')+(o.verworfen?' · '+txt(o.verworfen):'')+(o.error?' · '+txt(o.error):''),
@@ -301,14 +313,15 @@ function zeichnen(){
               ['automatischer Lauf und das Dokument trägt den Marker-Tag','Ende — schon klassifiziert (Schleifenschutz)'],
               ['KI-Knopf oder Panel','immer weiter'],['sonst','weiter']],
       stand:[['Klassifizierer',an(CFG.enabled)],['Marker-Tag',CFG.marker_tag]]},
-    {art:'entscheidung',id:'ocr',titel:'Text brauchbar? — sonst Mistral-OCR',knopf:knopf('ocr'),
-      regeln:[['KI-Knopf','Mistral-OCR'],['„Immer OCR“ ist eingeschaltet','Mistral-OCR'],
-              ['der Text ist kürzer als '+mz+' Zeichen','Mistral-OCR'],
-              ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter im Text','Mistral-OCR'],
-              ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','Mistral-OCR'],
-              ['sonst','Paperless-Text verwenden']],
+    {art:'ocr',id:'ocr',titel:'Text neu lesen',knopf:knopf('ocr'),
+      text:'Liest das Dokument mit <b>'+txt(CFG.ocr_model)+'</b> neu und ersetzt den Paperless-Text — aber nur unter diesen Bedingungen:',
+      regeln:[['KI-Knopf in Paperless','lesen'],['„Immer OCR“ ist eingeschaltet','lesen'],
+              ['der Text ist kürzer als '+mz+' Zeichen','lesen'],
+              ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter im Text','lesen'],
+              ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','lesen'],
+              ['sonst','nicht lesen — Paperless-Text verwenden']],
       stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
-      klappen:[['Eingabe','<p>Das Dokument als PDF an <b>'+txt(CFG.ocr_model)+'</b>.</p>'],['Ausgabe','<p>Der Text als Markdown (Überschriften, Tabellen) — ersetzt den Paperless-Text.</p>']]},
+      klappen:[['Eingabe','<p>Das Dokument als PDF.</p>'],['Ausgabe','<p>Der Text als Markdown (Überschriften, Tabellen).</p>']]},
     {art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
       text:'Modell <b>'+txt(CFG.model)+'</b>, kurzer Aufruf.',
       regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, kein KI-Aufruf'],['sonst','KI-Aufruf']],
@@ -556,5 +569,8 @@ def _json(x):
 
 _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down")))
                        .replace("%PFEILK%", _json('<div class="flex justify-center text-muted-foreground">'
-                                                  + symbol("arrow-down", "size-8") + "</div>")))
+                                                  + symbol("arrow-down", "size-12") + "</div>"))
+                       .replace("%SYM%", _json({n: symbol(n) for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
+                                                                       "circle-check", "refresh-ccw", "circle-alert", "clock",
+                                                                       "eye", "info")})))
 _JS_ABLAUF = _JS_ABLAUF.replace("%STIFT%", _json(symbol("pencil")))

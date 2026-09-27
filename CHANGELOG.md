@@ -16,6 +16,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   Einstellungen getrennt darunter (vorher Plaketten mit gemischtem Text).
 - Aktivität: „Info" hieß in Wahrheit „Trockenlauf" (DRY, nichts geschrieben) — jetzt so
   benannt; sonstige unbekannte Zeilen heißen „Hinweis".
+- Aktivität: fünf Kennzahlen wieder in einer Reihe; Verlauf über die volle Breite mit 60 Tagen als
+  flache Balkenreihe (das C22-Diagramm hat ein festes Seitenverhältnis — Sonderweg, in C22 gemeldet);
+  Symbole je Ereignisart.
+- Lauf-Popup scrollt (der Dialoginhalt war abgeschnitten).
+- Ablauf: Schritt „Mistral-OCR · Text neu lesen" mit seinen Bedingungen statt „Text brauchbar?";
+  Symbole je Schrittart, größere Überschriften und Pfeile.
 - Lauf-Popup: nur noch die Schritte, die in diesem Lauf passiert sind (kein OCR-Schritt ohne OCR).
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die

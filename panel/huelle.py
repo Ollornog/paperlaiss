@@ -17,6 +17,13 @@ import html
 
 # Lucide-Pfade, wörtlich aus den C22-Komponenten (gleiche Strichstärke, gleicher Rahmen).
 _ICONS = {
+    'settings-2': '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+    'send': '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+    'list': '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
+    'image': '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
+    'eye': '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+    'cloud-upload': '<path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/>',
+    'badge-check': '<path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/>',
     'external-link': '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     'arrow-down': '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
@@ -139,7 +146,9 @@ def dialog(kennung: str, titel: str, koerper: str, fuss: str = "", breit: bool =
     return (f'<dialog id="{e(kennung)}" class="dialog" aria-labelledby="{e(kennung)}-titel" '
             f'onclick="if (event.target === this) this.close()">'
             f'<div{weite}><header><h2 id="{e(kennung)}-titel">{e(titel)}</h2></header>'
-            f'<section>{koerper}</section>'
+            # min-h-0 + overflow-y-auto: C22 begrenzt den Dialog auf die Fensterhöhe, der Inhalt
+            # selbst scrollt aber nicht — langer Inhalt wäre sonst abgeschnitten.
+            f'<section class="min-h-0 overflow-y-auto">{koerper}</section>'
             + (f'<footer>{fuss}</footer>' if fuss else "") +
             f'<button type="button" class="btn btn-close" data-variant="ghost" aria-label="Schließen" '
             f'onclick="this.closest(\'dialog\').close()">{symbol("x")}</button></div></dialog>')
