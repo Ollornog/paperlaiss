@@ -51,7 +51,7 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, PFEIL_K=%PFEILK%, SYM=%SYM%;
+const CHEV=%CHEV%, PFEIL_K=%PFEILK%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
 const ART={paperless:['Paperless','info','inbox'],code:['Schritt','secondary','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Lesbar statt Code: Text mit Absätzen und Zeilenumbrüchen in normaler Schrift, Objekte als Tabelle.
 function prosa(t){
@@ -73,7 +73,8 @@ function klapp(titel,inhalt,offen){return '<details class="min-w-0"'+(offen?' op
 function schritt(o){
   if(o.art==='grenze') return '<div class="mx-auto w-fit rounded-full border bg-muted/40 px-6 py-2 text-center text-sm font-medium">'+txt(o.titel)+'</div>';
   const a=ART[o.art]||['',''];
-  const badge='<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+(SYM[a[2]]||'')+a[0]+'</span>';
+  // Symbol GETRENNT vom Chip und größer — im Chip war es zu klein, um etwas zu sagen.
+  const badge=(SYMG[a[2]]||'')+'<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
   const erg=o.ergebnis?'<span class="badge" data-variant="'+(o.variante||'secondary')+'">'+txt(o.ergebnis)+'</span>':'';
   // Regeln als Tabelle „Wenn → Dann" in normaler Schrift — Plaketten mit Text waren schwer zu lesen.
   const regeln=(o.regeln||[]).length?'<div class="overflow-x-auto"><table class="table"><thead><tr><th>Wenn</th><th>Dann</th></tr></thead><tbody>'+
@@ -81,10 +82,10 @@ function schritt(o){
   const stand=(o.stand||[]).length?'<p class="text-muted-foreground text-xs">Aktuell: '+o.stand.map(x=>txt(x[0])+' <b>'+txt(x[1])+'</b>').join(' · ')+'</p>':'';
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
   const klappen=(o.klappen||[]).length?'<div class="accordion min-w-0" data-multiple>'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
-  return '<div class="card" data-size="sm"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-2">'+
-    '<h2 class="flex items-center gap-2 text-lg font-semibold"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
+  return '<div class="card"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-3">'+
+    '<h2 class="flex items-center gap-3 text-lg font-semibold"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
     '<div class="flex items-center gap-2">'+erg+(o.knopf||'')+'</div></header>'+
-    '<section class="grid min-w-0 gap-3 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
+    '<section class="grid min-w-0 gap-4 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
 }
 function kette(liste){let n=0;return liste.map(o=>schritt(o.art==='grenze'?o:{...o,nr:++n})).join(PFEIL_K)}
 """
@@ -117,7 +118,7 @@ def aktivitaet() -> str:
         '</tr></thead><tbody id="zeilen"><tr><td colspan="6" class="text-muted-foreground">lädt…</td></tr></tbody></table></div>'
         '<nav id="seiten" role="navigation" aria-label="Seitennavigation" data-pagination '
         'class="mt-4 flex w-full justify-center"></nav>')
-    lauf = dialog("lauf", "Lauf", '<div id="lauf-schritte" class="grid gap-2"></div>')
+    lauf = dialog("lauf", "Lauf", '<div id="lauf-schritte" class="grid gap-3"></div>')
     arten_js = "{" + ",".join(f"'{a}':['{t}','{v}']" for a, t, _, v in ARTEN) + ",'trockenlauf':['Trockenlauf','outline'],'hinweis':['Hinweis','outline'],'vorschlag':['Vorschlag','outline']}"
     return (
         kopf("Aktivität", "Was der Klassifizierer getan hat. Kästen und Verlauf filtern, eine Zeile öffnet den Lauf.",
@@ -144,7 +145,7 @@ function setzeFilter(neu, ersetzen){
 }
 window.addEventListener('popstate',()=>{F=Object.fromEntries(new URLSearchParams(location.search));laden()});
 const ART_SYM={klassifiziert:'circle-check',ocr:'file-text',repariert:'refresh-ccw',fehler:'circle-alert',uebersprungen:'clock',trockenlauf:'eye',hinweis:'info'};
-function badge(art){const a=ARTEN[art]||[art,'outline'];return '<span class="badge" data-variant="'+a[1]+'">'+(SYM[ART_SYM[art]]||'')+txt(a[0])+'</span>'}
+function badge(art){const a=ARTEN[art]||[art,'outline'];return '<span class="flex items-center gap-2">'+(SYMK[ART_SYM[art]]||'')+'<span class="badge" data-variant="'+a[1]+'">'+txt(a[0])+'</span></span>'}
 async function laden(){
   const q=new URLSearchParams({...F}); let d;
   try{ d=await holen('/api/aktivitaet?'+q); }catch(e){ document.getElementById('zeilen').innerHTML='<tr><td colspan="6">'+txt(e.message)+'</td></tr>'; return; }
@@ -294,7 +295,7 @@ def ablauf() -> str:
     return (kopf("Ablauf & Prompt",
                  "Jeder Schritt, den ein Dokument durchläuft — aufklappbar mit Eingabe und Ausgabe, bei der KI mit Prompt "
                  "und Antwortformat. Der Prompt ist hier bearbeitbar.")
-            + '<div id="schritte" class="grid gap-2"><p class="text-muted-foreground">lädt…</p></div>' + editor
+            + '<div id="schritte" class="grid gap-3"><p class="text-muted-foreground">lädt…</p></div>' + editor
             + "<script>" + _JS_GRUND + _JS_SCHRITTE_FERTIG + "const KNOTEN=" + knoten_js + ";" + _JS_ABLAUF + "</script>")
 
 
@@ -568,8 +569,12 @@ def _json(x):
 
 
 _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down")))
-                       .replace("%PFEILK%", _json('<div class="flex justify-center text-muted-foreground">'
-                                                  + symbol("arrow-down", "size-12") + "</div>"))
+                       .replace("%PFEILK%", _json('<div class="flex justify-center py-3 text-muted-foreground">'
+                                                  + symbol("arrow-down", "size-14") + "</div>"))
+                       .replace("%SYMG%", _json({n: symbol(n, "size-6 shrink-0 text-muted-foreground")
+                                                 for n in ("inbox", "settings-2", "bot", "file-text", "git-branch")}))
+                       .replace("%SYMK%", _json({n: symbol(n, "size-5 shrink-0 text-muted-foreground") for n in
+                                                 ("circle-check", "file-text", "refresh-ccw", "circle-alert", "clock", "eye", "info")}))
                        .replace("%SYM%", _json({n: symbol(n) for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
                                                                        "circle-check", "refresh-ccw", "circle-alert", "clock",
                                                                        "eye", "info")})))

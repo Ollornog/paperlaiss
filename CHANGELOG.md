@@ -23,6 +23,9 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - Ablauf: Schritt „Mistral-OCR · Text neu lesen" mit seinen Bedingungen statt „Text brauchbar?";
   Symbole je Schrittart, größere Überschriften und Pfeile.
 - Lauf-Popup: nur noch die Schritte, die in diesem Lauf passiert sind (kein OCR-Schritt ohne OCR).
+- Ablauf und Lauf-Popup: Symbole getrennt neben den Chips und größer, noch größere Pfeile mit
+  mehr Abstand zu den Kästen, mehr Luft zwischen Kopf und Inhalt; im Popup werden die
+  Kastenränder nicht mehr abgeschnitten.
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
   Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.

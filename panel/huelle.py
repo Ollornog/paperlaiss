@@ -148,7 +148,8 @@ def dialog(kennung: str, titel: str, koerper: str, fuss: str = "", breit: bool =
             f'<div{weite}><header><h2 id="{e(kennung)}-titel">{e(titel)}</h2></header>'
             # min-h-0 + overflow-y-auto: C22 begrenzt den Dialog auf die Fensterhöhe, der Inhalt
             # selbst scrollt aber nicht — langer Inhalt wäre sonst abgeschnitten.
-            f'<section class="min-h-0 overflow-y-auto">{koerper}</section>'
+            # p-1: ein Scrollbereich schneidet ab, was über seinen Rand ragt — sonst fehlte der Kartenrand.
+            f'<section class="min-h-0 overflow-y-auto p-1">{koerper}</section>'
             + (f'<footer>{fuss}</footer>' if fuss else "") +
             f'<button type="button" class="btn btn-close" data-variant="ghost" aria-label="Schließen" '
             f'onclick="this.closest(\'dialog\').close()">{symbol("x")}</button></div></dialog>')
