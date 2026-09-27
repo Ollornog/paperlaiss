@@ -27,7 +27,9 @@ Env-Schalter:
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
-  CLASSIFY_SOURCE=knopf|manual|bulk  nur fürs Trace/Log (knopf = KI/OCR-Knopf in Paperless)
+  CLASSIFY_SOURCE=knopf|manual|bulk  Herkunft des Laufs (Trace/Log) — entscheidet auch, ob ein schon
+                               gesetzter Dokumenttyp ersetzt werden darf: knopf/manual ja, leer (Import) nur
+                               ohne CLASSIFY_FORCE, bulk und Handaufrufe mit CLASSIFY_FORCE nein
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
   CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
@@ -991,17 +993,30 @@ def baue_system_teile(tpl, types, taglines):
     return teile
 
 
-def typ_setzen(dt_id, bisher, ausdruecklich):
+def typ_ueberschreibbar(source, force):
+    """Darf dieser Lauf einen schon gesetzten Dokumenttyp ersetzen? Siehe typ_setzen().
+
+    Ja beim KI-Knopf (`knopf`) und im Panel (`manual`), und beim echten Import: keine Quelle
+    UND kein CLASSIFY_FORCE — nur dort kann der Typ ausschliesslich von der Paperless-Automatik
+    stammen. Nein bei allem anderen: dem Bestands-Durchlauf (`bulk`) und jedem Handaufruf mit
+    CLASSIFY_FORCE über vorhandene Dokumente, deren Typ ein Mensch gesetzt haben kann. Die sichere
+    Seite ist „stehen lassen": eine unbekannte Aufrufart überschreibt nie (Prüfrunde 2026-09-27 —
+    „alles ausser bulk" hätte den dokumentierten Handaufruf in einer Schleife überschreiben lassen)."""
+    return source in ("knopf", "manual") or (source == "" and not force)
+
+
+def typ_setzen(dt_id, bisher, darf_ueberschreiben):
     """Welchen Dokumenttyp schreiben — oder keinen (None).
 
-    Automatisch nur, wenn noch keiner gesetzt ist: den Typ vergeben oft Paperless-Workflows
-    („Rechnung erkennen") oder ein Mensch, und die soll ein Hintergrundlauf nicht ueberstimmen.
-    Beim ausdruecklichen Neu-Klassifizieren (Knopf in Paperless, Panel) darf die KI ihn aendern —
-    genau dafuer drueckt man den Knopf, oft mit dem Hinweis „das ist eine Gutschrift".
+    Seit 2026-09-27 (PO): Die Paperless-Automatik darf einen Typ vorbelegen, paperlaiss bekommt
+    ihn als Vorschlag in die Nachricht und darf ihn ueberschreiben — nach dem Import (dort kann der
+    Typ nur von der Automatik stammen), beim KI-Knopf und im Panel. Nur der Bestands-Durchlauf
+    laesst einen vorhandenen Typ stehen: dort kann ihn ein Mensch gesetzt haben.
+    (Bis dahin ueberschrieb nur der Knopf; ein von der Automatik gesetzter Typ blieb stehen.)
     """
     if not dt_id or dt_id == bisher:
         return None
-    if bisher and not ausdruecklich:
+    if bisher and not darf_ueberschreiben:
         return None
     return dt_id
 
@@ -1110,7 +1125,7 @@ KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen k�
 
 
 def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, created, dateiname,
-                          fieldspec, title, content):
+                          fieldspec, title, content, typ_vorschlag=None):
     """Die Nachricht je Dokument an Pass 1, in Stuecken (Text, eingesetzter Wert oder None,
     Bedingung des Blocks oder None). Der Lauf fuegt sie zusammen; das Panel zeigt dieselben
     Stuecke mit Beispielwerten und markiert, was eingesetzt wird und welcher Block nur manchmal
@@ -1134,8 +1149,12 @@ def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, cr
               (mail_ktx, "Text der Mail", w), ("\n\n", None, w)]
     T += [("METADATEN:\n- Hinzugefügt am: ", None, None), (added, "Datum", None),
           ("\n- Aktuelles Dokumentdatum (evtl. falsch): ", None, None), (created, "Datum", None),
-          ("\n- Originaldateiname: ", None, None), (dateiname, "Dateiname", None),
-          ("\n\nVERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n", None, None),
+          ("\n- Originaldateiname: ", None, None), (dateiname, "Dateiname", None)]
+    if typ_vorschlag:
+        w = "nur wenn Paperless schon einen Dokumenttyp gesetzt hat (Automatik oder Workflow)"
+        T += [("\n- Dokumenttyp, von Paperless vorbelegt (nur ein Vorschlag, kann falsch sein): ", None, w),
+              (typ_vorschlag, "bisheriger Dokumenttyp", w)]
+    T += [("\n\nVERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n", None, None),
           (fieldspec, "je Feld: Name (Art), aktueller Wert", None),
           ("\n\nTITEL: ", None, None), (title, "Titel", None), ("\n\nINHALT:\n", None, None),
           (content, "Text des Dokuments", None)]
@@ -1163,7 +1182,7 @@ def prompt_vorschau():
         bsp("Text der Mail"), bsp("JJJJ-MM-TT"), bsp("JJJJ-MM-TT"), bsp("Dateiname"),
         "- " + bsp("Feld") + " (" + bsp("Art") + "), aktuell: " + bsp("Wert") + "\n- …",
         bsp("Titel"), bsp(f"Text des Dokuments, bis {CFG['content_max_len']} Zeichen: Anfang und die letzten "
-                          f"{CFG.get('content_end_len', 1000)}"))
+                          f"{CFG.get('content_end_len', 1000)}"), typ_vorschlag=bsp("Dokumenttyp"))
     return {
         "system": "".join(t for t, _ in sys_teile),
         "system_teile": sys_teile,
@@ -1341,7 +1360,8 @@ def main():
     user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
         (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
-        fieldspec, title, text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000))))
+        fieldspec, title, text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000)),
+        typ_vorschlag=next((n for n, i in types.items() if i == doc.get("document_type")), None)))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200, schema1, "pass1")
 
@@ -1474,7 +1494,7 @@ def main():
     patch = {"tags": list(dict.fromkeys(keep_tags))}
     if corr_id:
         patch["correspondent"] = corr_id
-    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), SOURCE in ("knopf", "manual"))
+    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR))
     if neuer_typ:
         patch["document_type"] = neuer_typ
 

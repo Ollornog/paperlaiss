@@ -54,6 +54,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   Link-Ziele, byte-gleich mit dem API-Download), Dokumente danach unverändert; Rechte, Grenzen und
   Aufräumen aus dem Browser heraus.
 
+### Geändert — Paperless-Typ als Vorschlag, paperlaiss darf überschreiben
+
+- Belegt die Paperless-Automatik (Zuordnungsregeln, Workflows) beim Import schon einen Dokumenttyp,
+  geht er als „von Paperless vorbelegt (nur ein Vorschlag)" in die Nachricht an Pass 1, und
+  paperlaiss darf ihn ersetzen — beim echten Import (keine `CLASSIFY_SOURCE`, kein `CLASSIFY_FORCE`),
+  beim KI-Knopf und im Panel. Stehen bleibt ein vorhandener Typ beim Bestands-Durchlauf (`bulk`) und
+  bei jedem Handaufruf mit `CLASSIFY_FORCE` — dort kann ihn ein Mensch gesetzt haben; eine unbekannte
+  Aufrufart überschreibt nie. Bisher überschrieb nur der Knopf; ein von der Automatik gesetzter Typ
+  verdrängte die KI. Eine unabhängige Prüfrunde fand in der ersten Fassung („alles ausser bulk")
+  genau diese Lücke beim Handaufruf und eine ungetestete Schreibstelle — beides behoben, die
+  Schreibstelle ist jetzt mit echten (nicht trockenen) Läufen getestet (Mutation rot).
+
 ### Geändert — KI-Antwort per JSON-Schema, Prompt-Caching, Anfang + Ende
 
 - **Pass 1 und Pass 2 antworten nach JSON-Schema** (`response_format: json_schema`, strict) statt nur

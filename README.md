@@ -67,6 +67,11 @@ CLASSIFY_FORCE=1 CLASSIFY_DOC=<id> python3 classify.py     # redo an already-cla
 CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # force Mistral OCR
 ```
 
+A document type that is already set is replaced only on a real import (no `CLASSIFY_SOURCE`, no
+`CLASSIFY_FORCE`), by the button in Paperless and from the panel. Manual runs with `CLASSIFY_FORCE`
+and bulk runs (`CLASSIFY_SOURCE=bulk`) leave it alone — a person may have set it. A type that
+Paperless' own matching pre-set on import reaches the model as a suggestion.
+
 ## Panel
 
 An admin panel for when something hangs or needs adjusting — paperlaiss is middleware, master data
