@@ -277,7 +277,11 @@ def namens_treffer(corrs, alias, text, eigene_namen=()):
     ersten 1000 Zeichen): unten stehen Bankverbindung und Zahlungsdienste, deren Namen sonst jede
     Rechnung zur Rechnung der Bank machten (2026-09-27, Stichprobe). Schwächer als eine Kennung,
     deshalb nur Kandidat für Pass 1. Längere Namen zuerst: „Muster Autoteile" sagt mehr als „Muster"."""
-    woerter = set(ctoks(str(text or "")[:1000]))
+    # Zeilen mit Bankdaten zählen nicht: „Bank: Raiffeisenbank …" nennt, wo gezahlt wird, nicht wer
+    # schreibt — bei kurzen Dokumenten rutscht die Fusszeile sonst in den Briefkopf (2026-09-27).
+    kopf = "\n".join(z for z in str(text or "")[:1000].splitlines()
+                     if not re.search(r"\b(IBAN|BIC|SWIFT|Bank|Bankverbindung|Konto|Kto)\b", z, re.IGNORECASE))
+    woerter = set(ctoks(kopf))
     aus = []
     for c in corrs:
         if any(n <= set(ctoks(c["name"])) for n in eigene_namen):
@@ -981,10 +985,18 @@ def eigene_firma_anweisung(cfg):
         return ""
     kenn = [f"USt-ID {u}" for u in (e.get("ustid") or [])] + [f"IBAN {i}" for i in (e.get("iban") or [])]
     kenn += [f"Mail {m}" for m in (e.get("email") or [])] + [f"Domain {d}" for d in (e.get("domains") or [])]
+    # Aufgeweicht 2026-09-27 (PO, nach der Stichprobe): „nie die eigene Firma" liess die KI bei internen
+    # Dokumenten (Lohnabrechnung, Überweisungsliste) auf die Bank ausweichen, deren Bankverbindung
+    # darauf steht. Jetzt: das Gegenüber, wenn es eines gibt — sonst wir selbst; eine Bank nur als
+    # Ausstellerin.
     return ("\nWICHTIG: Dieses Archiv gehört " + " / ".join(namen)
-            + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. Gesucht ist immer das GEGENÜBER: "
-            "bei eingehenden Dokumenten der Absender, bei unseren eigenen Dokumenten (Ausgangsrechnung, Angebot) "
-            "der Empfänger. correspondent ist NIE die eigene Firma, und absender enthält NIE ihre Stammdaten.")
+            + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. correspondent ist das GEGENÜBER: "
+            "bei eingehenden Dokumenten der Absender, bei unseren Dokumenten an Kunden (Ausgangsrechnung, Angebot, "
+            "Kaufvertrag) der Empfänger. NUR bei internen Dokumenten ohne externes Gegenüber (Lohnabrechnung, "
+            "Überweisungsliste, interne Aufstellung) ist die eigene Firma der correspondent — dann unter dem Namen "
+            + namen[0] + ". Eine Bank ist nur correspondent, wenn sie das Dokument selbst ausgestellt hat "
+            "(Kontoauszug, Schreiben der Bank), nicht weil ihre Bankverbindung darauf steht. "
+            "absender enthält NIE unsere eigenen Stammdaten.")
 SUMMARY_ANWEISUNG = (
     "\nGib ausserdem summary = TLDR, Länge an das Dokument angepasst: Rechnung/Beleg/kurzer Bescheid → 1 knapper Satz; "
     "Vertrag/Brief → 2-3 Sätze; langer Bericht → 4-6 Sätze. Keine Floskeln, direkt zur Sache.")
