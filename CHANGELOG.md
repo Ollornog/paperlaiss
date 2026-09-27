@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Panel unter einem Unterpfad (`PANEL_PFAD`)
+
+- Das Panel läuft auch unter einem Pfad derselben Domain wie Paperless (etwa `/paperlaiss`), hinter
+  einem Proxy, der den Präfix abschneidet. Jeder Link, jede Stil-/Skriptdatei und jeder API-Aufruf
+  bekommt den Präfix (`huelle.u()`, `PL_BASIS` in `holen()`), uvicorn startet mit `--root-path`, und
+  die Anmeldeseite zeigt das Logo unter dem Pfad. Passt `PANEL_BASE_URL` nicht zum Pfad, startet der
+  Container nicht. Belegt auf dem Testbett hinter einem abschneidenden Caddy; die Weiterleitungen
+  von TinySesam brauchen dafür 0.21.0 (Unterpfad-Montage, T-15).
+- Mit `PANEL_OIDC_GROUPS` fordert das Panel den Scope `groups` an. Ohne ihn schickt PocketID keine
+  Gruppen, und die Gruppensperre wiese jeden ab — auch den Admin (TinySesam gemeldet).
+
 ### Geändert — Kandidaten ohne Pass 0, Stammdaten nachtragen, eigene Firma
 
 - **Pass 0 entfällt.** Statt eines eigenen KI-Aufrufs, der nur einen Absendernamen riet, sucht

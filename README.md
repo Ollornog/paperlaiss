@@ -99,6 +99,11 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
     use); the user store lives in `PANEL_AUTH_DB` (default `/auth/tinysesam.db`, mount it as a
     volume). A half-configured OIDC or no sign-in method at all stops the container with a message.
     A set `PANEL_TOKEN` stays valid for scripts.
+- **Under a sub-path** (e.g. `https://paperless.example.com/paperlaiss`, next to Paperless on the same
+  domain): set `PANEL_PFAD=/paperlaiss` and let the reverse proxy strip the prefix (Caddy:
+  `handle_path /paperlaiss/* { reverse_proxy panel:8400 }`). The panel prefixes every link and API
+  call, and starts uvicorn with `--root-path`. With TinySesam, `PANEL_BASE_URL` must end in the same
+  path — otherwise the container refuses to start.
 
 ## Ingest API
 

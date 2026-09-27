@@ -226,6 +226,15 @@ def auffaelligkeiten(zeilen, geloest_nach=None):
     return out
 
 
+def panel_pfad(env) -> str:
+    """Der Pfad, unter dem das Panel im Browser erreichbar ist (`PANEL_PFAD`, etwa `/paperlaiss`
+    hinter derselben Domain wie Paperless). Leer = an der Wurzel. Nur einfache Pfadteile — der Wert
+    landet in HTML und JavaScript; alles andere zählt als leer, und die Anmeldeprüfung meldet dann,
+    dass er nicht zu PANEL_BASE_URL passt."""
+    p = (env.get("PANEL_PFAD") or "").strip().rstrip("/")
+    return p if re.fullmatch(r"(/[A-Za-z0-9._-]+)*", p) else ""
+
+
 def auth_einstellungen(env):
     """Wie sich das Panel anmeldet — aus der Umgebung gelesen, ohne etwas zu importieren.
 
@@ -255,6 +264,11 @@ def auth_einstellungen(env):
         out["fehler"].append("PANEL_BASE_URL fehlt oder ist keine http(s)-Adresse — TinySesam "
                              "braucht sie für Weiterleitungen und den OIDC-Rückruf")
         return out
+    if teile.path.rstrip("/") != panel_pfad(env):
+        out["fehler"].append(f"PANEL_BASE_URL endet auf {teile.path or '/'!r}, PANEL_PFAD ist "
+                             f"{panel_pfad(env) or '/'!r} — beide müssen denselben Pfad nennen, sonst "
+                             "führen Anmeldung und Rückruf ins Leere")
+        return out
     https = teile.scheme == "https"
     passwort = (env.get("PANEL_PASSWORD_LOGIN") or "").strip().lower() in ("1", "true", "ja", "yes")
     issuer = (env.get("PANEL_OIDC_ISSUER") or "").strip()
@@ -275,8 +289,9 @@ def auth_einstellungen(env):
         # Projektbild gross ueber den eingebauten Seiten (Anmeldung, Konto); /logo.png liefert
         # das Panel ohne Anmeldung aus. Zentriert per brand_css statt style-Attribut — die CSP
         # von TinySesam laesst Inline-Styles nicht zu.
-        "brand_icon": "/logo.png",
-        "brand_header": '<div class="pl-logo"><img src="/logo.png" alt="paperlaiss" width="160" height="160"></div>',
+        "brand_icon": panel_pfad(env) + "/logo.png",
+        "brand_header": ('<div class="pl-logo"><img src="' + panel_pfad(env)
+                         + '/logo.png" alt="paperlaiss" width="160" height="160"></div>'),
         # Logo und Karte als EIN Block mittig: TinySesam gibt .tsmain sonst die ganze Resthoehe
         # (flex:1) und zentriert die Karte darin — das Logo bliebe oben kleben.
         "brand_css": ("body{justify-content:center}.tsmain{flex:0 0 auto}"
@@ -305,6 +320,9 @@ def auth_einstellungen(env):
         gruppen = [g.strip() for g in (env.get("PANEL_OIDC_GROUPS") or "").split(",") if g.strip()]
         if gruppen:
             cfg["oidc_allowed_groups"] = gruppen
+            # Ohne den Scope `groups` schickt PocketID keine Gruppen mit — dann käme bei gesetzter
+            # Gruppensperre niemand hinein, auch der Admin nicht.
+            cfg["oidc_scopes"] = "openid profile email groups"
     out["tinysesam"] = cfg
     name = (env.get("PANEL_ADMIN_USER") or "").strip()
     pw = env.get("PANEL_ADMIN_PASSWORD") or ""

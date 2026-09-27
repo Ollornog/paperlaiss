@@ -23,7 +23,7 @@ ARTEN = [
 # Gemeinsame Helfer für alle Seiten: Escapen, JSON holen/senden, einfaches Markdown.
 _JS_GRUND = r"""
 function txt(v){return String(v==null?'':v).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}
-async function holen(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(r.status+' '+(await r.text()).slice(0,200));return r.json()}
+async function holen(u,o){const r=await fetch((u[0]==='/'?PL_BASIS:'')+u,o);if(!r.ok)throw new Error(r.status+' '+(await r.text()).slice(0,200));return r.json()}
 function senden(u,body){return holen(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
 // Markdown, wie ihn Mistral-OCR liefert: Überschriften, Tabellen, Listen, Fettdruck. Erst escapen,
 // dann auszeichnen — der Text kommt aus einem fremden Dokument und darf kein HTML einschleusen.

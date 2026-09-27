@@ -456,7 +456,7 @@ def einstellungen(request: Request):
 def trace_seite(doc_id: int, request: Request):
     """Alte Adresse: der Lauf öffnet sich jetzt als Dialog in der Aktivität."""
     guard(request)
-    return RedirectResponse(f"/?doc={int(doc_id)}")
+    return RedirectResponse(huelle.u(f"/?doc={int(doc_id)}"))
 
 
 @app.get("/ablauf", response_class=HTMLResponse)

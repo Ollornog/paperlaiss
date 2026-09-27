@@ -99,6 +99,11 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
     `/auth/tinysesam.db`, als Volume einhängen). Eine halbe OIDC-Konfiguration oder gar kein
     Anmeldeweg beendet den Container mit einer Meldung. Ein gesetzter `PANEL_TOKEN` gilt weiter für
     Skripte.
+- **Unter einem Unterpfad** (etwa `https://paperless.example.com/paperlaiss`, neben Paperless auf
+  derselben Domain): `PANEL_PFAD=/paperlaiss` setzen und den Präfix im Reverse-Proxy abschneiden
+  lassen (Caddy: `handle_path /paperlaiss/* { reverse_proxy panel:8400 }`). Das Panel setzt den
+  Präfix vor jeden Link und jeden API-Aufruf und startet uvicorn mit `--root-path`. Mit TinySesam
+  muss `PANEL_BASE_URL` auf denselben Pfad enden — sonst startet der Container nicht.
 
 ## Ingest-API
 
