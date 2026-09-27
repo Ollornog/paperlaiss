@@ -75,10 +75,10 @@ r.check("OCR-Nachlauf: alles erkannt → nichts", classify.ocr_nachhol_gruende(
     {"document_type": "Rechnung", "correspondent": "X", "needs_ocr": False},
     {"ocr_regeln": {"wenn_kein_typ": True, "wenn_kein_korrespondent": True}}) == [])
 
-# ---- typ_setzen(): automatisch nur leere Typen füllen, beim Knopf auch ändern.
+# ---- typ_setzen(): vorbelegten Typ überschreiben dürfen alle Läufe außer dem Bestands-Durchlauf.
 r.check("Typ: leer → gesetzt", classify.typ_setzen(3, None, False) == 3)
-r.check("Typ: automatisch vorhandenen NICHT überschreiben", classify.typ_setzen(3, 5, False) is None)
-r.check("Typ: beim Neu-Klassifizieren überschreiben", classify.typ_setzen(3, 5, True) == 3)
+r.check("Typ: Bestands-Durchlauf lässt vorhandenen stehen", classify.typ_setzen(3, 5, False) is None)
+r.check("Typ: sonst (Import, Knopf, Panel) überschreiben", classify.typ_setzen(3, 5, True) == 3)
 r.check("Typ: gleich oder nichts erkannt → nichts schreiben",
         classify.typ_setzen(5, 5, True) is None and classify.typ_setzen(None, 5, True) is None)
 
@@ -88,11 +88,12 @@ r.check("Typ: gleich oder nichts erkannt → nichts schreiben",
 import contextlib as _ctx, io as _io
 
 
-def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=()):
+def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
+          dry=True, source="", force=False):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
-                                "custom_fields": list(feldwerte), "created": "2026-01-01"},
-              "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}]},
+                                "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ},
+              "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}]},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
     def get(pfad, raw=False):
@@ -109,9 +110,22 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
         aufrufe.setdefault("laengen", []).append(len(messages))
         aufrufe.setdefault("system", messages[0]["content"])
         return dict(antworten.pop(0)), "{}"
-    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "TOK", "DRY", "FORCE_OCR")}
+    # Echter (nicht trockener) Lauf: Schreibzugriffe abfangen — send legt Korrespondenten an,
+    # patch_doc schreibt das Dokument, Stammdaten landen im Skriptordner (→ temporär).
+    def send(pfad, daten, methode="POST"):
+        aufrufe.setdefault("send", []).append((pfad, daten))
+        return {"id": 99, **(daten or {})}
+
+    def patch_doc(did, patch):
+        aufrufe.setdefault("patch", []).append(dict(patch))
+        return True, ""
+    tmp = tempfile.mkdtemp()
+    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "TOK", "DRY", "FORCE_OCR",
+                                            "send", "patch_doc", "SCRIPT_DIR", "SOURCE", "FORCE")}
     classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
-    classify.TOK, classify.DRY, classify.FORCE_OCR = "x", True, force_ocr
+    classify.TOK, classify.DRY, classify.FORCE_OCR = "x", dry, force_ocr
+    classify.send, classify.patch_doc, classify.SCRIPT_DIR = send, patch_doc, tmp
+    classify.SOURCE, classify.FORCE = source, force
     os.environ["CLASSIFY_DOC"] = "5"
     try:
         with _ctx.redirect_stdout(_io.StringIO()):
@@ -320,6 +334,15 @@ _s = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "
            text=_gut + " UID ATU99988777", korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
 classify.CORR_META.clear()
 r.check("Verdrahtung: nur ein KI-Aufruf (Pass 1), kein Pass 0", len(_s["chat"]) == 1, str(len(_s["chat"])))
+_v = classify.pass1_nachricht_teile("", None, "", "", "", "2026-01-02", "", "a.pdf", "", "T", "I", typ_vorschlag="Mahnung")
+r.check("Typ-Vorschlag: vorbelegter Typ steht als Vorschlag in der Nachricht",
+        "von Paperless vorbelegt (nur ein Vorschlag, kann falsch sein): Mahnung" in "".join(t for t, _, _ in _v))
+r.check("Typ überschreibbar: Import ohne FORCE, Knopf, Panel ja — Bestand, FORCE-Handaufruf, Unbekanntes nein",
+        classify.typ_ueberschreibbar("", False) and classify.typ_ueberschreibbar("knopf", True)
+        and classify.typ_ueberschreibbar("manual", True) and not classify.typ_ueberschreibbar("", True)
+        and not classify.typ_ueberschreibbar("bulk", False) and not classify.typ_ueberschreibbar("irgendwas", False))
+r.check("Typ-Vorschlag: ohne vorbelegten Typ kein Hinweis",
+        "vorbelegt" not in "".join(t for t, _, _ in classify.pass1_nachricht_teile("", None, "", "", "", "d", "", "a", "", "T", "I")))
 r.check("Verdrahtung: Pass 1 läuft mit Schema (Dokumenttyp aus der Liste)",
         (_s.get("schemas") or [None])[0] and "Rechnung" in _s["schemas"][0]["properties"]["document_type"]["enum"])
 r.check("Verdrahtung: Treffer steht mit Begründung in der Nachricht an Pass 1",
@@ -333,6 +356,23 @@ r.check("Verdrahtung: ohne Kennung findet der Name im Text den Kandidaten (Recht
         "- Nord Autoteile GmbH" in _o["chat"][0] and "Name „Nord Autoteile GmbH“ im Briefkopf" in _o["chat"][0]
         and "Beispiel Software" not in _o["chat"][0].split("METADATEN")[0])
 r.check("Verdrahtung: Pass 1 wird nach den Absender-Stammdaten gefragt", "absender = Objekt" in _b["system"])
+
+# Die Schreibstelle selbst (nicht nur die Hilfsfunktion): echter Lauf, vorbelegter Typ 1, die KI
+# sagt „Mahnung" (Typ 2). Import überschreibt, Handaufruf mit FORCE und Bestand lassen stehen.
+def _typ_geschrieben(**kw):
+    a = _lauf([{**_ok, "document_type": "Mahnung"}], typ=1, dry=False, **kw)
+    return [p.get("document_type") for p in a.get("patch", [])]
+r.check("Schreibstelle: Import (keine Quelle, kein FORCE) überschreibt den vorbelegten Typ",
+        _typ_geschrieben() == [2], str(_typ_geschrieben()))
+r.check("Schreibstelle: KI-Knopf und Panel überschreiben",
+        _typ_geschrieben(source="knopf") == [2] and _typ_geschrieben(source="manual") == [2])
+r.check("Schreibstelle: Handaufruf mit FORCE oder FORCE_OCR und Bestands-Durchlauf lassen den Typ stehen",
+        _typ_geschrieben(force=True) == [None] and _typ_geschrieben(source="bulk") == [None]
+        and _typ_geschrieben(force_ocr=True) == [None],
+        f"{_typ_geschrieben(force=True)} {_typ_geschrieben(source='bulk')}")
+_tv = _lauf([_ok], typ=1)
+r.check("Verdrahtung: der von Paperless vorbelegte Typ geht als Vorschlag an Pass 1",
+        "vorbelegt (nur ein Vorschlag, kann falsch sein): Rechnung" in _tv["chat"][0])
 
 # Portal-Fall (PO 2026-09-27): Die Absender-Mail gehört einem Portal, das Dokumente vieler Firmen
 # verschickt. Die Mail ist dann nur ein Kandidat — nennt Pass 1 die Firma aus dem Text, gilt die.
