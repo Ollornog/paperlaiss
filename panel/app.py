@@ -760,7 +760,7 @@ def api_verlauf(request: Request, tage: int = 30):
     guard(request)
     zeilen = _log_zeilen()
     auff = auffaelligkeiten(zeilen)
-    return {"verlauf": verlauf(zeilen, tage=tage),
+    return {"verlauf": verlauf(zeilen, tage=tage, heute=_jetzt().date().isoformat()),
             "auffaelligkeiten": auff[:60],
             "offen": sum(1 for a in auff if not a["geloest"])}
 

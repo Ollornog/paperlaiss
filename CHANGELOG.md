@@ -6,6 +6,16 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Verlauf zeigte bei frischer Installation nur einen Tag
+
+- Der Verlauf in der Aktivität begann mit der ersten Logzeile: eine Installation, die erst seit
+  heute protokolliert, sah einen einzigen Balken über die ganze Breite statt 60 Tage. Jetzt immer
+  das volle Fenster bis heute (Zeitzone von Paperless); Tage vor der ersten Logzeile sind als
+  `vor_beginn` markiert, bleiben leer und filtern nicht, darunter steht „Aufzeichnung seit …“ — ein
+  Tag ohne Aufzeichnung ist etwas anderes als ein Tag, an dem nichts lief. Auch ohne Ereignis heute
+  endet das Fenster heute, „seit einer Woche lief nichts“ bleibt sichtbar. Test ersetzt, der das alte
+  Verhalten festschrieb („beginnt nicht vor dem ersten Ereignis“); Mutation rot.
+
 ### Hinzugefügt — komplett weiße Seiten beim Import entfernen
 
 - **`deploy/vorab/leerseiten.py`:** Vorab-Schritt (Pre-Consume) für PDFs. Ghostscript rendert jede
