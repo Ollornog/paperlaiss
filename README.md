@@ -129,24 +129,26 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 
 ### Buttons in Paperless (optional)
 
-Two buttons in the document view (replacing Paperless' own *Suggest*, which is hidden) and in the
-multi-select bar of the document list (for all selected documents) — without a fork:
+**KI** (magic wand: optional hint, then re-classify — always with Mistral OCR) and **OCR** (only
+re-read the text; metadata stays) — in the document view instead of Paperless' own *Suggest*
+(hidden), and as two entries in the **Actions** menu of the multi-select. No fork, no tags, no
+workflow:
 
-- **KI** (magic wand) — an optional hint for the AI, then re-classify (always with Mistral OCR).
-- **OCR** — only re-read the text with Mistral OCR; metadata stays as it is.
-
-Paperless runs scripts from `/custom-cont-init.d` on every container start (documented under
-*Custom Container Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` copies
-`paperlaiss-knoepfe.js` into the static directory and adds one `<script>` line to the start page —
-again after every update, nothing to merge. The buttons only talk to the **Paperless API with the
-user's own session**: they set the redo tag / hint field or the OCR tag, and the existing workflow
-calls paperlaiss. Set up tag, field and workflow once with `deploy/neu-klassifizieren-einrichten.py`.
-Names: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` in the Paperless
-container (defaults `KI-neu`, `KI-OCR`, `KI-Hinweis`). With *Select all* across pages only the
-visible selected documents are processed, and the button says so. The panel runs at most
-`PANEL_PARALLEL` (default 2) of these jobs at once. If Paperless changes its page, the buttons
-are missing — Paperless itself keeps working. After the run the page reloads, so Paperless does
-not save its stale state back over the result.
+- Paperless runs scripts from `/custom-cont-init.d` on every container start (*Custom Container
+  Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` copies
+  `paperlaiss-knoepfe.js` into the static directory and adds one `<script>` line to the start page —
+  again after every update, nothing to merge.
+- The buttons call the panel directly (`POST /knopf`). The browser sends the **Paperless session**
+  along; the panel asks Paperless with it which documents this user may change
+  (`user_can_change`) and processes only those. Without a valid session: 401.
+- `PAPERLAISS_URL` (Paperless container): where the browser reaches the panel. Behind the same
+  reverse proxy a path is enough (default `/paperlaiss`, proxied to the panel without the prefix);
+  on a separate port the full address. In that case also set `PAPERLAISS_KNOPF_ORIGIN` (panel
+  container) to the Paperless address, so the cross-origin call passes CORS.
+- With *Select all* across pages only the visible selected documents are processed, and the menu
+  entry says so. The panel runs at most `PANEL_PARALLEL` (default 2) jobs at once. After the run the
+  page reloads, so Paperless does not save its stale state back over the result. If Paperless
+  changes its page, the buttons are missing — Paperless itself keeps working.
 
 ## Configuration (`classify-config.json`)
 
@@ -158,8 +160,8 @@ not save its stale state back over the result.
 | `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |
 | `tagging_enabled` | `false` | AI assigns content tags (off: type/correspondent/fields only) |
 | `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal |
-| `unsicher_tag` / `redo_tag` | – | optional flag / redo tags (by name) |
-| `summary_field` / `hinweis_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
+| `unsicher_tag` | – | optional flag tag (by name) |
+| `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |

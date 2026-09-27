@@ -22,28 +22,22 @@ if [ ! -f "$quelle" ]; then
   exit 0
 fi
 
-# Namen einsetzen. Nur Buchstaben, Ziffern, Leer, Punkt, Binde- und Unterstrich zulassen:
-# die Werte landen in einem JavaScript-String.
-wert() {
-  local v="${1:-$2}"
-  if [[ ! "$v" =~ ^[[:alnum:]\ ._äöüÄÖÜß-]+$ ]]; then
-    echo "$p unzulässiger Name '$v' — nehme '$2'" >&2
-    v="$2"
-  fi
-  printf '%s' "$v"
-}
-redo="$(wert "${PAPERLAISS_REDO_TAG:-}" "KI-neu")"
-ocr="$(wert "${PAPERLAISS_OCR_TAG:-}" "KI-OCR")"
-feld="$(wert "${PAPERLAISS_HINWEIS_FELD:-}" "KI-Hinweis")"
-sed -e "s/%%REDO_TAG%%/${redo}/" -e "s/%%OCR_TAG%%/${ocr}/" -e "s/%%HINWEIS_FELD%%/${feld}/" \
-  "$quelle" > "$static/paperlaiss-knoepfe.js"
+# Adresse des Panels aus Sicht des Browsers. Hinter demselben Reverse-Proxy genügt ein Pfad
+# ("/paperlaiss"); im Testbett mit getrenntem Port die volle Adresse. Nur Zeichen einer URL
+# zulassen — der Wert landet in einem JavaScript-String.
+url="${PAPERLAISS_URL:-/paperlaiss}"
+if [[ ! "$url" =~ ^(https?://[A-Za-z0-9.:-]+)?(/[A-Za-z0-9._/-]*)?$ ]]; then
+  echo "$p unzulässige PAPERLAISS_URL '$url' — Knöpfe NICHT eingehängt"
+  exit 0
+fi
+sed -e "s#%%PAPERLAISS_URL%%#${url}#" "$quelle" > "$static/paperlaiss-knoepfe.js"
 chmod 644 "$static/paperlaiss-knoepfe.js"
 
 if grep -qF "paperlaiss-knoepfe.js" "$vorlage"; then
   echo "$p schon eingehängt"
 elif grep -q '</body>' "$vorlage"; then
   sed -i "s#</body>#\t${zeile}\n</body>#" "$vorlage"
-  echo "$p eingehängt (Tag '${redo}', OCR-Tag '${ocr}', Feld '${feld}')"
+  echo "$p eingehängt (Panel: ${url})"
 else
   echo "$p WARNUNG: kein </body> in $vorlage — Paperless hat die Seite umgebaut, Knöpfe fehlen"
 fi

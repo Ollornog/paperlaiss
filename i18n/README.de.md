@@ -129,24 +129,26 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 
 ### Knöpfe in Paperless (optional)
 
-Zwei Knöpfe in der Dokumentansicht (anstelle von Paperless' eigenem *Suggest*, das ausgeblendet
-wird) und in der Leiste der Mehrfachauswahl (für alle markierten Dokumente) — ohne Fork:
+**KI** (Zauberstab: optional ein Hinweis, dann neu klassifizieren — immer mit Mistral-OCR) und
+**OCR** (nur den Text neu lesen; Metadaten bleiben) — in der Dokumentansicht anstelle von Paperless'
+eigenem *Suggest* (ausgeblendet) und als zwei Einträge im Menü **Actions** der Mehrfachauswahl.
+Kein Fork, keine Tags, kein Workflow:
 
-- **KI** (Zauberstab) — optional ein Hinweis für die KI, dann neu klassifizieren (immer mit Mistral-OCR).
-- **OCR** — nur den Text per Mistral-OCR neu lesen; die Metadaten bleiben.
-
-Paperless führt bei jedem Containerstart Skripte aus `/custom-cont-init.d` aus (dokumentiert unter
-*Custom Container Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` kopiert
-`paperlaiss-knoepfe.js` ins Static-Verzeichnis und hängt eine `<script>`-Zeile in die Startseite —
-nach jedem Update erneut, nichts zu mergen. Die Knöpfe sprechen nur die **Paperless-API mit der
-Sitzung des Nutzers** an: sie setzen Auslöser-Tag/Hinweisfeld bzw. OCR-Tag, und der vorhandene
-Workflow ruft paperlaiss. Tag, Feld und Workflow einmal mit `deploy/neu-klassifizieren-einrichten.py`
-anlegen. Namen: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` im
-Paperless-Container (Vorgaben `KI-neu`, `KI-OCR`, `KI-Hinweis`). Bei *Alle auswählen* über
-mehrere Seiten werden nur die sichtbaren markierten verarbeitet, und der Knopf sagt das. Das Panel
-fährt höchstens `PANEL_PARALLEL` (Vorgabe 2) solcher Läufe gleichzeitig. Baut Paperless seine Seite um,
-fehlen die Knöpfe — Paperless selbst läuft weiter. Nach dem Lauf lädt die Seite neu, damit Paperless
-nicht seinen alten Stand über das Ergebnis speichert.
+- Paperless führt bei jedem Containerstart Skripte aus `/custom-cont-init.d` aus (*Custom Container
+  Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` kopiert
+  `paperlaiss-knoepfe.js` ins Static-Verzeichnis und hängt eine `<script>`-Zeile in die Startseite —
+  nach jedem Update erneut, nichts zu mergen.
+- Die Knöpfe rufen das Panel direkt (`POST /knopf`). Der Browser schickt die **Paperless-Sitzung**
+  mit; das Panel fragt damit bei Paperless, welche Dokumente dieser Nutzer ändern darf
+  (`user_can_change`), und verarbeitet nur die. Ohne gültige Sitzung: 401.
+- `PAPERLAISS_URL` (Paperless-Container): wo der Browser das Panel erreicht. Hinter demselben
+  Reverse-Proxy genügt ein Pfad (Vorgabe `/paperlaiss`, ohne Präfix ans Panel weitergereicht); auf
+  einem eigenen Port die volle Adresse. Dann zusätzlich `PAPERLAISS_KNOPF_ORIGIN` (Panel-Container)
+  auf die Paperless-Adresse setzen, damit der Aufruf über Ursprünge hinweg CORS besteht.
+- Bei *Alle auswählen* über mehrere Seiten werden nur die sichtbaren markierten verarbeitet, und der
+  Menüeintrag sagt das. Das Panel fährt höchstens `PANEL_PARALLEL` (Vorgabe 2) Läufe gleichzeitig.
+  Nach dem Lauf lädt die Seite neu, damit Paperless nicht seinen alten Stand über das Ergebnis
+  speichert. Baut Paperless seine Seite um, fehlen die Knöpfe — Paperless selbst läuft weiter.
 
 ## Konfiguration (`classify-config.json`)
 
@@ -158,8 +160,8 @@ nicht seinen alten Stand über das Ergebnis speichert.
 | `ocr_regeln` | siehe unten | wann ein Text als zu schwach gilt und per OCR neu gelesen wird |
 | `tagging_enabled` | `false` | KI vergibt inhaltliche Tags (aus: nur Typ/Korrespondent/Felder) |
 | `marker_tag` | `ai-processed` | Tag, das gesetzt wird + als „schon erledigt"-Signal dient |
-| `unsicher_tag` / `redo_tag` | – | optionale Flag-/Redo-Tags (per Name) |
-| `summary_field` / `hinweis_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
+| `unsicher_tag` | – | optionaler Flag-Tag (per Name) |
+| `summary_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |

@@ -316,49 +316,6 @@ def auth_einstellungen(env):
     return out
 
 
-def ausloeser_auswerten(tags, custom_fields, redo_id, ocr_id, hinweis_fid, marker_id=None):
-    """Was hat der Nutzer in Paperless ausgeloest, und was muss vor dem Lauf weg?
-
-    Drei Auslöser: Tag „neu klassifizieren", Hinweisfeld mit Text, Tag „nur OCR".
-    Rueckgabe (modus, hinweis, patch):
-      modus  "neu"      — neu klassifizieren (mit OCR); gewinnt, wenn mehrere gesetzt sind,
-                          denn der Lauf liest ohnehin per OCR neu
-             "nur_ocr"  — nur den Text neu lesen
-             None       — nichts ausgeloest (der Webhook kam von einer anderen Aenderung)
-      patch  — entfernt BEIDE Tags und das Hinweisfeld, sonst loest die naechste Bearbeitung
-               erneut aus. Leer, wenn nichts zu entfernen ist.
-
-    Beim reinen OCR bleibt der OCR-Tag stehen: der Lauf entfernt ihn erst zusammen mit dem
-    neuen Text, und das ist das Fertig-Signal fuer den Knopf (ein unveraenderter Text aendert
-    das Dokument sonst gar nicht). Beim Neu-Klassifizieren geht auch der Marker-Tag mit weg; der Lauf setzt ihn am Ende wieder.
-    Daran erkennt der KI-Knopf in Paperless, dass das ERGEBNIS da ist — „das Dokument hat sich
-    geaendert" genuegt nicht, denn der OCR-Text wird schon vorher geschrieben.
-    """
-    tags = list(tags or [])
-    cfs = list(custom_fields or [])
-    hinweis = ""
-    if hinweis_fid:
-        for c in cfs:
-            if c.get("field") == hinweis_fid:
-                hinweis = str(c.get("value") or "").strip()
-    neu = bool(redo_id) and redo_id in tags
-    ocr = bool(ocr_id) and ocr_id in tags
-    patch = {}
-    if neu or hinweis:
-        weg = {x for x in (redo_id, ocr_id, marker_id) if x}
-    else:
-        weg = set()
-    rest = [t for t in tags if t not in weg]
-    if len(rest) != len(tags):
-        patch["tags"] = rest
-    if hinweis:
-        patch["custom_fields"] = [c for c in cfs if c.get("field") != hinweis_fid]
-    modus = "neu" if (neu or hinweis) else "nur_ocr" if ocr else None
-    return modus, hinweis, patch
-
-
-# Die fünf Arten, die das Panel oben als Kennzahl zeigt und nach denen es filtert — dieselbe
-# Einordnung wie log_art(), damit Zahl und gefilterte Liste nie auseinanderlaufen.
 KENNZAHL_ARTEN = ("klassifiziert", "ocr", "repariert", "fehler", "uebersprungen")
 _DOC = None
 
@@ -413,3 +370,15 @@ def aktivitaet(zeilen, art=None, tag=None, doc=None, seite=1, je=100):
     return {"eintraege": treffer[(seite - 1) * je: seite * je], "gesamt": len(treffer),
             "seite": seite, "seiten": seiten, "je": je, "kennzahlen": kennzahlen,
             "filter": {"art": art, "tag": tag, "doc": doc}}
+
+
+def knopf_rechte(antwort, gewuenscht):
+    """Welche der gewünschten Dokumente darf der angemeldete Paperless-Nutzer ändern?
+
+    `antwort` ist die JSON-Antwort von `GET /api/documents/?id__in=…&fields=id,user_can_change`,
+    abgefragt MIT der Sitzung des Nutzers. Ein Dokument, das dort fehlt, darf er nicht einmal
+    sehen — es zählt als verweigert, nicht als erlaubt. Rückgabe: (erlaubt, verweigert), sortiert.
+    """
+    darf = {int(d["id"]) for d in (antwort or {}).get("results", []) if d.get("user_can_change")}
+    gewuenscht = sorted({int(x) for x in gewuenscht})
+    return [d for d in gewuenscht if d in darf], [d for d in gewuenscht if d not in darf]

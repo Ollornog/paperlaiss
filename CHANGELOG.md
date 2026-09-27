@@ -6,6 +6,26 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Knöpfe rufen paperlaiss direkt; Tag-Auslöser entfernt
+
+- KI-/OCR-Knopf rufen das Panel direkt (`POST /knopf`, Status `GET /knopf/status`). Berechtigt
+  ist, wer das Dokument in Paperless ändern darf — geprüft mit der Paperless-Sitzung des Nutzers
+  (`user_can_change`, Logik `kern.knopf_rechte()`). Kein Tag, kein Hinweisfeld, kein Workflow mehr.
+- **Entfernt:** Webhook `/redo`, `REDO_SECRET`, `deploy/neu-klassifizieren-einrichten.py`, die
+  Config-Schlüssel `redo_tag`, `ocr_tag`, `hinweis_field`. Neu: `PAPERLAISS_URL` (Paperless-Container),
+  `PAPERLAISS_KNOPF_ORIGIN` (Panel, nur bei getrennten Adressen).
+- In der Mehrfachauswahl stehen KI und OCR jetzt im Menü **Actions** statt als eigene Knöpfe.
+
+### Geändert — Panel: Navigation in der Titelleiste, Ablauf als Flussdiagramm, Einstellungen erklärt
+
+- Keine Seitenleiste mehr; die drei Seiten stehen in der Titelleiste.
+- **Ablauf & Prompt** nach den üblichen Flussdiagramm-Regeln: Oval Start/Ende, Raute Entscheidung
+  mit beschrifteten Zweigen, Paperless-Schritte hinterlegt, KI-Knoten mit Eingabe → Modell →
+  Ausgabe; Legende oben.
+- **Einstellungen** in Gruppen, jede mit Titel und Beschreibung (`seiten.EINSTELLUNGEN`); ein Test
+  stellt sicher, dass jeder Schlüssel des Klassifizierers eine hat. Der Klassifizierer gibt nur noch
+  Schlüssel aus, die er kennt — veraltete Reste einer alten Datei erscheinen nicht mehr.
+
 ### Geändert — Panel neu auf C22: Aktivität mit Filtern, Lauf als Entscheidungsbaum, Ablauf-Editor
 
 - **Aussehen aus C22** (vendort unter `panel/static/c22/`, `scripts/vendor-c22.sh`, mit Herkunft

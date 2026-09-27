@@ -76,37 +76,30 @@ def rahmen(titel: str, koerper: str) -> str:
 
 
 def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
-    """Vollständige Seite: Titelleiste, Seitenleiste, Inhaltsbereich (C22 app-shell)."""
-    def aktuell(pfad: str) -> str:
-        return ' aria-current="page"' if pfad == aktiv else ""
+    """Vollständige Seite: Titelleiste mit Navigation, darunter der Inhalt.
 
-    punkte = "".join(
-        f'<li><a role="menuitem" href="{e(pfad)}"{aktuell(pfad)}>{symbol(sym)}<span>{e(name)}</span></a></li>'
-        for name, pfad, sym in NAVIGATION)
+    Die Navigation steht in der Titelleiste (C22 `navigation/app-shell.html`, Nav-Punkte als
+    `.btn` ghost/sm), keine Seitenleiste — drei Seiten brauchen keine. Die aktive Seite ist
+    hinterlegt (`bg-accent`) und semantisch markiert (`aria-current`).
+    """
+    def punkt(name: str, pfad: str, sym: str) -> str:
+        if pfad == aktiv:
+            return (f'<a href="{e(pfad)}" class="btn bg-accent text-accent-foreground" data-variant="ghost" '
+                    f'data-size="sm" aria-current="page">{symbol(sym)}{e(name)}</a>')
+        return f'<a href="{e(pfad)}" class="btn" data-variant="ghost" data-size="sm">{symbol(sym)}{e(name)}</a>'
+
+    punkte = "".join(punkt(*n) for n in NAVIGATION)
     raus = (f'<a class="btn" data-variant="outline" data-size="sm" href="/auth/logout">'
             f'{symbol("log-out")}Abmelden</a>' if abmelden else "")
     koerper = f"""<div class="flex h-screen w-full flex-col bg-background text-foreground">
   <header class="flex shrink-0 items-center gap-3 border-b bg-card px-4 py-2">
-    <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Navigation umschalten"
-            onclick="document.getElementById('pl-sidebar')?.toggle()">{symbol("panel-left")}</button>
     <a href="/" class="flex items-center gap-2 text-base font-bold">
       <img src="/logo.png" alt="" width="28" height="28"> paperlaiss
     </a>
+    <nav class="ms-2 flex items-center gap-1" aria-label="Hauptbereiche">{punkte}</nav>
     <div class="ms-auto flex items-center gap-3">{raus}</div>
   </header>
-  <div class="relative flex flex-1 transform-gpu overflow-hidden" style="--sidebar-width: 15rem">
-    <aside id="pl-sidebar" class="sidebar" data-side="left" aria-hidden="false">
-      <nav aria-label="Hauptnavigation">
-        <section>
-          <div role="group" aria-labelledby="pl-nav-h1">
-            <div role="heading" id="pl-nav-h1">Klassifizierer</div>
-            <ul>{punkte}</ul>
-          </div>
-        </section>
-      </nav>
-    </aside>
-    <main class="ms-60 flex-1 overflow-y-auto p-6">{inhalt}</main>
-  </div>
+  <main class="flex-1 overflow-y-auto p-6">{inhalt}</main>
 </div>"""
     return rahmen(titel, koerper)
 

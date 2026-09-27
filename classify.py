@@ -28,7 +28,7 @@ Env-Schalter:
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
   CLASSIFY_NUR_OCR=1           nur den Text per Mistral-OCR neu lesen, NICHT klassifizieren
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
-  CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
+  CLASSIFY_SOURCE=knopf|manual|bulk  nur fürs Trace/Log (knopf = KI/OCR-Knopf in Paperless)
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
   CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
@@ -64,10 +64,7 @@ CFG = {
     "tagging_enabled": False,          # KI vergibt KEINE inhaltlichen Tags (Firmen-DMS: Tags sind manuelle Status/Richtung)
     "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
     "unsicher_tag": "",                # optional: Flag-Tag bei Unsicherheit / KI-Tag-Vorschlag
-    "redo_tag": "",                    # optional: Redo-Auslöser-Tag (wird nach Verarbeitung entfernt)
-    "ocr_tag": "",                     # optional: Auslöser „nur Text per OCR neu lesen" (Panel entfernt ihn)
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
-    "hinweis_field": "",               # optional: Nutzer-Feedback-Feld für Redo (nach Gebrauch geleert)
     "mail_context_field": "",          # optional: Herkunft-Kontext (Mail-/Chat-Anschreiben) fürs Prompt
     "mail_from_field": "",             # optional: Absender-Mail → Korrespondent-Domain-Match
     "manual_fields": [],               # Custom-Field-Namen, die die KI NIE anfasst (rein manuell gepflegt, z.B. Bezahlt-Am)
@@ -92,6 +89,10 @@ CFG = {
 # log() noch nicht. Eine kaputte Config darf NICHT still zu Standardwerten fuehren: dann
 # faellt der installationsspezifische Prompt weg, manual_fields ist leer, und der Lauf sieht
 # aeusserlich normal aus, waehrend er gegen die falsche Taxonomie arbeitet.
+# Welche Schlüssel der Klassifizierer kennt — festgehalten VOR dem Einlesen der Datei. Die Panel-
+# Ausgabe (CLASSIFY_DUMP_CONFIG) zeigt nur diese: ein veralteter Schlüssel in einer alten Datei
+# (z. B. redo_tag aus der Zeit des Tag-Auslösers) soll nicht als einstellbar erscheinen.
+_BEKANNT = set(CFG)
 _CFG_FEHLER = None
 try:
     CFG.update(json.load(open(CONFIG)))
@@ -228,7 +229,7 @@ def nachbearbeiten(did, patch, erfolg, lesbar):
     entstanden. Mit der Naht bleibt der Kern ueberall gleich, und das Eigene liegt daneben.
 
     Das Skript bekommt auf stdin:
-      {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…}, "quelle": "redo",
+      {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…}, "quelle": "knopf",
        "dry": false}
     Es laeuft mit denselben Umgebungsvariablen (PAPERLESS_TOKEN, PAPERLESS_API …), kann also
     selbst die API benutzen. Seine Ausgabe geht ins Log.
@@ -667,20 +668,11 @@ def baue_system(tpl, types, taglines):
 def nur_ocr(did, doc):
     """Nur den Text neu lesen (OCR-Knopf in Paperless) — Metadaten bleiben, wie sie sind.
 
-    Der OCR-Tag geht erst mit dem Ergebnis weg, in DEMSELBEN Schreibvorgang: daran erkennt der
-    Knopf, dass der Lauf fertig ist — auch wenn der neue Text dem alten gleicht. Auch bei einem
-    Fehler kommt er weg, sonst haengt der Knopf bis zur Zeitueberschreitung.
     """
     content = doc.get("content") or ""
     mark_running(did, "OCR")
-    TRACE["trigger"] = "OCR aus Paperless (nur Text)"
+    TRACE["trigger"] = "OCR-Knopf in Paperless (nur Text)"
     patch = {}
-    ocr_name = norm(CFG.get("ocr_tag") or "")
-    if ocr_name:
-        ocr_id = next((t["id"] for t in get("/tags/?page_size=1000")["results"]
-                       if norm(t["name"]) == ocr_name), None)
-        if ocr_id in (doc.get("tags") or []):
-            patch["tags"] = [t for t in doc["tags"] if t != ocr_id]
     try:
         new = mistral_ocr(did)
     except Exception as e:
@@ -721,7 +713,7 @@ def reservierte_tags(cfg):
     """Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (normalisiert):
     die konfigurierten plus Marker-, Unsicher- und Ausloeser-Tag."""
     reserved = {norm(x) for x in (cfg.get("reserved_tags") or [])}
-    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag"), cfg.get("redo_tag"), cfg.get("ocr_tag")):
+    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag")):
         if extra:
             reserved.add(norm(extra))
     return reserved
@@ -776,11 +768,11 @@ def prompt_vorschau():
                       if f["id"] != summary_fid and f["name"] not in (CFG.get("manual_fields") or [])
                       and f.get("data_type") != "documentlink"
                       and norm(f["name"]) not in {norm(CFG.get(k) or "") for k in
-                                                   ("hinweis_field", "mail_context_field", "mail_from_field")}],
+                                                   ("mail_context_field", "mail_from_field")}],
         "einstellungen": {k: CFG.get(k) for k in (
             "model", "ocr_model", "temperature", "content_max_len", "ocr_enabled", "ocr_always",
-            "tagging_enabled", "marker_tag", "unsicher_tag", "redo_tag", "summary_field",
-            "hinweis_field", "manual_fields", "nachbearbeitung")},
+            "tagging_enabled", "marker_tag", "unsicher_tag", "summary_field",
+            "manual_fields", "nachbearbeitung")},
         "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
     }
 
@@ -818,7 +810,6 @@ def main():
 
     marker_id = resolve_tag(tagid_by_norm, CFG["marker_tag"])
     unsicher_id = resolve_tag(tagid_by_norm, CFG["unsicher_tag"])
-    redo_id = resolve_tag(tagid_by_norm, CFG["redo_tag"])
 
     if marker_id in tag_ids_on and not DRY and not FORCE and not FORCE_OCR:
         log(f"skip {did}: schon klassifiziert (Marker '{CFG['marker_tag']}')"); return
@@ -834,7 +825,7 @@ def main():
     ocr_versucht = False
     if CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or vorher):
         ocr_versucht = True
-        grund = ("neu klassifizieren aus Paperless" if FORCE_OCR and SOURCE == "redo"
+        grund = ("KI-Knopf in Paperless" if FORCE_OCR and SOURCE == "knopf"
                  else "manuell erzwungen" if FORCE_OCR else "immer-OCR" if CFG["ocr_always"]
                  else "; ".join(vorher))
         try:
@@ -860,12 +851,11 @@ def main():
     cur_vals = {c["field"]: c.get("value") for c in doc.get("custom_fields", [])}
 
     summary_fid = resolve_field(cfields, CFG["summary_field"])
-    hinweis_fid = resolve_field(cfields, CFG["hinweis_field"])
     mailctx_fid = resolve_field(cfields, CFG["mail_context_field"])
     mailfrom_fid = resolve_field(cfields, CFG["mail_from_field"])
     # Felder, die NICHT von der KI gesteuert werden (behalten): Sonderfelder + manuelle Felder
     manual_fids = {resolve_field(cfields, n) for n in (CFG.get("manual_fields") or [])}
-    skip_fids = {x for x in (summary_fid, hinweis_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
+    skip_fids = {x for x in (summary_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
 
     _NL = chr(10)
     mail_ktx = (cur_vals.get(mailctx_fid) or "").strip() if mailctx_fid else ""
@@ -873,13 +863,8 @@ def main():
     mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
     TRACE["mail"] = ({"from": mail_from or None, "hat_kontext": bool(mail_ktx)} if (mail_ktx or mail_from) else None)
 
-    # Der Hinweis kann aus zwei Richtungen kommen: aus dem Custom Field (normaler Weg) oder
-    # aus der Umgebung. Letzteres braucht der Vorschlagsmodus: dort raeumt der Anstoss Tag und
-    # Feld, bevor der Lauf startet — sonst bliebe der Ausloeser bei einem verworfenen Vorschlag
-    # stehen. Der gelesene Text wird dabei durchgereicht, damit er nicht verloren geht.
+    # Der Hinweis kommt vom KI-Knopf in Paperless (über das Panel), nicht aus einem Feld.
     hinweis = os.environ.get("CLASSIFY_HINWEIS", "").strip()
-    if not hinweis and hinweis_fid:
-        hinweis = (cur_vals.get(hinweis_fid) or "").strip()
     hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
 
     # Korrespondent-Metadaten (Panel-Store, per ID an Paperless gebunden) fürs Prompt
@@ -930,7 +915,7 @@ def main():
     kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") for c in kand)
     kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand else "")
     TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand]}
-    TRACE["trigger"] = ("Redo mit Nutzer-Hinweis" if hinweis else "Redo aus Paperless" if SOURCE == "redo"
+    TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
                         else "manuell (Panel)" if (FORCE or FORCE_OCR) else "automatisch (Post-Consume)")
     TRACE["hinweis"] = hinweis or None
@@ -1063,10 +1048,10 @@ def main():
     # --- Zurückschreiben (KEIN owner/Rechte — macht post-consume.sh) ---
     extra = ([marker_id] if marker_id else []) + ([unsicher_id] if ((new_tags) and unsicher_id) else [])
     keep_tags = tag_ids_on + tag_ids + extra
-    patch = {"tags": [t for t in dict.fromkeys(keep_tags) if not (redo_id and t == redo_id)]}
+    patch = {"tags": list(dict.fromkeys(keep_tags))}
     if corr_id:
         patch["correspondent"] = corr_id
-    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), SOURCE in ("redo", "manual"))
+    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), SOURCE in ("knopf", "manual"))
     if neuer_typ:
         patch["document_type"] = neuer_typ
 
@@ -1077,9 +1062,6 @@ def main():
         patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
     code_flds = {}
-    if hinweis_fid and hinweis:
-        # Nutzer-Hinweis nach Gebrauch entfernen, sonst feuert der Redo-Trigger erneut.
-        code_flds[hinweis_fid] = None
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
     TRACE["writeback"] = {"document_type": dt, "tags": [tagname_by_id.get(i) for i in tag_ids],
@@ -1123,7 +1105,7 @@ def main():
 # importierbar — die Tests prüfen die reinen Hilfsfunktionen, ohne main() oder sys.exit auszulösen.
 if __name__ == "__main__":
     if os.environ.get("CLASSIFY_DUMP_CONFIG") == "1":
-        wirksam = {k: v for k, v in CFG.items() if not k.startswith("api_key")}
+        wirksam = {k: v for k, v in CFG.items() if k in _BEKANNT and not k.startswith("api_key")}
         regeln = ocr_regeln(CFG)
         if (CFG.get("ocr_regeln") or {}).get("min_zeichen") is None:
             # Nicht eigens gesetzt: dann gilt ocr_min_len. Nicht als Wert ausgeben, sonst schriebe

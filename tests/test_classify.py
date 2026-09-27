@@ -480,4 +480,15 @@ r.check("nachbearbeiten: im Trockenlauf passiert nichts", "bekam doc 5" not in _
 
 classify.CFG["nachbearbeitung"] = _alt_cfg
 
+# ---- Jede Einstellung hat im Panel Titel und Beschreibung (panel/seiten.EINSTELLUNGEN).
+# Fehlt ein Eintrag, erschiene der Schlüssel roh unter „Weitere" — genau das soll nicht passieren.
+sys.path.insert(0, str(ROOT / "panel"))
+import seiten  # noqa: E402
+_meta = seiten.EINSTELLUNGEN
+_fehlt = [k for k in sorted(classify._BEKANNT) if not k.startswith("api_key")
+          and k not in _meta and not any(m.startswith(k + ".") for m in _meta)]
+_fehlt += [f"ocr_regeln.{k}" for k in classify.OCR_REGELN_VORGABE if f"ocr_regeln.{k}" not in _meta]
+r.check("Einstellungen: jeder Schlüssel hat Titel und Beschreibung im Panel", not _fehlt, str(_fehlt))
+r.check("Einstellungen: nur bekannte Gruppen", all(g in seiten.GRUPPEN for g, *_ in _meta.values()))
+
 sys.exit(r.done())

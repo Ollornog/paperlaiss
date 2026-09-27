@@ -211,93 +211,162 @@ _JS_AKTIVITAET = _JS_AKTIVITAET.replace("%PFEIL%", _pfeil_js())
 
 
 # ---------------------------------------------------------------- Ablauf & Prompt
-# Die Knoten des Ablaufs. Jeder nennt die Einstellungen, die ihn steuern — ein Klick auf den
-# Knoten öffnet genau diese zum Bearbeiten (wie ein Knoten in n8n). `entscheidung` zeigt die
-# beiden Zweige. Schlüssel mit Punkt liegen verschachtelt (ocr_regeln.max_muell_anteil).
-KNOTEN = [
-    {"id": "ausloeser", "titel": "Auslöser", "art": "schritt",
-     "text": "Automatisch nach dem Import (Post-Consume) · manuell im Panel · aus Paperless per "
-             "KI-/OCR-Knopf bzw. Tag und Hinweisfeld.",
-     "felder": [("redo_tag", "Tag „neu klassifizieren“"), ("ocr_tag", "Tag „nur OCR“"),
-                ("hinweis_field", "Hinweisfeld")]},
-    {"id": "vorpruefung", "titel": "Schon klassifiziert?", "art": "entscheidung",
-     "ja": "überspringen (Schleifenschutz) — Knöpfe und Panel umgehen das",
-     "nein": "weiter",
-     "felder": [("enabled", "Klassifizierer aktiv"), ("marker_tag", "Marker-Tag")]},
-    {"id": "ocr", "titel": "Text brauchbar? (Regeln)", "art": "entscheidung",
-     "ja": "Paperless-Text verwenden", "nein": "Mistral-OCR liest das Dokument neu",
-     "felder": [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
-                ("ocr_model", "OCR-Modell"), ("ocr_min_len", "Mindestlänge (Zeichen)"),
-                ("ocr_regeln.min_schluesselwoerter", "Mindestens bekannte Wörter"),
-                ("ocr_regeln.max_zeichen_je_wort", "Höchstens Zeichen je echtem Wort"),
-                ("ocr_regeln.max_muell_anteil", "Höchstanteil Zeichensalat (0–1)"),
-                ("ocr_regeln.schluesselwoerter", "Bekannte Wörter")]},
-    {"id": "pass0", "titel": "Pass 0 — Absender & Kandidaten", "art": "schritt",
-     "text": "Ein kurzer Aufruf zieht den Absender aus Titel und Textanfang; per Namensabgleich "
-             "gegen alle Korrespondenten gehen die wahrscheinlichsten mit Kontext an Pass 1.",
-     "felder": [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]},
-    {"id": "pass1", "titel": "Pass 1 — Analyse (Prompt)", "art": "prompt",
-     "felder": [("system_prompt", "System-Prompt (leer = eingebaut; {TYPES}, {TAGBLOCK}/{TAGS})"),
-                ("model", "Modell"), ("temperature", "Temperatur"),
-                ("content_max_len", "Text bis (Zeichen)")]},
-    {"id": "nachlauf", "titel": "KI zufrieden?", "art": "entscheidung",
-     "ja": "weiter zum Korrespondenten", "nein": "OCR nachholen und Pass 1 wiederholen (nur wenn noch kein OCR lief)",
-     "felder": [("ocr_regeln.nach_ki_meldung", "Wenn die KI unlesbaren Text meldet"),
-                ("ocr_regeln.wenn_kein_typ", "Wenn kein Dokumenttyp erkannt"),
-                ("ocr_regeln.wenn_kein_korrespondent", "Wenn kein Korrespondent erkannt")]},
-    {"id": "korrespondent", "titel": "Korrespondent bekannt?", "art": "entscheidung",
-     "ja": "zuordnen", "nein": "Rückfrage ans Modell, sonst neu anlegen",
-     "felder": []},
-    {"id": "schreiben", "titel": "Zurückschreiben", "art": "schritt",
-     "text": "Typ, Korrespondent, Datum und Felder nach Paperless; lehnt Paperless einen Wert ab, "
-             "korrigiert die KI in derselben Unterhaltung.",
-     "felder": [("manual_fields", "Felder, die die KI nie anfasst"), ("tagging_enabled", "KI vergibt Tags"),
-                ("reserved_tags", "Reservierte Tags"), ("summary_field", "Feld für die Zusammenfassung"),
-                ("unsicher_tag", "Tag bei Unsicherheit")]},
-    {"id": "nachbearbeitung", "titel": "Nachbearbeitung", "art": "schritt",
-     "text": "Optionales Skript nach dem Schreiben — für alles, was nur diese Installation braucht.",
-     "felder": [("nachbearbeitung", "Skript-Pfad")]},
-]
+# Das Diagramm folgt den üblichen Flussdiagramm-Regeln (ISO 5807): EINE Form je Bedeutung,
+# Fluss von oben nach unten, Zweige mit „ja"/„nein" beschriftet —
+#   Oval        Start / Ende
+#   Rechteck    Schritt (Code, kein Modell)
+#   Daten       Lesen/Schreiben in Paperless (blau hinterlegt; ISO: Parallelogramm)
+#   Raute       Entscheidung
+#   KI-Knoten   ein Modellaufruf: EINGABE (Prompt) → Modell → AUSGABE (was zurückkommt)
+# Jeder Knoten mit Einstellungen öffnet sie per Klick (wie ein Knoten in n8n). Schlüssel mit
+# Punkt liegen verschachtelt (ocr_regeln.max_muell_anteil).
+KNOTEN_FELDER = {
+    "vorpruefung": ("Schon klassifiziert?", [("enabled", "Klassifizierer aktiv"), ("marker_tag", "Marker-Tag")]),
+    "ocr": ("Text brauchbar?", [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
+                                ("ocr_model", "OCR-Modell"), ("ocr_min_len", "Mindestlänge (Zeichen)"),
+                                ("ocr_regeln.min_schluesselwoerter", "Mindestens bekannte Wörter"),
+                                ("ocr_regeln.max_zeichen_je_wort", "Höchstens Zeichen je echtem Wort"),
+                                ("ocr_regeln.max_muell_anteil", "Höchstanteil Zeichensalat (0–1)"),
+                                ("ocr_regeln.schluesselwoerter", "Bekannte Wörter")]),
+    "pass0": ("Pass 0 — Absender", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
+    "pass1": ("Pass 1 — Analyse", [("system_prompt", "System-Prompt (leer = eingebaut; {TYPES}, {TAGBLOCK}/{TAGS})"),
+                                   ("model", "Modell"), ("temperature", "Temperatur"),
+                                   ("content_max_len", "Text bis (Zeichen)")]),
+    "nachlauf": ("Text lesbar laut KI?", [("ocr_regeln.nach_ki_meldung", "Wenn die KI unlesbaren Text meldet"),
+                                          ("ocr_regeln.wenn_kein_typ", "Wenn kein Dokumenttyp erkannt"),
+                                          ("ocr_regeln.wenn_kein_korrespondent", "Wenn kein Korrespondent erkannt")]),
+    "schreiben": ("Nach Paperless schreiben", [("manual_fields", "Felder, die die KI nie anfasst"),
+                                               ("tagging_enabled", "KI vergibt Tags"),
+                                               ("reserved_tags", "Reservierte Tags"),
+                                               ("summary_field", "Feld für die Zusammenfassung"),
+                                               ("unsicher_tag", "Tag bei Unsicherheit")]),
+    "nachbearbeitung": ("Nachbearbeitung", [("nachbearbeitung", "Skript-Pfad")]),
+}
+
+
+def _bearbeiten(kid: str) -> str:
+    if kid not in KNOTEN_FELDER:
+        return ""
+    return (f'<button type="button" class="btn" data-variant="outline" data-size="sm" '
+            f'onclick="event.stopPropagation();bearbeiten(\'{kid}\')">{symbol("pencil")}Einstellungen</button>')
+
+
+def _werte(kid: str) -> str:
+    return f'<p class="text-muted-foreground text-xs" id="wert-{kid}"></p>' if kid in KNOTEN_FELDER else ""
+
+
+def _klick(kid: str) -> str:
+    return (f' id="k-{kid}" onclick="bearbeiten(\'{kid}\')"' if kid in KNOTEN_FELDER else "")
+
+
+def _oval(text: str) -> str:
+    return (f'<div class="mx-auto w-fit rounded-full border bg-muted/40 px-6 py-2 text-center text-sm font-medium">'
+            f'{text}</div>')
+
+
+def _pfeil(beschriftung: str = "") -> str:
+    b = f'<span class="badge" data-variant="success">{beschriftung}</span>' if beschriftung else ""
+    return (f'<div class="flex items-center justify-center gap-2 text-muted-foreground">'
+            f'{symbol("arrow-down", "size-10")}{b}</div>')
+
+
+def _schritt(kid: str, titel: str, text: str) -> str:
+    return (f'<div class="card cursor-pointer hover:border-ring" data-size="sm"{_klick(kid)}>'
+            f'<header class="flex flex-wrap items-center justify-between gap-2"><h2 class="flex items-center gap-2">'
+            f'<span class="badge" data-variant="secondary">Schritt</span>{titel}</h2>{_bearbeiten(kid)}</header>'
+            f'<section class="text-sm">{text}{_werte(kid)}</section></div>')
+
+
+def _daten(kid: str, titel: str, text: str) -> str:
+    return (f'<div class="card cursor-pointer bg-info/10 hover:border-ring" data-size="sm"{_klick(kid)}>'
+            f'<header class="flex flex-wrap items-center justify-between gap-2"><h2 class="flex items-center gap-2">'
+            f'<span class="badge" data-variant="info">Paperless</span>{titel}</h2>{_bearbeiten(kid)}</header>'
+            f'<section class="text-sm">{text}{_werte(kid)}</section></div>')
+
+
+def _raute(kid: str, frage: str, seitentext: str, seite: str = "nein", weiter: str = "ja") -> str:
+    """Entscheidung: Raute mit der Frage, darunter der Seitenzweig; der andere Zweig geht weiter."""
+    return (f'<div class="grid gap-2"{_klick(kid)}>'
+            f'<div class="relative mx-auto h-36 w-80 cursor-pointer">'
+            f'<svg class="absolute inset-0 size-full" viewBox="0 0 320 144" aria-hidden="true">'
+            f'<polygon points="160,2 318,72 160,142 2,72" fill="var(--card)" stroke="var(--border)" stroke-width="2"/></svg>'
+            f'<div class="absolute inset-0 flex items-center justify-center">'
+            f'<p class="w-48 text-center text-sm font-medium leading-tight">{frage}</p></div></div>'
+            f'<div class="mx-auto flex max-w-2xl items-start gap-3 rounded-md border border-dashed p-3">'
+            f'<span class="badge" data-variant="warning">{seite}</span><p class="text-sm">{seitentext}</p></div>'
+            f'<div class="flex justify-center">{_bearbeiten(kid)}</div>{_werte(kid)}</div>'
+            + _pfeil(weiter))
+
+
+def _ki(kid: str, titel: str, eingabe: str, ausgabe: str) -> str:
+    return (f'<div class="card cursor-pointer border-primary hover:border-ring" data-size="sm"{_klick(kid)}>'
+            f'<header class="flex flex-wrap items-center justify-between gap-2"><h2 class="flex items-center gap-2">'
+            f'<span class="badge">KI</span>{titel}</h2>{_bearbeiten(kid)}</header>'
+            f'<section class="grid gap-3 text-sm">'
+            f'<div><p class="text-muted-foreground text-xs uppercase tracking-wide">Eingabe</p>{eingabe}</div>'
+            f'<div><p class="text-muted-foreground text-xs uppercase tracking-wide">Modell</p>'
+            f'<p id="modell-{kid}">…</p></div>'
+            f'<div><p class="text-muted-foreground text-xs uppercase tracking-wide">Ausgabe</p>{ausgabe}</div>'
+            f'{_werte(kid)}</section></div>')
+
+
+def _legende() -> str:
+    raute = ('<svg class="size-5" viewBox="0 0 20 20" aria-hidden="true"><polygon points="10,1 19,10 10,19 1,10" '
+             'fill="var(--card)" stroke="var(--muted-foreground)" stroke-width="1.5"/></svg>')
+    return ('<div class="mb-6 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">'
+            '<span class="flex items-center gap-2"><span class="rounded-full border px-3 py-0.5">…</span>Start / Ende</span>'
+            '<span class="flex items-center gap-2"><span class="badge" data-variant="secondary">Schritt</span>Code</span>'
+            '<span class="flex items-center gap-2"><span class="badge" data-variant="info">Paperless</span>lesen / schreiben</span>'
+            f'<span class="flex items-center gap-2">{raute}Entscheidung</span>'
+            '<span class="flex items-center gap-2"><span class="badge">KI</span>Modell: Eingabe → Ausgabe</span></div>')
+
+
+def _schluessel(*namen: str) -> str:
+    return '<div class="mt-1 flex flex-wrap gap-1">' + "".join(
+        f'<span class="badge" data-variant="outline">{n}</span>' for n in namen) + "</div>"
 
 
 def ablauf() -> str:
     import json
-    pfeil = f'<div class="flex justify-center text-muted-foreground">{symbol("arrow-down", "size-12")}</div>'
-    teile = []
-    for k in KNOTEN:
-        bearbeiten = (f'<button type="button" class="btn" data-variant="outline" data-size="sm" '
-                      f'onclick="event.stopPropagation();bearbeiten(\'{k["id"]}\')">{symbol("pencil")}Bearbeiten</button>'
-                      if k["felder"] else "")
-        if k["art"] == "entscheidung":
-            innen = (f'<section class="grid grid-cols-2 gap-3">'
-                     f'<div class="rounded-md border p-3"><span class="badge" data-variant="success">ja</span>'
-                     f'<p class="mt-2 text-sm">{k["ja"]}</p></div>'
-                     f'<div class="rounded-md border p-3"><span class="badge" data-variant="warning">nein</span>'
-                     f'<p class="mt-2 text-sm">{k["nein"]}</p></div></section>'
-                     f'<section class="text-muted-foreground text-sm" id="wert-{k["id"]}"></section>')
-            marke = '<span class="badge" data-variant="outline">Entscheidung</span>'
-        elif k["art"] == "prompt":
-            innen = ('<section class="text-muted-foreground text-sm" id="wert-pass1"></section>'
-                     '<section><pre class="code-block max-h-96 overflow-auto"><code id="prompt-vorschau">lädt…</code></pre></section>')
-            marke = '<span class="badge" data-variant="info">KI</span>'
-        else:
-            innen = (f'<section class="text-sm">{k["text"]}</section>'
-                     f'<section class="text-muted-foreground text-sm" id="wert-{k["id"]}"></section>')
-            marke = '<span class="badge" data-variant="secondary">Schritt</span>'
-        teile.append(
-            f'<div class="card cursor-pointer hover:border-ring" data-size="sm" id="k-{k["id"]}" '
-            f'onclick="bearbeiten(\'{k["id"]}\')">'
-            f'<header class="flex flex-wrap items-center justify-between gap-2">'
-            f'<h2 class="flex items-center gap-2">{marke}{k["titel"]}</h2>{bearbeiten}</header>{innen}</div>')
-    fluss = pfeil.join(teile)
+    fluss = "".join([
+        _oval("Dokument kommt an — nach dem Import · KI-Knopf · OCR-Knopf · Panel"), _pfeil(),
+        _daten("laden", "Dokument laden", "Text, Titel, Metadaten und Felder aus Paperless."), _pfeil(),
+        _raute("vorpruefung", "Automatischer Lauf und schon klassifiziert (Marker-Tag)?",
+               "Ende — überspringen. Knöpfe und Panel klassifizieren immer.", seite="ja", weiter="nein"),
+        _raute("ocr", "Text brauchbar?",
+               "Mistral-OCR liest das Dokument neu. Beim KI- und OCR-Knopf immer. "
+                   "Danach weiter — beim OCR-Knopf ist hier Schluss: nur der Text wird geschrieben."),
+        _ki("pass0", "Pass 0 — Absender erkennen",
+            '<p>Titel und Textanfang</p>',
+            _schluessel("Absender") + '<p class="mt-1">danach Namensabgleich gegen alle Korrespondenten → Kandidaten</p>'),
+        _pfeil(),
+        _ki("pass1", "Pass 1 — Analyse",
+            # Nur lesend in einem Textfeld: bricht um (ein Code-Block tut das nicht und liefe aus der Karte).
+            '<p>System-Prompt:</p><textarea class="textarea max-h-96 w-full font-mono" rows="10" readonly '
+            'id="prompt-vorschau" onclick="event.stopPropagation()">lädt…</textarea>'
+            '<p class="mt-1">Nachricht: Hinweis vom Knopf · Kandidaten · Metadaten · Felder · Text</p>',
+            _schluessel("document_type", "correspondent", "fields", "document_date", "summary", "tags",
+                        "needs_ocr")),
+        _pfeil(),
+        _raute("nachlauf", "Text lesbar laut KI?",
+               "OCR nachholen und Pass 1 wiederholen — nur wenn vorher noch kein OCR lief."),
+        _raute("korrespondent", "Korrespondent bekannt?",
+               "KI-Rückfrage mit ähnlichen Namen (Pass 2); passt keiner, wird er neu angelegt."),
+        _daten("schreiben", "Nach Paperless schreiben",
+               "Typ, Korrespondent, Datum, Felder. Lehnt Paperless einen Wert ab, korrigiert die KI in derselben Unterhaltung."),
+        _pfeil(),
+        _schritt("nachbearbeitung", "Nachbearbeitung",
+                 "Optionales Skript — für alles, was nur diese Installation braucht."),
+        _pfeil(), _oval("Fertig"),
+    ])
     editor = dialog("knoten", "Knoten bearbeiten", '<div id="knoten-felder" class="grid gap-4"></div>',
                     fuss=('<span id="knoten-meldung" class="text-muted-foreground text-sm"></span>'
                           '<button type="button" class="btn" data-variant="outline" onclick="this.closest(\'dialog\').close()">Abbrechen</button>'
                           '<button type="button" class="btn" onclick="speichern()">Speichern</button>'))
-    knoten_js = json.dumps({k["id"]: {"titel": k["titel"], "felder": k["felder"]} for k in KNOTEN}, ensure_ascii=False)
+    knoten_js = json.dumps({k: {"titel": t, "felder": f} for k, (t, f) in KNOTEN_FELDER.items()}, ensure_ascii=False)
     return (kopf("Ablauf & Prompt",
-                 "So läuft ein Dokument durch paperlaiss. Ein Klick auf einen Knoten öffnet seine Einstellungen.")
-            + f'<div class="mx-auto grid max-w-3xl gap-2">{fluss}</div>' + editor
+                 "So läuft ein Dokument durch paperlaiss. Knoten mit Einstellungen öffnen sie per Klick.")
+            + _legende() + f'<div class="mx-auto grid max-w-3xl gap-2">{fluss}</div>' + editor
             + "<script>" + _JS_GRUND + "const KNOTEN=" + knoten_js + ";" + _JS_ABLAUF + "</script>")
 
 
@@ -310,13 +379,17 @@ function kurz(v){ if(v===true) return 'an'; if(v===false) return 'aus'; if(v==nu
 function zeigeWerte(){
   for(const [id,k] of Object.entries(KNOTEN)){
     const el=document.getElementById('wert-'+id); if(!el||!k.felder.length) continue;
-    el.innerHTML=k.felder.filter(([p])=>p!=='system_prompt').map(([p,n])=>txt(n)+': <b>'+txt(kurz(wert(p)))+'</b>').join(' · ');
+    // Modell, Temperatur und Textlänge stehen im KI-Knoten schon unter „Modell".
+    el.innerHTML=k.felder.filter(([p])=>!['system_prompt','model','temperature','content_max_len'].includes(p)).map(([p,n])=>txt(n)+': <b>'+txt(kurz(wert(p)))+'</b>').join(' · ');
   }
 }
 async function laden(){
   try{ CFG=await holen('/api/config'); zeigeWerte(); }catch(e){}
-  try{ const v=await holen('/api/prompt-vorschau'); document.getElementById('prompt-vorschau').textContent=v.system||'';
-  }catch(e){ document.getElementById('prompt-vorschau').textContent='Vorschau nicht verfügbar: '+e.message; }
+  try{ const v=await holen('/api/prompt-vorschau'); document.getElementById('prompt-vorschau').value=v.system||'';
+    const e=v.einstellungen||{};
+    document.getElementById('modell-pass0').textContent=(e.model||'')+' — kurzer Aufruf';
+    document.getElementById('modell-pass1').textContent=(e.model||'')+' · Temperatur '+(e.temperature??'')+' · Text bis '+(e.content_max_len||'')+' Zeichen';
+  }catch(e){ document.getElementById('prompt-vorschau').value='Vorschau nicht verfügbar: '+e.message; }
 }
 function feldHtml(pfad,name){
   const v=wert(pfad), id='f-'+pfad.replace(/\W/g,'_');
@@ -360,33 +433,117 @@ laden();
 
 
 # ---------------------------------------------------------------- Einstellungen
+# Jede Einstellung mit Gruppe, Titel und Beschreibung. Schlüssel, die hier fehlen, erscheinen
+# unter „Weitere" mit ihrem rohen Namen — so geht ein neuer Schlüssel nicht verloren, fällt aber
+# auf. Verschachtelte Werte (ocr_regeln.x) werden einzeln gezeigt.
+GRUPPEN = ["Allgemein", "KI-Modell & Prompt", "OCR", "Tags", "Felder", "Korrespondenten", "Erweitert"]
+EINSTELLUNGEN = {
+    "enabled": ("Allgemein", "Klassifizierer aktiv",
+                "Hauptschalter. Aus: automatisch importierte Dokumente werden übersprungen. "
+                "Die KI-/OCR-Knöpfe in Paperless und das Panel funktionieren weiter."),
+    "marker_tag": ("Allgemein", "Marker-Tag",
+                   "Setzt paperlaiss nach jeder Klassifizierung. Ein Dokument mit diesem Tag wird beim "
+                   "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz)."),
+    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 0, 1 und 2)."),
+    "temperature": ("KI-Modell & Prompt", "Temperatur",
+                    "Wie frei das Modell antwortet: 0 = immer gleich, höher = kreativer. Für Klassifizierung niedrig halten (0–0,2)."),
+    "content_max_len": ("KI-Modell & Prompt", "Text bis (Zeichen)",
+                        "So viel vom Dokumenttext geht an die KI. Mehr kostet mehr und ist selten nötig."),
+    "system_prompt": ("KI-Modell & Prompt", "System-Prompt",
+                      "Die Anweisung an die KI. Leer = eingebauter Prompt. Platzhalter: {TYPES} (Dokumenttypen), "
+                      "{TAGBLOCK} oder {TAGS} (Tag-Liste). Fertig eingesetzt zu sehen unter „Ablauf & Prompt“."),
+    "ocr_enabled": ("OCR", "OCR erlaubt", "Aus: paperlaiss liest nie per Mistral-OCR, auch nicht beim OCR-Knopf."),
+    "ocr_always": ("OCR", "Immer OCR", "Jedes Dokument per Mistral-OCR neu lesen, auch wenn der Text gut ist. Kostet je Seite."),
+    "ocr_model": ("OCR", "OCR-Modell", "Mistral-Modell für die Texterkennung."),
+    "ocr_min_len": ("OCR", "Mindestlänge (Zeichen)", "Kürzerer Text gilt als unbrauchbar und wird per OCR neu gelesen."),
+    "ocr_regeln.min_schluesselwoerter": ("OCR", "Mindestens bekannte Wörter",
+                                         "So viele Wörter aus der Liste „Bekannte Wörter“ muss der Text enthalten, sonst OCR."),
+    "ocr_regeln.schluesselwoerter": ("OCR", "Bekannte Wörter",
+                                     "Allerweltswörter, an denen lesbarer Text erkannt wird. Ein Eintrag je Zeile; "
+                                     "Leerzeichen zählen („ der “ trifft nicht in „oder“)."),
+    "ocr_regeln.max_zeichen_je_wort": ("OCR", "Höchstens Zeichen je echtem Wort",
+                                       "Kommt auf so viele Zeichen weniger als ein echtes Wort, gilt der Text als Zeichensalat."),
+    "ocr_regeln.max_muell_anteil": ("OCR", "Höchstanteil Zeichensalat",
+                                    "Anteil (0–1) der Zeichen, die weder Buchstabe, Ziffer noch übliches Satzzeichen sind. Darüber: OCR."),
+    "ocr_regeln.nach_ki_meldung": ("OCR", "OCR, wenn die KI unlesbaren Text meldet",
+                                   "Nach der Analyse: meldet die KI Müll, wird per OCR neu gelesen und noch einmal analysiert."),
+    "ocr_regeln.wenn_kein_typ": ("OCR", "OCR, wenn kein Dokumenttyp erkannt",
+                                 "Nach der Analyse: ohne Typ wird per OCR neu gelesen und noch einmal analysiert."),
+    "ocr_regeln.wenn_kein_korrespondent": ("OCR", "OCR, wenn kein Korrespondent erkannt",
+                                           "Nach der Analyse: ohne Korrespondent wird per OCR neu gelesen und noch einmal analysiert."),
+    "ocr_regeln.min_zeichen": ("OCR", "Mindestlänge (Regel)", "Wie „Mindestlänge“, hat Vorrang, wenn gesetzt."),
+    "tagging_enabled": ("Tags", "KI vergibt Tags", "An: die KI wählt passende Tags aus dem Bestand. Aus: nur Typ, Korrespondent, Felder."),
+    "tag_descriptions": ("Tags", "Tag-Beschreibungen",
+                         "Kurze Beschreibung je Tag für die KI, als {\"Tagname\": \"Beschreibung\"}. Nur bei aktivem Tagging."),
+    "reserved_tags": ("Tags", "Reservierte Tags",
+                      "Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (Status, Richtung …). Ein Eintrag je Zeile."),
+    "unsicher_tag": ("Tags", "Tag bei Unsicherheit", "Wird gesetzt, wenn die KI einen neuen Tag vorschlägt. Leer = aus."),
+    "manual_fields": ("Felder", "Felder, die die KI nie anfasst",
+                      "Namen von Custom Fields, die nur von Hand gepflegt werden (z. B. Bezahlt-Am). Ein Eintrag je Zeile."),
+    "summary_field": ("Felder", "Feld für die Zusammenfassung",
+                      "Name eines Custom Fields (Langtext), in das die KI eine kurze Zusammenfassung schreibt. Leer = keine."),
+    "mail_context_field": ("Felder", "Feld mit Mail-Kontext",
+                           "Custom Field mit dem Anschreiben einer Mail; geht als Kontext an die KI. Leer = aus."),
+    "mail_from_field": ("Felder", "Feld mit Absender-Mail",
+                        "Custom Field mit der Absenderadresse; hilft, den Korrespondenten über die Domain zu finden. Leer = aus."),
+    "korrespondent_beispiele": ("Korrespondenten", "Beispielpaare für den Abgleich",
+                                "Paare [\"falsch geschrieben\", \"richtiger Name\"] — helfen der KI bei OCR-Fehlern im Absender."),
+    "nachbearbeitung": ("Erweitert", "Nachbearbeitung (Skript)",
+                        "Pfad zu einem Skript, das nach dem Schreiben läuft — für alles, was nur diese Installation braucht. Leer = aus."),
+}
+
+
 def einstellungen() -> str:
-    return (kopf("Einstellungen", "Alle Werte der classify-config.json. Schlüssel gehören in die Umgebung, nicht hierher.",
+    import json
+    return (kopf("Einstellungen", "Alle Werte der Konfiguration. Schlüssel (API-Keys) gehören in die Umgebung, nicht hierher.",
+                 '<span id="meld" class="text-muted-foreground text-sm"></span>'
                  '<button type="button" class="btn" onclick="sichern()">'
-                 f'{symbol("save")}Speichern</button><span id="meld" class="text-muted-foreground text-sm"></span>')
-            + '<div id="felder" class="mx-auto grid max-w-3xl gap-4"><p class="text-muted-foreground">lädt…</p></div>'
-            + "<script>" + _JS_GRUND + _JS_EINSTELLUNGEN + "</script>")
+                 f'{symbol("save")}Speichern</button>')
+            + '<div id="felder" class="mx-auto grid max-w-3xl gap-6"><p class="text-muted-foreground">lädt…</p></div>'
+            + "<script>" + _JS_GRUND + "const META=" + json.dumps(EINSTELLUNGEN, ensure_ascii=False)
+            + ";const GRUPPEN=" + json.dumps(GRUPPEN + ["Weitere"], ensure_ascii=False) + ";" + _JS_EINSTELLUNGEN + "</script>")
 
 
 _JS_EINSTELLUNGEN = r"""
-let FELDER=[];
-async function laden(){
-  const d=await holen('/api/config/schema'); FELDER=d.felder;
-  document.getElementById('felder').innerHTML=FELDER.map(f=>{
-    const id='f_'+f.name;
-    if(f.typ==='bool') return '<div class="card" data-size="sm"><section><div class="field" role="group" data-orientation="horizontal"><input class="input" type="checkbox" role="switch" id="'+id+'"'+(f.wert?' checked':'')+'><label class="label" for="'+id+'">'+txt(f.name)+'</label></div></section></div>';
-    let e;
-    if(f.typ==='text') e='<textarea class="textarea font-mono" rows="8" id="'+id+'">'+txt(f.wert)+'</textarea>';
-    else if(f.typ==='json') e='<textarea class="textarea font-mono" rows="4" id="'+id+'">'+txt(JSON.stringify(f.wert,null,1))+'</textarea>';
-    else e='<input class="input" id="'+id+'" value="'+txt(f.wert)+'">';
-    return '<div class="card" data-size="sm"><section><div class="field" role="group"><label class="label" for="'+id+'">'+txt(f.name)+'</label>'+e+'</div></section></div>';
-  }).join('');
+let WERTE={};
+function flach(cfg){ const out=[];
+  for(const [k,v] of Object.entries(cfg)){
+    if(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(META).some(m=>m.startsWith(k+'.')))
+      for(const [u,w] of Object.entries(v)) out.push([k+'.'+u,w]);
+    else out.push([k,v]);
+  } return out; }
+function feld(pfad,v){
+  const [gruppe,titel,text]=META[pfad]||['Weitere',pfad,''], id='f_'+pfad.replace(/\W/g,'_');
+  const hilfe=text?'<p class="text-muted-foreground text-sm">'+txt(text)+'</p>':'';
+  if(typeof v==='boolean') return [gruppe,'<div class="field" role="group" data-orientation="horizontal"><input class="input" type="checkbox" role="switch" id="'+id+'"'+(v?' checked':'')+'><label class="label" for="'+id+'">'+txt(titel)+'</label></div>'+hilfe];
+  let e;
+  if(pfad==='system_prompt') e='<textarea class="textarea max-h-96 font-mono" rows="12" id="'+id+'">'+txt(v)+'</textarea>';
+  else if(Array.isArray(v)&&v.every(x=>typeof x==='string')) e='<textarea class="textarea max-h-48 font-mono" rows="4" id="'+id+'">'+txt(v.join('\n'))+'</textarea>';
+  else if(v&&typeof v==='object') e='<textarea class="textarea max-h-48 font-mono" rows="4" id="'+id+'">'+txt(JSON.stringify(v,null,1))+'</textarea>';
+  else if(typeof v==='number') e='<input class="input" type="number" step="any" id="'+id+'" value="'+txt(v)+'">';
+  else e='<input class="input" id="'+id+'" value="'+txt(v??'')+'">';
+  return [gruppe,'<div class="field" role="group"><label class="label" for="'+id+'">'+txt(titel)+'</label>'+e+hilfe+'</div>'];
 }
+async function laden(){
+  WERTE=await holen('/api/config'); const je={};
+  for(const [p,v] of flach(WERTE)){ const [g,h]=feld(p,v); (je[g]=je[g]||[]).push(h); }
+  document.getElementById('felder').innerHTML=GRUPPEN.filter(g=>je[g]).map(g=>
+    '<div class="card" data-size="sm"><header><h2>'+txt(g)+'</h2></header><section class="grid gap-5">'+je[g].join('')+'</section></div>').join('');
+}
+function lies(p,alt){ const el=document.getElementById('f_'+p.replace(/\W/g,'_'));
+  if(typeof alt==='boolean') return el.checked;
+  if(Array.isArray(alt)&&alt.every(x=>typeof x==='string')) return el.value.split('\n').filter(x=>x.trim()!=='');
+  if(alt&&typeof alt==='object') return JSON.parse(el.value||'null');
+  if(typeof alt==='number') return Number(el.value);
+  return el.value; }
 async function sichern(){
   const body={}, meld=document.getElementById('meld');
-  for(const f of FELDER){ const el=document.getElementById('f_'+f.name); body[f.name]=f.typ==='bool'?el.checked:el.value; }
-  try{ const d=await senden('/api/config',body);
+  try{
+    for(const [p,alt] of flach(WERTE)){ const v=lies(p,alt);
+      if(p.includes('.')){ const [a,b]=p.split('.'); body[a]=body[a]||{...(WERTE[a]||{})}; body[a][b]=v; } else body[p]=v; }
+    const d=await senden('/api/config',body);
     meld.textContent=(d.uebergangen||[]).length?'übergangen: '+d.uebergangen.join(', '):'gespeichert';
+    await laden();
   }catch(e){ meld.textContent='Fehler: '+e.message; }
 }
 laden();

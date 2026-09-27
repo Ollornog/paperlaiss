@@ -24,7 +24,7 @@ from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, H
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from kern import (aktivitaet, auffaelligkeiten, auth_einstellungen, ausloeser_auswerten,
+from kern import (aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
 import huelle
 import seiten
@@ -104,9 +104,6 @@ def schreibe_json(pfad, daten):
         raise
 
 
-# Eigenes Geheimnis fuer den Webhook — NICHT PANEL_TOKEN. Regel: ein Geheimnis, ein Bereich.
-# Wer den Webhook kennt, soll damit nicht die Panel-API bedienen koennen.
-REDO_SECRET = os.environ.get("REDO_SECRET", "")
 
 
 def _cfg():
@@ -114,36 +111,6 @@ def _cfg():
         return json.load(open(CONFIG))
     except Exception:
         return {}
-
-
-def raeume_ausloeser(doc_id, doc=None):
-    """Auslöser lesen und entfernen, BEVOR der Lauf startet — der Schleifenschutz.
-
-    Der Lauf dauert mit OCR leicht eine Minute. Stuenden Tag und Feld so lange noch am Dokument,
-    loeste jede Bearbeitung in dieser Zeit den Webhook erneut aus. Gibt (modus, hinweis) zurueck;
-    die Entscheidung steht in kern.ausloeser_auswerten().
-    """
-    cfg = _cfg()
-    doc = doc or api_get(f"/documents/{doc_id}/")
-
-    def tag_id(name):
-        name = (name or "").strip().lower()
-        if not name:
-            return None
-        return next((t["id"] for t in api_get("/tags/?page_size=1000")["results"]
-                     if t["name"].strip().lower() == name), None)
-
-    hinweis_fid = None
-    hinweis_name = (cfg.get("hinweis_field") or "").strip().lower()
-    if hinweis_name:
-        hinweis_fid = next((f["id"] for f in api_get("/custom_fields/?page_size=1000")["results"]
-                            if f["name"].strip().lower() == hinweis_name), None)
-    modus, hinweis, patch = ausloeser_auswerten(doc.get("tags"), doc.get("custom_fields"),
-                                                tag_id(cfg.get("redo_tag")), tag_id(cfg.get("ocr_tag")),
-                                                hinweis_fid, tag_id(cfg.get("marker_tag")))
-    if patch:
-        api_send(f"/documents/{doc_id}/", patch, "PATCH")
-    return modus, hinweis
 
 
 def _cfg_oeffentlich():
@@ -324,63 +291,86 @@ async def reclassify(request: Request):
 PARALLEL = threading.BoundedSemaphore(max(1, int(os.environ.get("PANEL_PARALLEL") or 2)))
 
 
-def run_classify_begrenzt(*args, **kwargs):
+# ---------- KI- und OCR-Knopf in Paperless ----------
+# Die Knöpfe (deploy/paperless-knoepfe/) rufen das Panel DIREKT, ohne Tag, Feld und Workflow.
+# Wer drückt, ist in Paperless angemeldet: sein Browser schickt die Paperless-Sitzung mit, und
+# das Panel fragt damit bei Paperless nach, welche Dokumente dieser Nutzer ändern darf. Nur die
+# werden verarbeitet — mit dem eigenen Token des Panels, aber nie über die Rechte des Nutzers
+# hinaus.
+KNOPF_ORIGINS = [o.strip().rstrip("/") for o in (os.environ.get("PAPERLAISS_KNOPF_ORIGIN") or "").split(",")
+                 if o.strip()]
+if KNOPF_ORIGINS:
+    # Nur nötig, wenn Paperless und Panel NICHT unter derselben Adresse laufen (Testbett mit
+    # zwei Ports). Mit Reverse-Proxy (Paperless /, Panel /paperlaiss) ist alles gleicher Ursprung.
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(CORSMiddleware, allow_origins=KNOPF_ORIGINS, allow_credentials=True,
+                       allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Paperlaiss"])
+JOBS = {}          # doc_id → {"status": wartet|laeuft|fertig|fehler, "modus", "seit"}
+_JOBS_LOCK = threading.Lock()
+
+
+def _job(doc, **felder):
+    with _JOBS_LOCK:
+        JOBS.setdefault(doc, {}).update(felder)
+
+
+def knopf_lauf(doc, modus, hinweis):
     with PARALLEL:
-        return run_classify(*args, **kwargs)
+        _job(doc, status="laeuft")
+        rc, _ = run_classify(doc, force=True, force_ocr=True, source="knopf",
+                             hinweis=hinweis, nur_ocr=(modus == "ocr"))
+    _job(doc, status="fertig" if rc == 0 else "fehler")
 
 
-# ---------- Neu klassifizieren aus Paperless ----------
-# Die reine Logik steht in kern.py — dort ist sie ohne FastAPI testbar.
+def knopf_nutzer_rechte(request: Request, ids):
+    """(erlaubt, verweigert) für den Nutzer, dessen Paperless-Sitzung die Anfrage trägt."""
+    # Der eigene Kopf erzwingt beim Aufruf von einer fremden Seite eine CORS-Vorabfrage — die
+    # nur freigegebene Paperless-Adressen bestehen. Ein blosses Formular kann ihn nicht setzen.
+    if request.headers.get("x-paperlaiss") != "1":
+        raise HTTPException(400, "Aufruf nur über die paperlaiss-Knöpfe")
+    cookie = request.headers.get("cookie", "")
+    if not cookie:
+        raise HTTPException(401, "Keine Paperless-Sitzung — in Paperless anmelden")
+    url = (f"{BASE}/documents/?id__in={','.join(str(i) for i in ids)}"
+           f"&fields=id,user_can_change&page_size={len(ids)}")
+    try:
+        antwort = json.load(urllib.request.urlopen(
+            urllib.request.Request(url, headers={"Cookie": cookie, "Accept": "application/json"}), timeout=20))
+    except urllib.error.HTTPError as e:
+        raise HTTPException(401 if e.code in (401, 403) else 502,
+                            "Paperless kennt diese Sitzung nicht — in Paperless anmelden")
+    return knopf_rechte(antwort, ids)
 
 
-@app.post("/redo", status_code=202)
-async def redo(request: Request, hintergrund: BackgroundTasks, x_redo_secret: str = Header(None)):
-    """Webhook-Ziel fuer den Paperless-Workflow: neu klassifizieren, IMMER mit Mistral-OCR.
+def _ids(werte):
+    ids = sorted({int(x) for x in werte if str(x).strip().isdigit()})
+    if not ids or len(ids) > 500:
+        raise HTTPException(400, "1 bis 500 Dokument-IDs nötig")
+    return ids
 
-    Wer den Knopf drueckt, will genau dieses Dokument neu gelesen haben — also OCR, auch wenn
-    der vorhandene Text den Regeln genuegt. Der optionale Hinweis geht als Zusatz in den Prompt.
-    Geschrieben wird direkt. Der Lauf startet im Hintergrund (202): mit OCR dauert er laenger,
-    als Paperless auf die Antwort eines Webhooks wartet.
-    """
-    if not REDO_SECRET:
-        raise HTTPException(503, "REDO_SECRET nicht gesetzt — der Webhook ist nicht konfiguriert.")
-    if not hmac.compare_digest(x_redo_secret or "", REDO_SECRET):
-        raise HTTPException(403, "falsches Redo-Secret")
-    # Paperless sendet je nach Einstellung anders: `use_params=true` als Query-Parameter
-    # oder Formularfeld, `as_json=true` mit `body` als (doppelt kodiertes) JSON. Statt eine
-    # Form vorzuschreiben, werden alle drei gelesen — der Betreiber soll den Workflow
-    # einrichten koennen, wie er mag.
-    roh = (await request.body()).decode("utf-8", "replace")
-    doc_id = None
-    for kandidat in (request.query_params.get("doc_id"),
-                     request.query_params.get("document_id"),
-                     request.query_params.get("id")):
-        if kandidat and str(kandidat).strip().isdigit():
-            doc_id = int(kandidat)
-            break
-    if not doc_id and roh:
-        doc_id = doc_id_aus_webhook(roh)
-    if not doc_id and roh:
-        # Formularfeld (application/x-www-form-urlencoded)
-        from urllib.parse import parse_qs
-        for schluessel, werte in parse_qs(roh).items():
-            if schluessel in ("doc_id", "document_id", "id") and werte and werte[0].strip().isdigit():
-                doc_id = int(werte[0])
-                break
-    if not doc_id:
-        # Sagen, was ankam — sonst sucht man im Dunkeln, welche Webhook-Form eingestellt ist.
-        print(f"redo: keine Dokument-ID. query={dict(request.query_params)} "
-              f"body={roh[:200]!r}", file=sys.stderr)
-        raise HTTPException(400, "keine Dokument-ID im Webhook gefunden "
-                                 "(weder Query-Parameter noch Rumpf enthielten eine)")
-    modus, hinweis = raeume_ausloeser(doc_id)
-    if modus is None:
-        # Der Workflow feuert bei JEDER Aenderung, die zu einem Ausloeser passt — auch bei der,
-        # mit der wir die Ausloeser gerade selbst entfernt haben. Dann gibt es nichts zu tun.
-        return {"ok": True, "doc": doc_id, "gestartet": False}
-    hintergrund.add_task(run_classify_begrenzt, doc_id, force=True, force_ocr=True, source="redo",
-                         hinweis=hinweis, nur_ocr=(modus == "nur_ocr"))
-    return {"ok": True, "doc": doc_id, "modus": modus, "hinweis": bool(hinweis), "gestartet": True}
+
+@app.post("/knopf", status_code=202)
+async def knopf(request: Request, hintergrund: BackgroundTasks):
+    """KI (neu klassifizieren, immer mit OCR, optional mit Hinweis) oder OCR (nur Text)."""
+    body = await request.json()
+    modus = body.get("modus")
+    if modus not in ("ki", "ocr"):
+        raise HTTPException(400, "modus muss ki oder ocr sein")
+    ids = _ids(body.get("docs") or [])
+    hinweis = str(body.get("hinweis") or "").strip()[:2000] if modus == "ki" else ""
+    erlaubt, verweigert = knopf_nutzer_rechte(request, ids)
+    for doc in erlaubt:
+        _job(doc, status="wartet", modus=modus, seit=datetime.datetime.now().isoformat(timespec="seconds"))
+        hintergrund.add_task(knopf_lauf, doc, modus, hinweis)
+    return {"gestartet": erlaubt, "verweigert": verweigert}
+
+
+@app.get("/knopf/status")
+def knopf_status(request: Request, docs: str = ""):
+    ids = _ids(docs.split(","))
+    erlaubt, _ = knopf_nutzer_rechte(request, ids)
+    with _JOBS_LOCK:
+        return {str(d): JOBS.get(d, {}).get("status", "unbekannt") for d in erlaubt}
 
 
 def _log_zeilen(max_zeilen=20000):
