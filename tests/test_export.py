@@ -283,4 +283,11 @@ _fertig = [f for f in _ast.walk(_baum) if isinstance(f, _ast.FunctionDef) and _s
 r.check("Verdrahtung: nach „fertig“ wird der Speicher aller Exporte begrenzt",
         _fertig and all(_ruft(f, "_export_speicher_begrenzen") for f in _fertig), str([f.name for f in _fertig]))
 
+# Aufbewahrung: Vorgabe 20 Minuten (PO 2026-09-27) — gelesen aus der Zuweisung in app.py.
+_aufb = [n.value for n in ast.walk(_app) if isinstance(n, ast.Assign)
+         and any(getattr(t, "id", "") == "EXPORT_AUFBEWAHRUNG" for t in n.targets)]
+_vorgabe = [c.args[1].value for v in _aufb for c in ast.walk(v)
+            if isinstance(c, ast.Call) and getattr(c.func, "id", "") == "_env_zahl" and len(c.args) == 2]
+r.check("Vorgabe: Export 20 Minuten abrufbar (EXPORT_AUFBEWAHRUNG_MIN)", _vorgabe == [20], str(_vorgabe))
+
 sys.exit(r.done())

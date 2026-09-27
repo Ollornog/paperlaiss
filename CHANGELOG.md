@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Export 20 Minuten abrufbar; kein Einmal-Token mehr im Log
+
+- **Export-Aufbewahrung:** Vorgabe von `EXPORT_AUFBEWAHRUNG_MIN` 20 Minuten statt 24 Stunden
+  (Wunsch aus dem Betrieb) — ein Export ist ein Download, kein Archiv.
+- **TinySesam-Einmal-Token aus:** Ohne Admin schrieb TinySesam bei jedem Start einen Einmal-Token
+  für `/auth/claim-admin` ins Container-Log. Das Panel braucht keinen TinySesam-Admin (Zugang über
+  die OIDC-Gruppe bzw. `PANEL_ADMIN_USER`); `admin_claim_ttl_min=0` schaltet den Weg ab, es wird
+  kein Token mehr erzeugt.
+
 ### Behoben — Schema mit doppeltem Pflichtfeld; gescheiterter KI-Knopf stand als „fertig" da
 
 - **Jeder Lauf scheiterte mit 422** seit „Typ zuletzt im Schema": `document_type` stand zweimal in
@@ -98,7 +107,7 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   seinem Token.
 - **Grenzen und Aufräumen**: `EXPORT_MAX_DOKUMENTE` (1000), `EXPORT_MAX_MB` (2000, Summe der PDFs,
   beim Herunterladen blockweise gemessen), `EXPORT_PARALLEL` (1), höchstens fünf offene Aufträge. Das
-  Ergebnis bleibt `EXPORT_AUFBEWAHRUNG_MIN` (1440 = 24 Stunden) abrufbar, dann sind Auftrag und Dateien weg;
+  Ergebnis bleibt `EXPORT_AUFBEWAHRUNG_MIN` (20 Minuten) abrufbar, dann sind Auftrag und Dateien weg;
   liegen mehr als `EXPORT_SPEICHER_MB` (10000) fertige Exporte auf der Platte, fallen die ältesten zuerst
   (Zeitgeber je Auftrag; beim Start werden Reste eines früheren Prozesses gelöscht). Ein Abbruch
   räumt sofort auf. Links nach Paperless über `PAPERLESS_PUBLIC_URL`, sonst die Adresse der

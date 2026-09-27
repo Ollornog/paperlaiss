@@ -311,6 +311,10 @@ def auth_einstellungen(env):
         "oidc_enabled": oidc,
         # Keine Selbstregistrierung: wer hier hinein darf, legt der Admin an bzw. die PocketID fest.
         "allow_signup": False,
+        # Kein Einmal-Token für den TinySesam-Admin: das Panel braucht keinen (Zugang über die
+        # PocketID-Gruppe bzw. PANEL_ADMIN_USER), und TinySesam schrieb ihn bei jedem Start ohne
+        # Admin ins Container-Log (2026-09-27, PO: „einfach entfernen").
+        "admin_claim_ttl_min": 0,
     }
     if oidc:
         cfg.update({"oidc_issuer": issuer, "oidc_client_id": client_id,

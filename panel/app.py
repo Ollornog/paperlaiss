@@ -19,7 +19,7 @@ ENV:
                   alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
   EXPORT_*        Export-Knopf: EXPORT_MAX_DOKUMENTE (1000), EXPORT_MAX_MB (2000), EXPORT_AUFBEWAHRUNG_MIN
-                  (1440 = 24 h), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
+                  (20), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
 """
 import os, sys, json, re, glob, html, hmac, secrets, shutil, subprocess, datetime, tempfile, threading, time, traceback
 import urllib.request, urllib.error, zoneinfo
@@ -454,7 +454,7 @@ def _env_zahl(name, vorgabe):
 
 EXPORT_MAX_DOKUMENTE = _env_zahl("EXPORT_MAX_DOKUMENTE", 1000)
 EXPORT_MAX_MB = _env_zahl("EXPORT_MAX_MB", 2000)
-EXPORT_AUFBEWAHRUNG = _env_zahl("EXPORT_AUFBEWAHRUNG_MIN", 1440) * 60
+EXPORT_AUFBEWAHRUNG = _env_zahl("EXPORT_AUFBEWAHRUNG_MIN", 20) * 60     # PO 2026-09-27: 20 min
 EXPORT_SPEICHER_MB = _env_zahl("EXPORT_SPEICHER_MB", 10000)   # alle fertigen Exporte zusammen
 EXPORT_TMP = os.environ.get("EXPORT_TMP") or tempfile.gettempdir()
 EXPORT_PRAEFIX = "paperlaiss-export-"
