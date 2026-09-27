@@ -52,11 +52,11 @@ function md(roh){
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
 const CHEV=%CHEV%, PFEIL_K=%PFEILK%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
-const ART={paperless:['Paperless','info','inbox'],code:['Schritt','secondary','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
+const ART={paperless:['Paperless','info','inbox'],code:['paperlaiss','outline','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Lesbar statt Code: Text mit Absätzen und Zeilenumbrüchen in normaler Schrift, Objekte als Tabelle.
 function prosa(t){
   const abs=String(t||'').trim().split(/\n\s*\n/).map(a=>'<p>'+txt(a).replace(/\n/g,'<br>')+'</p>').join('');
-  return '<div class="grid max-h-96 gap-2 overflow-y-auto rounded-md border bg-muted/40 p-3 leading-relaxed">'+(abs||'<p>—</p>')+'</div>';
+  return '<div class="grid max-h-96 gap-2 overflow-y-auto rounded-md border bg-background/70 p-3 leading-relaxed">'+(abs||'<p>—</p>')+'</div>';
 }
 function wertText(v){ if(v===null||v===undefined) return '<span class="text-muted-foreground">leer</span>';
   if(Array.isArray(v)) return v.length?v.map(x=>txt(typeof x==='object'?JSON.stringify(x):x)).join(', '):'<span class="text-muted-foreground">keine</span>';
@@ -71,18 +71,18 @@ function tabelle(obj,kopf){
 }
 function klapp(titel,inhalt,offen){return '<details class="min-w-0"'+(offen?' open':'')+'><summary>'+txt(titel)+CHEV+'</summary><div class="min-w-0">'+inhalt+'</div></details>'}
 function schritt(o){
-  if(o.art==='grenze') return '<div class="mx-auto w-fit rounded-full border bg-muted/40 px-6 py-2 text-center text-sm font-medium">'+txt(o.titel)+'</div>';
+  if(o.art==='grenze') return '<div class="mx-auto w-fit rounded-full border bg-muted px-6 py-2 text-center text-sm font-medium">'+txt(o.titel)+'</div>';
   const a=ART[o.art]||['',''];
   // Symbol GETRENNT vom Chip und größer — im Chip war es zu klein, um etwas zu sagen.
   const badge=(SYMG[a[2]]||'')+'<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
-  const erg=o.ergebnis?'<span class="badge" data-variant="'+(o.variante||'secondary')+'">'+txt(o.ergebnis)+'</span>':'';
+  const erg=o.ergebnis?'<span class="badge" data-variant="'+(o.variante||'outline')+'">'+txt(o.ergebnis)+'</span>':'';
   // Regeln als Tabelle „Wenn → Dann" in normaler Schrift — Plaketten mit Text waren schwer zu lesen.
   const regeln=(o.regeln||[]).length?'<div class="overflow-x-auto"><table class="table"><thead><tr><th>Wenn</th><th>Dann</th></tr></thead><tbody>'+
     o.regeln.map(r=>'<tr><td>'+txt(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</tbody></table></div>':'';
   const stand=(o.stand||[]).length?'<p class="text-muted-foreground text-xs">Aktuell: '+o.stand.map(x=>txt(x[0])+' <b>'+txt(x[1])+'</b>').join(' · ')+'</p>':'';
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
   const klappen=(o.klappen||[]).length?'<div class="accordion min-w-0" data-multiple>'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
-  return '<div class="card"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-3">'+
+  return '<div class="card bg-muted shadow-md"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-3">'+
     '<h2 class="flex items-center gap-3 text-lg font-semibold"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
     '<div class="flex items-center gap-2">'+erg+(o.knopf||'')+'</div></header>'+
     '<section class="grid min-w-0 gap-4 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';

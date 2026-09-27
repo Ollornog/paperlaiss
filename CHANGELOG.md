@@ -25,7 +25,9 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - Lauf-Popup: nur noch die Schritte, die in diesem Lauf passiert sind (kein OCR-Schritt ohne OCR).
 - Ablauf und Lauf-Popup: Symbole getrennt neben den Chips und größer, noch größere Pfeile mit
   mehr Abstand zu den Kästen, mehr Luft zwischen Kopf und Inhalt; im Popup werden die
-  Kastenränder nicht mehr abgeschnitten.
+  Kastenränder nicht mehr abgeschnitten. Die Schritt-Kästen heben sich mit eigener Fläche und
+  Schatten vom Hintergrund ab; der Chip nennt, wer den Schritt ausführt („paperlaiss" statt
+  „Schritt").
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
   Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.
