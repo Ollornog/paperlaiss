@@ -61,7 +61,7 @@ def _wahr(v):
     return v is True or str(v).strip().lower() in ("1", "true", "ja", "on")
 
 
-def export_auftrag(body, max_dokumente=200):
+def export_auftrag(body, max_dokumente=1000):
     """Den Auftrag aus dem Knopf prüfen: (auftrag, fehler).
 
     Die Reihenfolge der Dokumente bleibt erhalten (Doppelte fallen weg) — sie ist die Sortierung
@@ -112,6 +112,21 @@ def lese_rechte(antwort, gewuenscht):
     """
     da = {int(d["id"]) for d in (antwort or {}).get("results", []) if str(d.get("id", "")).isdigit()}
     return [d for d in gewuenscht if d in da], [d for d in gewuenscht if d not in da]
+
+
+def speicher_ueberlauf(fertige, grenze_bytes):
+    """Welche fertigen Exporte weg müssen, damit alle zusammen unter `grenze_bytes` bleiben.
+
+    `fertige` = [(auftrag, ende_zeitpunkt, bytes)]. Die ältesten fallen zuerst — bei 24 Stunden
+    Aufbewahrung und bis zu 2 GB je Export liefe die Platte sonst voll, bevor der Zeitgeber greift."""
+    summe = sum(b for _, _, b in fertige)
+    weg = []
+    for auftrag, _, b in sorted(fertige, key=lambda x: x[1]):
+        if summe <= grenze_bytes:
+            break
+        weg.append(auftrag)
+        summe -= b
+    return weg
 
 
 def groesse_fehler(summe_bytes, grenze_bytes):

@@ -199,8 +199,8 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   Paperless session, and one unreadable document rejects the whole export (403) instead of silently
   leaving it out. Status and download check again on every call. Names (correspondent, type, fields)
   are fetched with the user's session as well; the PDFs are downloaded with the panel's token.
-- Panel settings: `EXPORT_MAX_DOKUMENTE` (default 200), `EXPORT_MAX_MB` (200, sum of the PDFs),
-  `EXPORT_PARALLEL` (1), `EXPORT_AUFBEWAHRUNG_MIN` (30 — afterwards the result and its files are
+- Panel settings: `EXPORT_MAX_DOKUMENTE` (default 1000), `EXPORT_MAX_MB` (2000, sum of the PDFs),
+  `EXPORT_PARALLEL` (1), `EXPORT_SPEICHER_MB` (10000 — all finished exports together; the oldest go first), `EXPORT_AUFBEWAHRUNG_MIN` (1440 = 24 h — afterwards the result and its files are
   deleted), `EXPORT_TMP` (temporary directory), `PAPERLESS_PUBLIC_URL` (Paperless address for the
   links; unset: the address of the Paperless page that called, same origin only). Times follow
   `PAPERLESS_TIME_ZONE`, otherwise `TZ`. The panel must run as a single process (jobs live in memory).

@@ -30,9 +30,10 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   statt es still wegzulassen. Status und Download prüfen bei jedem Abruf erneut. Auch Namen
   (Korrespondent, Typ, Felder) kommen über die Sitzung des Nutzers; die PDFs lädt das Panel mit
   seinem Token.
-- **Grenzen und Aufräumen**: `EXPORT_MAX_DOKUMENTE` (200), `EXPORT_MAX_MB` (200, Summe der PDFs,
+- **Grenzen und Aufräumen**: `EXPORT_MAX_DOKUMENTE` (1000), `EXPORT_MAX_MB` (2000, Summe der PDFs,
   beim Herunterladen blockweise gemessen), `EXPORT_PARALLEL` (1), höchstens fünf offene Aufträge. Das
-  Ergebnis bleibt `EXPORT_AUFBEWAHRUNG_MIN` (30) Minuten abrufbar, dann sind Auftrag und Dateien weg
+  Ergebnis bleibt `EXPORT_AUFBEWAHRUNG_MIN` (1440 = 24 Stunden) abrufbar, dann sind Auftrag und Dateien weg;
+  liegen mehr als `EXPORT_SPEICHER_MB` (10000) fertige Exporte auf der Platte, fallen die ältesten zuerst
   (Zeitgeber je Auftrag; beim Start werden Reste eines früheren Prozesses gelöscht). Ein Abbruch
   räumt sofort auf. Links nach Paperless über `PAPERLESS_PUBLIC_URL`, sonst die Adresse der
   aufrufenden Paperless-Seite (nur vom selben Ursprung); Uhrzeit in `PAPERLESS_TIME_ZONE` bzw. `TZ`.

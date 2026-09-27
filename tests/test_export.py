@@ -31,6 +31,12 @@ _a, _f = el.export_auftrag({"docs": list(range(1, 12))}, max_dokumente=10)
 r.check("Auftrag: zu viele Dokumente ist ein Fehler mit Zahlen, keine stille Kürzung",
         any("10" in x and "11" in x for x in _f), str(_f))
 r.check("Auftrag: ohne Dokumente ein Fehler", el.export_auftrag({"docs": []})[1])
+_f = [("a", 100, 4), ("b", 300, 4), ("c", 200, 4)]          # Auftrag, Ende, Bytes
+r.check("Speicher: unter der Grenze bleibt alles", el.speicher_ueberlauf(_f, 12) == [])
+r.check("Speicher: über der Grenze fallen die ältesten zuerst, nur so viele wie nötig",
+        el.speicher_ueberlauf(_f, 8) == ["a"] and el.speicher_ueberlauf(_f, 4) == ["a", "c"], str(el.speicher_ueberlauf(_f, 4)))
+r.check("Vorgabe: bis 1000 Dokumente je Export", not el.export_auftrag({"docs": list(range(1, 1001))})[1]
+        and el.export_auftrag({"docs": list(range(1, 1002))})[1])
 r.check("Auftrag: unbekannte Art ein Fehler", el.export_auftrag({"docs": [1], "art": "fax"})[1])
 r.check("Auftrag: Einzel-Export prüft die Vorlage",
         el.export_auftrag({"docs": [1], "art": "einzeln", "vorlage": "{gibtsnicht}"})[1])
@@ -263,5 +269,18 @@ r.check("Statisch: der Download prüft die Größengrenze je Block", _laden is n
 # ---- Unicode-Hygiene der eigenen Meldungen: echte Umlaute, keine Ersatzschreibung
 _quelle = (ROOT / "panel" / "exportlogik.py").read_text(encoding="utf-8")
 r.check("exportlogik.py ist NFC", unicodedata.is_normalized("NFC", _quelle))
+
+# Verdrahtung: wer einen Export auf „fertig“ setzt, begrenzt danach den Speicher aller fertigen Exporte.
+import ast as _ast
+_baum = _ast.parse((ROOT / "panel" / "app.py").read_text(encoding="utf-8"))
+def _ruft(fn, name):
+    return any(isinstance(n, _ast.Call) and getattr(n.func, "id", None) == name for n in _ast.walk(fn))
+def _setzt_fertig(fn):
+    return any(isinstance(n, _ast.Call) and getattr(n.func, "id", None) == "_export"
+               and any(k.arg == "status" and isinstance(k.value, _ast.Constant) and k.value.value == "fertig" for k in n.keywords)
+               for n in _ast.walk(fn))
+_fertig = [f for f in _ast.walk(_baum) if isinstance(f, _ast.FunctionDef) and _setzt_fertig(f)]
+r.check("Verdrahtung: nach „fertig“ wird der Speicher aller Exporte begrenzt",
+        _fertig and all(_ruft(f, "_export_speicher_begrenzen") for f in _fertig), str([f.name for f in _fertig]))
 
 sys.exit(r.done())

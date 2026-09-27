@@ -18,8 +18,8 @@ ENV:
                   (PocketID/OIDC über PANEL_OIDC_*, Passwort nur mit PANEL_PASSWORD_LOGIN=1;
                   alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
-  EXPORT_*        Export-Knopf: EXPORT_MAX_DOKUMENTE (200), EXPORT_MAX_MB (200), EXPORT_AUFBEWAHRUNG_MIN
-                  (30), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
+  EXPORT_*        Export-Knopf: EXPORT_MAX_DOKUMENTE (1000), EXPORT_MAX_MB (2000), EXPORT_AUFBEWAHRUNG_MIN
+                  (1440 = 24 h), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
 """
 import os, sys, json, re, glob, html, hmac, secrets, shutil, subprocess, datetime, tempfile, threading, time, traceback
 import urllib.request, urllib.error, zoneinfo
@@ -438,9 +438,10 @@ def _env_zahl(name, vorgabe):
     return int(wert) if wert.isdigit() and int(wert) > 0 else vorgabe
 
 
-EXPORT_MAX_DOKUMENTE = _env_zahl("EXPORT_MAX_DOKUMENTE", 200)
-EXPORT_MAX_MB = _env_zahl("EXPORT_MAX_MB", 200)
-EXPORT_AUFBEWAHRUNG = _env_zahl("EXPORT_AUFBEWAHRUNG_MIN", 30) * 60
+EXPORT_MAX_DOKUMENTE = _env_zahl("EXPORT_MAX_DOKUMENTE", 1000)
+EXPORT_MAX_MB = _env_zahl("EXPORT_MAX_MB", 2000)
+EXPORT_AUFBEWAHRUNG = _env_zahl("EXPORT_AUFBEWAHRUNG_MIN", 1440) * 60
+EXPORT_SPEICHER_MB = _env_zahl("EXPORT_SPEICHER_MB", 10000)   # alle fertigen Exporte zusammen
 EXPORT_TMP = os.environ.get("EXPORT_TMP") or tempfile.gettempdir()
 EXPORT_PRAEFIX = "paperlaiss-export-"
 EXPORT_WARTESCHLANGE = 5            # offene Exporte (wartend + laufend), danach 429
@@ -485,6 +486,15 @@ def _export_aufraeumen():
     with _EXPORT_LOCK:
         alt = [k for k, j in EXPORTE.items() if j["status"] in ("fertig", "fehler") and j.get("ende", j["seit"]) < frist]
     for k in alt:
+        _export_entfernen(k)
+
+
+def _export_speicher_begrenzen():
+    """Liegen mehr fertige Exporte auf der Platte als EXPORT_SPEICHER_MB, die ältesten löschen."""
+    with _EXPORT_LOCK:
+        fertige = [(k, j.get("ende", j["seit"]), sum(g for _, _, g in j.get("dateien") or []))
+                   for k, j in EXPORTE.items() if j["status"] == "fertig"]
+    for k in exportlogik.speicher_ueberlauf(fertige, EXPORT_SPEICHER_MB * 1024 * 1024):
         _export_entfernen(k)
 
 
@@ -658,6 +668,7 @@ def export_lauf(job, auftrag, doks, namen, basis):
                     os.unlink(e["pfad"])
             _export(job, status="fertig", schritt="fertig", ende=time.time(),
                     dateien=[(n, p, os.path.getsize(p)) for n, p in dateien])
+            _export_speicher_begrenzen()
     except ExportAbbruch as ex:
         _export(job, status="fehler", meldung=str(ex), uebersprungen=uebersprungen(), ende=time.time())
         shutil.rmtree(ordner, ignore_errors=True)
