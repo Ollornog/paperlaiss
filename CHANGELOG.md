@@ -6,6 +6,117 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Korrespondent zuordnen (Pass 2) in derselben KI-Unterhaltung wie Pass 1
+
+- Pass 2 ist kein eigener Aufruf mit nur dem Namen mehr, sondern eine weitere Nachricht in der
+  Pass-1-Unterhaltung: die KI sieht dabei das ganze Dokument und ihre eigene Analyse
+  (`pass2_frage()`). Die Schnittstelle hat kein Gedächtnis — der Verlauf wird mitgeschickt, wie
+  schon beim OCR-Nachlauf und der Selbstkorrektur. Test belegt die Verdrahtung (Mutation rot).
+- Ablauf: Regeln als Tabelle „Wenn → Dann" in normaler Schrift, der aktuelle Stand der
+  Einstellungen getrennt darunter (vorher Plaketten mit gemischtem Text).
+- Aktivität: „Info" hieß in Wahrheit „Trockenlauf" (DRY, nichts geschrieben) — jetzt so
+  benannt; sonstige unbekannte Zeilen heißen „Hinweis".
+- Aktivität: fünf Kennzahlen wieder in einer Reihe; Verlauf über die volle Breite mit 60 Tagen als
+  flache Balkenreihe (das C22-Diagramm hat ein festes Seitenverhältnis — Sonderweg, in C22 gemeldet);
+  Symbole je Ereignisart.
+- Lauf-Popup scrollt (der Dialoginhalt war abgeschnitten).
+- Ablauf: Schritt „Mistral-OCR · Text neu lesen" mit seinen Bedingungen statt „Text brauchbar?";
+  Symbole je Schrittart, größere Überschriften und Pfeile.
+- Lauf-Popup: nur noch die Schritte, die in diesem Lauf passiert sind (kein OCR-Schritt ohne OCR).
+- Ablauf und Lauf-Popup: Symbole getrennt neben den Chips und größer, noch größere Pfeile mit
+  mehr Abstand zu den Kästen, mehr Luft zwischen Kopf und Inhalt; im Popup werden die
+  Kastenränder nicht mehr abgeschnitten. Die Schritt-Kästen heben sich mit eigener Fläche und
+  Schatten vom Hintergrund ab; der Chip nennt, wer den Schritt ausführt („paperlaiss" statt
+  „Schritt").
+- Ablauf und Lauf-Popup: ein Schritt ist jetzt ein nummerierter Container um alles, was zu ihm
+  gehört (Vorbereiten · Text beschaffen · Absender erkennen · Analysieren · Korrespondent
+  zuordnen · Schreiben), darin die Teilschritte mit kleinen Pfeilen. Oben stehen die Auslöser je
+  mit Symbol (im Popup der eine, der den Lauf gestartet hat), unten „Ende" mit Haken bzw.
+  „Abgebrochen" mit Kreuz — beide mit Abstand zum Rand.
+- Panel: kleinere Schrift überall. Ablauf: jeder Block sagt in einem Satz, was er tut („OCR — Text
+  neu erkennen" statt „Text neu lesen"); Eingabe und Ausgabe als abgesetzte Kästen mit farbigem
+  Etikett statt schlichter Aufklapp-Zeilen.
+- Pass 1: ein Feld statt zwei für den System-Prompt — die Anweisung, wie sie an die KI geht, mit
+  hinterlegten eingesetzten Werten; „Bearbeiten" öffnet die Vorlage darüber, und jede Änderung
+  rechnet die Vorschau live neu (`POST /api/prompt-vorschau` mit dem Entwurf, speichert nichts).
+  Unverändert gespeichert heißt: eingebauter Prompt, keine Kopie.
+- Die Nachrichten an Pass 0, Pass 1 und Pass 2 zeigt der Ablauf jetzt im echten Wortlaut, mit
+  Beispielwerten und — bei Pass 1 — der Bedingung je Block. System-Prompt und Pass-1-Nachricht
+  entstehen dafür in `classify.py` aus Stücken (`baue_system_teile`, `pass1_system_teile`,
+  `pass1_nachricht_teile`, `pass0_nachricht`); der Lauf fügt sie zusammen, ein Test vergleicht
+  Zeichen für Zeichen mit der bisherigen Nachricht (Mutation rot).
+- Pass 1: Die Kandidatenliste ist ein Angebot, keine Pflicht. Bisher hieß es „wähle GENAU einen
+  dieser Namen; nur wenn wirklich keiner passt einen neuen" — das drängte die KI zur Liste, und ein
+  ähnlicher, aber falscher Name wurde exakt übernommen und direkt zugeordnet (Pass 2 prüft nur
+  Namen, die nicht exakt passen). Jetzt: passt einer, seinen Namen exakt übernehmen; sonst den
+  tatsächlichen Absender nennen.
+- Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
+- Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
+  Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.
+
+### Hinzugefügt — Stammdaten der Korrespondenten im Paperless-Dialog
+
+- Das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten den Abschnitt *paperlaiss*
+  ein: Kontext für die KI, Aliase, E-Mail, Mail-Domains, Kundennummer, USt-ID, Telefon, Adresse.
+  Gespeichert mit Paperless' *Save* über `GET/POST /knopf/korrespondent/{id}`; berechtigt ist, wer
+  den Korrespondenten in Paperless ändern darf. Import-Felder (`quelle`, `extern_id`) bleiben
+  beim Speichern erhalten (`kern.korr_eintrag()`).
+- Panel: der Seitenkopf mit den Aktionen (etwa „Speichern") bleibt beim Scrollen stehen.
+
+### Geändert — ein Knopf „KI", Ablauf als Schrittliste mit Eingabe und Ausgabe
+
+- Der OCR-Knopf und der Nur-OCR-Modus (`CLASSIFY_NUR_OCR`) entfallen — der KI-Knopf liest ohnehin
+  immer per Mistral-OCR neu. Der Knopf heißt nur noch „KI", auch im Menü „Actions".
+- **Ablauf & Prompt** und der **Lauf** in der Aktivität nutzen dieselbe Schrittdarstellung: Nummer,
+  Art, Regeln „wenn … → …", aufklappbar Eingabe und Ausgabe — bei KI-Aufrufen Prompt und Antwort.
+  Keine Rauten mehr. Der Prompt von Pass 1 ist im Ablauf direkt bearbeitbar.
+- Pass 0 legt Prompt und Antwort jetzt im Trace ab; die kleinen Prompts von Pass 0/2 sind
+  Konstanten (`PASS0_SYSTEM`, `PASS2_SYSTEM`) und erscheinen in der Vorschau.
+- Panel: Titelleiste und Inhalt in einer begrenzten Spur; neue Seite **Info** mit GitHub-Link.
+
+### Geändert — Knöpfe rufen paperlaiss direkt; Tag-Auslöser entfernt
+
+- KI-/OCR-Knopf rufen das Panel direkt (`POST /knopf`, Status `GET /knopf/status`). Berechtigt
+  ist, wer das Dokument in Paperless ändern darf — geprüft mit der Paperless-Sitzung des Nutzers
+  (`user_can_change`, Logik `kern.knopf_rechte()`). Kein Tag, kein Hinweisfeld, kein Workflow mehr.
+- **Entfernt:** Webhook `/redo`, `REDO_SECRET`, `deploy/neu-klassifizieren-einrichten.py`, die
+  Config-Schlüssel `redo_tag`, `ocr_tag`, `hinweis_field`. Neu: `PAPERLAISS_URL` (Paperless-Container),
+  `PAPERLAISS_KNOPF_ORIGIN` (Panel, nur bei getrennten Adressen).
+- In der Mehrfachauswahl stehen KI und OCR jetzt im Menü **Actions** statt als eigene Knöpfe.
+
+### Geändert — Panel: Navigation in der Titelleiste, Ablauf als Flussdiagramm, Einstellungen erklärt
+
+- Keine Seitenleiste mehr; die drei Seiten stehen in der Titelleiste.
+- **Ablauf & Prompt** nach den üblichen Flussdiagramm-Regeln: Oval Start/Ende, Raute Entscheidung
+  mit beschrifteten Zweigen, Paperless-Schritte hinterlegt, KI-Knoten mit Eingabe → Modell →
+  Ausgabe; Legende oben.
+- **Einstellungen** in Gruppen, jede mit Titel und Beschreibung (`seiten.EINSTELLUNGEN`); ein Test
+  stellt sicher, dass jeder Schlüssel des Klassifizierers eine hat. Der Klassifizierer gibt nur noch
+  Schlüssel aus, die er kennt — veraltete Reste einer alten Datei erscheinen nicht mehr.
+
+### Geändert — Panel neu auf C22: Aktivität mit Filtern, Lauf als Entscheidungsbaum, Ablauf-Editor
+
+- **Aussehen aus C22** (vendort unter `panel/static/c22/`, `scripts/vendor-c22.sh`, mit Herkunft
+  und dem OFL-Lizenztext der Schrift Inter). Gleiche Navigation auf jeder Seite, die aktive
+  hinterlegt. Wächter `tests/test_c22_klassen.py`: jede Klasse und Variante muss im Pack stehen.
+- **Aktivität:** Kennzahlen und Verlauf filtern die Liste (Filter in der Adresse, Zurück hebt ihn
+  auf), 100 Einträge je Seite (`/api/aktivitaet`, Logik `kern.aktivitaet()`); eine Zeile öffnet den
+  Lauf mit Entscheidungsbaum, Prompt, Ausgabe und OCR-Text als Markdown.
+- **Ablauf & Prompt:** Entscheidungsbaum mit großen Pfeilen; ein Klick auf einen Knoten bearbeitet
+  seine Einstellungen, auch den Prompt.
+- **Einstellungen/Config:** das Panel zeigt die wirksame Config (Datei + Vorgaben,
+  `CLASSIFY_DUMP_CONFIG=1`) und schreibt beim Speichern nur geänderte Schlüssel.
+- **Entfernt:** Korrespondenten-Seite samt Zusammenführen (Stammdaten gehören nach Paperless bzw.
+  ins eigene System), `/api/stats`, `/api/feed`, `/api/correspondents*`; `/trace/{id}` leitet in
+  die Aktivität um.
+
+### Behoben — Läufe mit OCR fehlten bei „klassifiziert"
+
+- `log_art()` suchte Teiltexte der Reihe nach; die Erfolgszeile eines Laufs mit OCR
+  („OK 913 | … | OCR-rescue(340)") traf zuerst „OCR-rescue". Jetzt entscheidet das erste Wort.
+- Die OCR-Schlüsselwörter verloren in PR #58 ihre Leerzeichen (`' der '` → `der`, traf dann auch
+  „oder"); wieder wörtlich.
+
 ### Geändert — Knöpfe auch in der Mehrfachauswahl, „Suggest" ausgeblendet
 
 - KI/OCR stehen jetzt auch in der Leiste der Mehrfachauswahl und gelten für alle markierten

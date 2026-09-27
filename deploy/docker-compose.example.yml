@@ -10,12 +10,14 @@ services:
     # ... euer bestehender paperless-ngx-Service (image, db, redis, …) ...
     volumes:
       - ./scripts:/scripts
-      # Optional: KI-/OCR-Knöpfe in der Dokumentansicht (kein Fork, siehe README).
+      # Optional: KI-Knopf und Korrespondenten-Abschnitt in Paperless (kein Fork, siehe README).
       # Beide Dateien müssen root gehören und dürfen für andere nicht schreibbar sein.
       - ./paperless-knoepfe/10-paperlaiss-knoepfe.sh:/custom-cont-init.d/10-paperlaiss-knoepfe.sh:ro
       - ./paperless-knoepfe/paperlaiss-knoepfe.js:/paperlaiss-knoepfe/paperlaiss-knoepfe.js:ro
     environment:
       PAPERLESS_POST_CONSUME_SCRIPT: /scripts/classify.py
+      # Knöpfe: wo der Browser das Panel erreicht (hinter demselben Proxy genügt ein Pfad).
+      PAPERLAISS_URL: /paperlaiss
       CLASSIFY_CONFIG: /scripts/classify-config.json
       CLASSIFY_LOG: /scripts/classify.log
       PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
@@ -36,5 +38,7 @@ services:
       CLASSIFY_DIR: /scripts
       PANEL_TOKEN: ${PANEL_TOKEN:-}
       INGEST_TOKENS: ${INGEST_TOKENS:-{}}
+      # Nur wenn Paperless und Panel auf verschiedenen Adressen/Ports laufen (CORS für die Knöpfe):
+      # PAPERLAISS_KNOPF_ORIGIN: https://paperless.example.com
     depends_on:
       - paperless

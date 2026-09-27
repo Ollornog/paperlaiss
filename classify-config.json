@@ -10,9 +10,7 @@
   "tagging_enabled": false,
   "marker_tag": "ai-processed",
   "unsicher_tag": "",
-  "redo_tag": "",
   "summary_field": "",
-  "hinweis_field": "",
   "mail_context_field": "",
   "mail_from_field": "",
   "manual_fields": [

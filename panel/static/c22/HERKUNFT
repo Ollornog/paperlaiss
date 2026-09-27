@@ -1,0 +1,12 @@
+C22 — geteiltes Design-System (Aussehen). Kopie, nicht bearbeiten.
+
+Stand:   v0.2.0-88-g9dfe19f
+Commit:  9dfe19fc2c942f13d5b52356ea2c8441dc1cc583
+Pack:    vega
+Bezogen: 2026-09-27 durch scripts/vendor-c22.sh
+
+Enthalten: css/c22.css (Pack), js/basecoat.all.min.js, js/c22.js, fonts/inter.woff2
+(Inter, SIL Open Font License 1.1 — Lizenztext in fonts/OFL.txt).
+
+Änderungen am Aussehen gehören nach C22, nicht hierher: eine Korrektur in dieser Kopie
+wäre beim nächsten Vendor-Lauf wieder weg.

@@ -20,7 +20,7 @@ Paperless-REST-API zurück.
 
 Der Klassifizierer ist **stdlib-only** — keine Pakete zu installieren — und **mandantenunabhängig**:
 jedes Feld und jeder Tag wird per *Name* gegen die API aufgelöst, jedes Verhalten ist ein Schalter
-in der Config. Ein optionales FastAPI-Panel bringt Dashboard und Ingest-Endpunkt dazu.
+in der Config. Ein optionales FastAPI-Panel bringt eine Admin-Ansicht und einen Ingest-Endpunkt dazu.
 
 ---
 
@@ -68,18 +68,25 @@ CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # Mistral-OCR erzwing
 
 ## Panel
 
-Ein schlankes **FastAPI-Dashboard** (ein eigenständiger Baustein, kein Fork), gedacht als eigener
-Container im selben Docker-Netz, das sich das `scripts/`-Volume teilt:
+Ein Admin-Panel für den Fall, dass etwas hängt oder eingestellt werden muss — paperlaiss ist
+Middleware, Stammdaten (Tags, Korrespondenten) bleiben in Paperless bzw. im eigenen System. Ein
+FastAPI-Container im selben Docker-Netz, der sich das `scripts/`-Volume teilt. Das Aussehen kommt
+aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `panel/static/c22/`
+(`scripts/vendor-c22.sh`); `tests/test_c22_klassen.py` prüft jede Klasse dagegen.
 
-- **Dashboard** (`/`) — Live-Status („läuft gerade"), Kennzahlen (klassifiziert / OCR-Rescues /
-  repariert / Fehler / übersprungen), ein Aktivitäts-Feed, in dem jede Doc-ID einen
-  **Trace-Inspektor** öffnet.
+- **Aktivität** (`/`) — fünf Kennzahlen und ein 30-Tage-Verlauf **filtern** die Liste (der Filter
+  steht in der Adresse, *Zurück* hebt ihn auf), 100 Einträge je Seite. Eine Zeile öffnet den
+  **Lauf**: Entscheidungsbaum, Prompt, Ausgabe der KI und den OCR-Text als Markdown.
+- **Ablauf & Prompt** (`/ablauf`) — jeder Schritt, den ein Dokument durchläuft, aufklappbar mit Eingabe
+  und Ausgabe; bei den KI-Aufrufen Prompt und Antwortformat. Der Prompt von Pass 1 ist dort
+  bearbeitbar und wird auch so gezeigt, wie er gesendet wird (`CLASSIFY_PROMPT_VORSCHAU=1`). Ein Lauf
+  in der Aktivität erscheint mit denselben Schritten und seinen echten Prompts und Antworten.
+- **Info** (`/info`) — was paperlaiss ist, Links zum Repository und zu den Bausteinen.
+- **Einstellungen** (`/einstellungen`) — jeder Wert der wirksamen Konfiguration (Datei plus
+  Vorgaben; gespeichert werden nur geänderte Schlüssel).
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
-- **Ablauf & Prompt** (`/ablauf`) — jeder Schritt eines Laufs mit den aktuellen Einstellungen und der
-  System-Prompt von Pass 1 genau so, wie er gesendet wird (gebaut von `classify.py` selbst:
-  `CLASSIFY_PROMPT_VORSCHAU=1`).
-- **JSON-API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
-  `/api/config` (GET/POST). Eine übergeordnete Plattform kann dieselben Endpunkte konsumieren.
+- **JSON-API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
+  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST mit einem Entwurf für die Live-Vorschau beim Bearbeiten).
 - **Anmeldung** (`PANEL_AUTH`):
   - leer (Vorgabe) — Bearer-Token bzw. Cookie `PANEL_TOKEN`; ohne Token antwortet das Panel mit 503.
   - `none` — keine eigene Anmeldung, weil eine davorhängt (Reverse-Proxy mit Forward-Auth).
@@ -111,8 +118,11 @@ Dokumenten). paperlaiss löst das mit einem **eigenen Store** (`correspondents.j
 gepflegt), gebunden **per Paperless-Korrespondent-ID**, sodass er eine Umbenennung übersteht. Pro
 Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `uid`, `kontext`, `aliase`.
 
-Gepflegt im Panel unter **`/korrespondenten`** (alle Korrespondenten plus Edit-Modal). Der
-Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
+Gepflegt **in Paperless selbst**: das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten
+einen Abschnitt *paperlaiss* ein (Kontext, Aliase, E-Mail, Mail-Domains, Kundennummer, USt-ID,
+Telefon, Adresse), gespeichert zusammen mit Paperless' *Save* — erlaubt für alle, die den
+Korrespondenten in Paperless ändern dürfen. Die Datei lässt sich auch von außen befüllen (eigenes
+Stammdatensystem, ein Skript). Der Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
 Kennungen im Prompt, `aliase` im Feedback-Loop — präzisere Klassifizierung.
 
 ## Deployment (Docker)
@@ -124,24 +134,26 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 
 ### Knöpfe in Paperless (optional)
 
-Zwei Knöpfe in der Dokumentansicht (anstelle von Paperless' eigenem *Suggest*, das ausgeblendet
-wird) und in der Leiste der Mehrfachauswahl (für alle markierten Dokumente) — ohne Fork:
+Ein Knopf **KI** (Zauberstab: optional ein Hinweis, dann liest paperlaiss das Dokument per
+Mistral-OCR neu und klassifiziert es neu) — in der Dokumentansicht anstelle von Paperless' eigenem
+*Suggest* (ausgeblendet) und als Eintrag im Menü **Actions** der Mehrfachauswahl. Kein Fork, keine
+Tags, kein Workflow:
 
-- **KI** (Zauberstab) — optional ein Hinweis für die KI, dann neu klassifizieren (immer mit Mistral-OCR).
-- **OCR** — nur den Text per Mistral-OCR neu lesen; die Metadaten bleiben.
-
-Paperless führt bei jedem Containerstart Skripte aus `/custom-cont-init.d` aus (dokumentiert unter
-*Custom Container Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` kopiert
-`paperlaiss-knoepfe.js` ins Static-Verzeichnis und hängt eine `<script>`-Zeile in die Startseite —
-nach jedem Update erneut, nichts zu mergen. Die Knöpfe sprechen nur die **Paperless-API mit der
-Sitzung des Nutzers** an: sie setzen Auslöser-Tag/Hinweisfeld bzw. OCR-Tag, und der vorhandene
-Workflow ruft paperlaiss. Tag, Feld und Workflow einmal mit `deploy/neu-klassifizieren-einrichten.py`
-anlegen. Namen: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` im
-Paperless-Container (Vorgaben `KI-neu`, `KI-OCR`, `KI-Hinweis`). Bei *Alle auswählen* über
-mehrere Seiten werden nur die sichtbaren markierten verarbeitet, und der Knopf sagt das. Das Panel
-fährt höchstens `PANEL_PARALLEL` (Vorgabe 2) solcher Läufe gleichzeitig. Baut Paperless seine Seite um,
-fehlen die Knöpfe — Paperless selbst läuft weiter. Nach dem Lauf lädt die Seite neu, damit Paperless
-nicht seinen alten Stand über das Ergebnis speichert.
+- Paperless führt bei jedem Containerstart Skripte aus `/custom-cont-init.d` aus (*Custom Container
+  Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` kopiert
+  `paperlaiss-knoepfe.js` ins Static-Verzeichnis und hängt eine `<script>`-Zeile in die Startseite —
+  nach jedem Update erneut, nichts zu mergen.
+- Die Knöpfe rufen das Panel direkt (`POST /knopf`). Der Browser schickt die **Paperless-Sitzung**
+  mit; das Panel fragt damit bei Paperless, welche Dokumente dieser Nutzer ändern darf
+  (`user_can_change`), und verarbeitet nur die. Ohne gültige Sitzung: 401.
+- `PAPERLAISS_URL` (Paperless-Container): wo der Browser das Panel erreicht. Hinter demselben
+  Reverse-Proxy genügt ein Pfad (Vorgabe `/paperlaiss`, ohne Präfix ans Panel weitergereicht); auf
+  einem eigenen Port die volle Adresse. Dann zusätzlich `PAPERLAISS_KNOPF_ORIGIN` (Panel-Container)
+  auf die Paperless-Adresse setzen, damit der Aufruf über Ursprünge hinweg CORS besteht.
+- Bei *Alle auswählen* über mehrere Seiten werden nur die sichtbaren markierten verarbeitet, und der
+  Menüeintrag sagt das. Das Panel fährt höchstens `PANEL_PARALLEL` (Vorgabe 2) Läufe gleichzeitig.
+  Nach dem Lauf lädt die Seite neu, damit Paperless nicht seinen alten Stand über das Ergebnis
+  speichert. Baut Paperless seine Seite um, fehlen die Knöpfe — Paperless selbst läuft weiter.
 
 ## Konfiguration (`classify-config.json`)
 
@@ -153,8 +165,8 @@ nicht seinen alten Stand über das Ergebnis speichert.
 | `ocr_regeln` | siehe unten | wann ein Text als zu schwach gilt und per OCR neu gelesen wird |
 | `tagging_enabled` | `false` | KI vergibt inhaltliche Tags (aus: nur Typ/Korrespondent/Felder) |
 | `marker_tag` | `ai-processed` | Tag, das gesetzt wird + als „schon erledigt"-Signal dient |
-| `unsicher_tag` / `redo_tag` | – | optionale Flag-/Redo-Tags (per Name) |
-| `summary_field` / `hinweis_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
+| `unsicher_tag` | – | optionaler Flag-Tag (per Name) |
+| `summary_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |

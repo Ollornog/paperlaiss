@@ -57,6 +57,8 @@ r.check("OCR-Regel: Schwelle aus der Config", classify.ocr_gruende(
 r.check("OCR-Regel: eigene Schlüsselwörter", classify.ocr_gruende(
     "Lorem ipsum dolor sit amet consectetur " * 12,
     {"ocr_min_len": 300, "ocr_regeln": {"schluesselwoerter": ["lorem", "dolor"]}}) == [])
+r.check("OCR-Regel: Schlüsselwörter als ganze Wörter (' der ' trifft nicht in 'oder')",
+        classify.ocr_regeln({})["schluesselwoerter"][0] == " der ")
 r.check("OCR-Regel: altes ocr_min_len gilt weiter, wenn min_zeichen fehlt",
         classify.ocr_regeln({"ocr_min_len": 123})["min_zeichen"] == 123)
 
@@ -86,12 +88,12 @@ r.check("Typ: gleich oder nichts erkannt → nichts schreiben",
 import contextlib as _ctx, io as _io
 
 
-def _lauf(chat_antworten, force_ocr=False, text=_gut, nur_ocr=False):
+def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=()):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
                                 "custom_fields": [], "created": "2026-01-01"},
               "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}]},
-              "/correspondents/": {"results": []}, "/custom_fields/": {"results": []}}
+              "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": []}}
 
     def get(pfad, raw=False):
         return next(v for k, v in routen.items() if pfad.startswith(k))
@@ -103,12 +105,13 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, nur_ocr=False):
 
     def chat(messages, max_tokens=900):
         aufrufe["chat"].append(messages[-1]["content"])
+        aufrufe.setdefault("laengen", []).append(len(messages))
         aufrufe.setdefault("system", messages[0]["content"])
         return dict(antworten.pop(0)), "{}"
-    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR", "NUR_OCR")}
+    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR")}
     classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
     classify.mistral = lambda *a, **k: {}
-    classify.TOK, classify.DRY, classify.FORCE_OCR, classify.NUR_OCR = "x", True, force_ocr, nur_ocr
+    classify.TOK, classify.DRY, classify.FORCE_OCR = "x", True, force_ocr
     os.environ["CLASSIFY_DOC"] = "5"
     try:
         with _ctx.redirect_stdout(_io.StringIO()):
@@ -131,9 +134,13 @@ r.check("Verdrahtung: alles lesbar → kein OCR", _b["ocr"] == 0 and len(_b["cha
 _c = _lauf([{**_ok, "needs_ocr": True}], force_ocr=True)
 r.check("Verdrahtung: OCR lief schon vor Pass 1 → kein zweites Mal", _c["ocr"] == 1 and len(_c["chat"]) == 1,
         f"ocr={_c['ocr']} chat={len(_c['chat'])}")
-_d = _lauf([], nur_ocr=True)
-r.check("Verdrahtung: Nur-OCR liest neu und klassifiziert NICHT", _d["ocr"] == 1 and _d["chat"] == [],
-        f"ocr={_d['ocr']} chat={len(_d['chat'])}")
+
+# Pass 2 hängt an die Pass-1-Unterhaltung an: die KI sieht das Dokument, nicht nur den Namen.
+_e = _lauf([{**_ok, "correspondent": "Mustr Autoteile"}, {"match": "Muster Autoteile GmbH"}],
+           korrespondenten=[{"id": 7, "name": "Muster Autoteile GmbH"}, {"id": 8, "name": "Anderes Haus"}])
+r.check("Pass 2: zweiter Aufruf in derselben Unterhaltung (Dokument + Analyse + Frage)",
+        len(_e["chat"]) == 2 and _e["laengen"] == [2, 4] and "Muster Autoteile GmbH" in _e["chat"][1],
+        f"{len(_e['chat'])} Aufrufe, Längen {_e.get('laengen')}")
 
 # Die Vorschau im Panel muss GENAU den Prompt zeigen, den die KI bekommt — nicht einen Nachbau.
 _alt_get = classify.get
@@ -145,6 +152,47 @@ finally:
 r.check("Prompt-Vorschau = tatsächlich gesendeter System-Prompt", _vorschau["system"] == _b["system"])
 r.check("Prompt-Vorschau: Typen eingesetzt, keine Platzhalter übrig",
         "Rechnung" in _vorschau["system"] and "{TYPES}" not in _vorschau["system"])
+
+r.check("Prompt-Vorschau: Stücke ergeben genau den System-Prompt",
+        "".join(t for t, _ in _vorschau["system_teile"]) == _vorschau["system"])
+r.check("Prompt-Vorschau: eingesetzte Typen als Platzhalter markiert",
+        any(v == "TYPES" and "Rechnung" in t for t, v in _vorschau["system_teile"]))
+r.check("Prompt-Vorschau: Nachricht zeigt Beispielwerte markiert und Bedingungen",
+        any(v and "‹Titel›" in t for t, v, _ in _vorschau["nachricht_teile"])
+        and any(w and "MÖGLICHE KORRESPONDENTEN" in t for t, _, w in _vorschau["nachricht_teile"]))
+classify.get = _b["get"]
+os.environ["CLASSIFY_PROMPT_ENTWURF"] = "Nur {TYPES} und sonst nichts"
+try:
+    _entwurf = classify.prompt_vorschau()
+finally:
+    classify.get = _alt_get
+    os.environ.pop("CLASSIFY_PROMPT_ENTWURF")
+r.check("Prompt-Vorschau: Entwurf aus dem Editor wird eingesetzt, ohne zu speichern",
+        _entwurf["system"].startswith("Nur ") and "Rechnung" in _entwurf["system"]
+        and not classify.CFG.get("system_prompt", "").startswith("Nur "))
+
+# Die Nachricht an Pass 1 entsteht aus Stücken — zusammengesetzt muss sie Zeichen für Zeichen
+# der bisherigen Nachricht entsprechen (Vergleich gegen die alte Formel, mit und ohne Zusatzblöcke).
+def _alte_nachricht(hinweis, cname, chint, kand_lines, mail_ktx, added, created, fname, fieldspec, title, content):
+    _NL = "\n"
+    hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
+    corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
+    kand_block = (("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):" + _NL + kand_lines + _NL + _NL) if kand_lines else "")
+    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
+    meta = (f"METADATEN:\n- Hinzugefügt am: {added}\n- Aktuelles Dokumentdatum (evtl. falsch): {created}\n"
+            f"- Originaldateiname: {fname}\n")
+    return (f"{hint_block}{corr_hint_block}{kand_block}{mail_block}{meta}\n"
+            f"VERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n{fieldspec}\n\n"
+            f"TITEL: {title}\n\nINHALT:\n{content}")
+for _args in [("Bitte Typ Mahnung", "Firma A", "zahlt immer spät", "- Firma A\n- Firma B", "Hallo, anbei",
+               "2026-01-02", "2026-01-01", "a.pdf", "- Betrag (Zahl), aktuell: —", "Titel", "Inhalt"),
+              ("", None, "", "", "", "2026-01-02", "", "—", "", "", "Inhalt")]:
+    r.check("Pass-1-Nachricht aus Stücken = bisherige Nachricht" + (" (mit allen Blöcken)" if _args[0] else " (ohne Zusatzblöcke)"),
+            "".join(t for t, _, _ in classify.pass1_nachricht_teile(*_args)) == _alte_nachricht(*_args))
+r.check("Kandidatenliste ist ein Angebot, keine Pflicht (kein „GENAU einen dieser Namen“)",
+        "GENAU einen" not in classify.KAND_KOPF and "tatsächlichen Absender" in classify.KAND_KOPF)
+r.check("Verdrahtung: der Lauf schickt die aus Stücken gebaute Nachricht",
+        _b["chat"][0].startswith("METADATEN:") and "VERFÜGBARE FELDER" in _b["chat"][0] and "\nINHALT:\n" in _b["chat"][0])
 
 # ---- is_null(): die vielen Schreibweisen von „leer"
 r.check("is_null: None", classify.is_null(None) is True)
@@ -477,5 +525,16 @@ classify.DRY = _alt_dry
 r.check("nachbearbeiten: im Trockenlauf passiert nichts", "bekam doc 5" not in _log_seit("MARKE-5"))
 
 classify.CFG["nachbearbeitung"] = _alt_cfg
+
+# ---- Jede Einstellung hat im Panel Titel und Beschreibung (panel/seiten.EINSTELLUNGEN).
+# Fehlt ein Eintrag, erschiene der Schlüssel roh unter „Weitere" — genau das soll nicht passieren.
+sys.path.insert(0, str(ROOT / "panel"))
+import seiten  # noqa: E402
+_meta = seiten.EINSTELLUNGEN
+_fehlt = [k for k in sorted(classify._BEKANNT) if not k.startswith("api_key")
+          and k not in _meta and not any(m.startswith(k + ".") for m in _meta)]
+_fehlt += [f"ocr_regeln.{k}" for k in classify.OCR_REGELN_VORGABE if f"ocr_regeln.{k}" not in _meta]
+r.check("Einstellungen: jeder Schlüssel hat Titel und Beschreibung im Panel", not _fehlt, str(_fehlt))
+r.check("Einstellungen: nur bekannte Gruppen", all(g in seiten.GRUPPEN for g, *_ in _meta.values()))
 
 sys.exit(r.done())

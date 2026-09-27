@@ -39,46 +39,6 @@ r.check("Webhook: leerer Rumpf ergibt None", kern.doc_id_aus_webhook("") is None
 r.check("Webhook: Unsinn ergibt None statt Absturz",
         kern.doc_id_aus_webhook("{{{ kaputt") is None)
 
-# ---- merge_metadaten(): zwei Korrespondenten zusammenführen, ohne Kundendaten zu verlieren.
-#
-# Die Namen sind NEUTRAL (RFC 2606, `.example`), nicht aus einem echten Mandanten.
-# Bis 2026-09-22 standen hier ein realer Firmenname und zwei real registrierte
-# `.at`-Domains — in einem ÖFFENTLICHEN Repo. Gefunden hat es keine Prüfung:
-# `pruefe_adressen` sieht nur URLs MIT Schema, und das Infrastruktur-Muster
-# verlangt drei Namensteile (`sub.domain.tld`) — eine blanke Second-Level-Domain
-# fällt durch beide. Testdaten sind Veröffentlichung wie jede andere Zeile auch.
-_ziel = {"kundennummer": "KD-1", "kontext": "", "domains": "kunde.example", "aliase": "Kunde"}
-_q1 = {"kundennummer": "KD-99", "kontext": "Reifenhandel", "domains": "kunde-handel.example",
-       "aliase": "KUNDE Handel"}
-_erg = kern.merge_metadaten(_ziel, [_q1])
-
-r.check("Merge: das Ziel behält seine Kundennummer", _erg["kundennummer"] == "KD-1")
-r.check("Merge: leeres Zielfeld wird aus der Quelle gefüllt", _erg["kontext"] == "Reifenhandel")
-r.check("Merge: Domains werden vereinigt, nicht überschrieben",
-        _erg["domains"] == "kunde.example, kunde-handel.example")
-r.check("Merge: Aliase werden vereinigt", _erg["aliase"] == "Kunde, KUNDE Handel")
-
-# Dubletten in Listen fallen raus — die zuerst gesehene Schreibweise gewinnt.
-_erg2 = kern.merge_metadaten({"domains": "Kunde.EXAMPLE"},
-                             [{"domains": "kunde.example, neu.example"}])
-r.check("Merge: Dubletten fallen raus, Groß-/Kleinschreibung egal",
-        _erg2["domains"] == "Kunde.EXAMPLE, neu.example")
-
-# Leere Felder bleiben draußen, damit der Store nicht mit "" zuwächst.
-r.check("Merge: leere Werte landen nicht im Ergebnis",
-        "telefon" not in kern.merge_metadaten({"telefon": ""}, [{"telefon": "  "}]))
-
-# Mehrere Quellen: die erste, die etwas hat, gewinnt.
-r.check("Merge: erste Quelle mit Wert gewinnt",
-        kern.merge_metadaten({}, [{"email": ""}, {"email": "a@example.com"},
-                                  {"email": "b@example.com"}])["email"] == "a@example.com")
-
-# Ohne Quellen bleibt das Ziel unverändert (aber bereinigt).
-r.check("Merge: ohne Quellen bleibt das Ziel",
-        kern.merge_metadaten({"kundennummer": "KD-1"}, []) == {"kundennummer": "KD-1"})
-r.check("Merge: leeres Ziel und leere Quellen ergibt leeren Eintrag",
-        kern.merge_metadaten({}, []) == {})
-
 # ---- config_uebernehmen(): ein Formular liefert Text, die Konfiguration braucht Typen.
 # Ohne Rückwandlung stünde nach dem ersten Speichern "true" statt true und "300" statt 300 —
 # und der Klassifizierer liest eine Zeichenkette, wo er eine Zahl erwartet.
@@ -129,6 +89,9 @@ r.check("log_art: repair-fehlgeschlagen ist ein Fehler",
 r.check("log_art: repariert ist kein Fehler", kern.log_art("repariert 42 nach 2 Runde(n)") == "repariert")
 r.check("log_art: OK ist klassifiziert", kern.log_art("OK 42 | exakt='X'") == "klassifiziert")
 r.check("log_art: VORSCHLAG eigene Art", kern.log_art("VORSCHLAG 42 | ...") == "vorschlag")
+r.check("log_art: Erfolg MIT OCR zählt als klassifiziert, nicht als OCR (erstes Wort entscheidet)",
+        kern.log_art("OK 913 | exakt='X' id=13 | typ=21 | tags=[] | new=[] | OCR-rescue(340)") == "klassifiziert")
+r.check("log_art: Trockenlauf ist keine Art", kern.log_art("DRY 908 | exakt='X' | OCR-rescue(1)") is None)
 r.check("log_art: unbekannte Zeile ergibt None", kern.log_art("irgendwas anderes") is None)
 
 # ---- verlauf(): tägliche Zählung
@@ -206,29 +169,11 @@ r.check("Anmeldung: Admin-Konto ohne Passwort-Login ist ein Fehler",
              "PANEL_OIDC_ISSUER": "https://id.example.com", "PANEL_OIDC_CLIENT_ID": "c",
              "PANEL_OIDC_CLIENT_SECRET": "s", "PANEL_ADMIN_USER": "a", "PANEL_ADMIN_PASSWORD": "b"})["fehler"])
 
-# ---- ausloeser_auswerten(): welcher Knopf in Paperless gedrückt wurde, und was vorher weg muss.
-_aw = kern.ausloeser_auswerten
-_hf = [{"field": 39, "value": "  bitte Typ Rechnung  "}, {"field": 2, "value": "EUR1"}]
-m, h, pt = _aw([1, 239], [], 239, 240, 39)
-r.check("Auslöser: Tag neu → neu klassifizieren, Tag entfernt", m == "neu" and pt == {"tags": [1]}, str((m, pt)))
-m, h, pt = _aw([1], _hf, 239, 240, 39)
-r.check("Auslöser: Hinweis → neu, Text gelesen, nur das Hinweisfeld entfernt",
-        m == "neu" and h == "bitte Typ Rechnung" and pt == {"custom_fields": [{"field": 2, "value": "EUR1"}]}, str((m, h, pt)))
-m, h, pt = _aw([240], [], 239, 240, 39)
-r.check("Auslöser: Tag OCR → nur OCR, Tag bleibt (der Lauf entfernt ihn am Ende)", m == "nur_ocr" and pt == {}, str((m, pt)))
-m, h, pt = _aw([239, 240], [], 239, 240, 39)
-r.check("Auslöser: beide Tags → neu gewinnt, beide entfernt", m == "neu" and pt == {"tags": []}, str((m, pt)))
-m, h, pt = _aw([1, 5], [{"field": 39, "value": ""}], 239, 240, 39)
-r.check("Auslöser: nichts gesetzt (auch leeres Hinweisfeld) → kein Lauf, nichts zu entfernen",
-        m is None and pt == {}, str((m, pt)))
-m, h, pt = _aw([1], [], None, None, None)
-r.check("Auslöser: nichts konfiguriert → kein Lauf", m is None and pt == {})
-m, h, pt = _aw([1, 239, 77], [], 239, 240, 39, marker_id=77)
-r.check("Auslöser: neu → Marker geht mit weg (Fertig-Signal für den Knopf)", m == "neu" and pt == {"tags": [1]}, str(pt))
-m, h, pt = _aw([1, 240, 77], [], 239, 240, 39, marker_id=77)
-r.check("Auslöser: nur OCR → Marker bleibt", m == "nur_ocr" and pt == {}, str(pt))
-m, h, pt = _aw([1, 77], [], 239, 240, 39, marker_id=77)
-r.check("Auslöser: nichts ausgelöst → Marker bleibt, nichts zu tun", m is None and pt == {}, str(pt))
+# ---- knopf_rechte(): der Knopf in Paperless darf nur, was der Nutzer dort darf.
+_ant = {"results": [{"id": 1, "user_can_change": True}, {"id": 2, "user_can_change": False}]}
+r.check("Knopf: änderbar erlaubt, nur lesbar verweigert", kern.knopf_rechte(_ant, [2, 1]) == ([1], [2]))
+r.check("Knopf: unsichtbares Dokument gilt als verweigert", kern.knopf_rechte(_ant, [1, 3]) == ([1], [3]))
+r.check("Knopf: leere Antwort verweigert alles", kern.knopf_rechte({}, [5]) == ([], [5]))
 r.check("log_art: OCR-Nachlauf und Nur-OCR zählen als OCR, ihre Fehler als Fehler",
         kern.log_art("OCR-nachgeholt 5: x") == "ocr" and kern.log_art("OCR-neu 5: 1 → 2") == "ocr"
         and kern.log_art("OCR-neu-fail 5: x") == "fehler" and kern.log_art("OCR-nachgeholt-fail 5") == "fehler")
@@ -239,10 +184,48 @@ import re as _re
 _knopf = (ROOT / "deploy/paperless-knoepfe/paperlaiss-knoepfe.js").read_text(encoding="utf-8")
 _init = (ROOT / "deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh").read_text(encoding="utf-8")
 _im_js = set(_re.findall(r"%%([A-Z_]+)%%", _knopf))
-_ersetzt = set(_re.findall(r"s/%%([A-Z_]+)%%/", _init))
+_ersetzt = set(_re.findall(r"s[/#]%%([A-Z_]+)%%[/#]", _init))
 r.check("Knöpfe: jeder Platzhalter im Browser-Skript wird ersetzt",
         _im_js and _im_js == _ersetzt, f"js={sorted(_im_js)} init={sorted(_ersetzt)}")
 r.check("Knöpfe: Init-Skript bricht Paperless nie ab (endet immer mit exit 0)",
         _init.rstrip().endswith("exit 0") and "exit 1" not in _init)
+
+# ---- aktivitaet(): Liste, Filter, Seiten, Kennzahlen.
+_z = ["2026-09-26 23:56:40 OCR-rescue 913: 340 Zeichen",
+      "2026-09-26 23:56:46 OK 913 | exakt='Klein GmbH' id=13 | typ=21 | tags=[] | new=[] | OCR-rescue(340)",
+      "kein Zeitstempel", "2026-09-27 00:22:29 FEHLER 5 | ValueError()",
+      "2026-09-27 00:23:00 OK 7 | NEU='Neu AG' id=99 | typ=3 | tags=[] | new=[] | ",
+      "2026-09-27 00:24:00 skip 8: schon klassifiziert"]
+_e = kern.eintrag_lesen(_z[1])
+r.check("Aktivität: Eintrag zerlegt (Art, Dokument, Korrespondent, Typ, OCR)",
+        (_e["art"], _e["doc"], _e["korrespondent"], _e["typ"], _e["ocr"]) ==
+        ("klassifiziert", 913, "Klein GmbH", "21", "OCR-rescue(340)"), str(_e))
+r.check("Aktivität: neuer Korrespondent erkannt", kern.eintrag_lesen(_z[4])["korrespondent_neu"] is True)
+r.check("Aktivität: Zeile ohne Zeitstempel fällt weg", kern.eintrag_lesen(_z[2]) is None)
+_a = kern.aktivitaet(_z)
+r.check("Aktivität: neueste zuerst", _a["eintraege"][0]["doc"] == 8 and _a["gesamt"] == 5)
+r.check("Aktivität: Kennzahlen je Art", _a["kennzahlen"] ==
+        {"klassifiziert": 2, "ocr": 1, "repariert": 0, "fehler": 1, "uebersprungen": 1}, str(_a["kennzahlen"]))
+_f = kern.aktivitaet(_z, art="klassifiziert")
+r.check("Aktivität: Filter nach Art", [e["doc"] for e in _f["eintraege"]] == [7, 913])
+r.check("Aktivität: Kennzahlen zählen ungefiltert (Einstieg in den Filter)", _f["kennzahlen"] == _a["kennzahlen"])
+r.check("Aktivität: Filter nach Tag und Dokument kombiniert",
+        [e["art"] for e in kern.aktivitaet(_z, tag="2026-09-26", doc=913)["eintraege"]] == ["klassifiziert", "ocr"])
+_s = kern.aktivitaet(_z, je=2, seite=9)
+r.check("Aktivität: Seiten zu je N, zu große Seite wird auf die letzte gezogen",
+        _s["seiten"] == 3 and _s["seite"] == 3 and len(_s["eintraege"]) == 1, str((_s["seiten"], _s["seite"])))
+
+# ---- korr_eintrag(): Adressbuch-Eintrag aus dem Paperless-Dialog.
+_alt = {"email": "a@example.com", "quelle": "import", "extern_id": "K-7", "kontext": "alt"}
+_neu = kern.korr_eintrag(_alt, {"kontext": "  Werkstattzulieferer ", "email": "", "unbekannt": "x"})
+r.check("Adressbuch: Werte getrimmt, leere Felder fallen weg", _neu.get("kontext") == "Werkstattzulieferer"
+        and "email" not in _neu, str(_neu))
+r.check("Adressbuch: Import-Herkunft bleibt erhalten", _neu.get("quelle") == "import" and _neu.get("extern_id") == "K-7")
+r.check("Adressbuch: unbekannte Eingaben werden nicht übernommen", "unbekannt" not in _neu)
+
+r.check("Aktivität: Trockenlauf ist eine eigene Art, keine Info",
+        kern.eintrag_lesen("2026-09-20 19:52:14 DRY DRY 918 | exakt='X' | typ=Rechnung |")["art"] == "trockenlauf")
+r.check("Aktivität: unbekannte Zeile ist ein Hinweis",
+        kern.eintrag_lesen("2026-09-20 19:52:14 nachbearbeitung 5: ok")["art"] == "hinweis")
 
 sys.exit(r.done())

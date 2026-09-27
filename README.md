@@ -20,7 +20,7 @@ back through the Paperless REST API.
 
 The classifier is **stdlib-only** — no packages to install — and **tenant-agnostic**: every field
 and tag is resolved by *name* against the API, and every behaviour is a switch in the config. An
-optional FastAPI panel adds a dashboard and an ingest endpoint.
+optional FastAPI panel adds an admin view and an ingest endpoint.
 
 ---
 
@@ -69,16 +69,25 @@ CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # force Mistral OCR
 
 ## Panel
 
-A lean **FastAPI dashboard** (a standalone building block, not a fork), meant to run as its own
-container in the same Docker network, sharing the `scripts/` volume:
+An admin panel for when something hangs or needs adjusting — paperlaiss is middleware, master data
+(tags, correspondents) stays in Paperless or your own system. A FastAPI container in the same
+Docker network, sharing the `scripts/` volume. Its look comes from the
+[C22](https://github.com/Ollornog/C22) design system, vendored under `panel/static/c22/`
+(`scripts/vendor-c22.sh`); `tests/test_c22_klassen.py` checks every class against it.
 
-- **Dashboard** (`/`) — live status ("running now"), counters (classified / OCR rescues / repaired
-  / errors / skipped), an activity feed where every document ID opens a **trace inspector**.
+- **Activity** (`/`) — five counters and a 30-day chart that **filter** the list (the filter lives in
+  the address, so *Back* undoes it), 100 entries per page. A row opens the **run**: decision tree,
+  prompt, AI output, and the OCR text rendered as Markdown.
+- **Flow & prompt** (`/ablauf`) — every step a document goes through, each with its input and output
+  to expand; for the AI calls the prompt and the answer format. The Pass-1 prompt is editable in
+  place and also shown exactly as it is sent (`CLASSIFY_PROMPT_VORSCHAU=1`). A run in the activity
+  list is shown with the same steps and its real prompts and answers.
+- **Info** (`/info`) — what paperlaiss is, links to the repository and the building blocks.
+- **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
+  saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
-- **Flow & prompt** (`/ablauf`) — every step of a run with the current settings, and the Pass-1 system
-  prompt exactly as it is sent (built by `classify.py` itself: `CLASSIFY_PROMPT_VORSCHAU=1`).
-- **JSON API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
-  `/api/config` (GET/POST). A higher-level platform can consume the same endpoints.
+- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
+  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST with a draft for the live preview while editing).
 - **Sign-in** (`PANEL_AUTH`):
   - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.
   - `none` — no sign-in of its own, because one sits in front of it (reverse proxy with forward-auth).
@@ -109,7 +118,10 @@ only). paperlaiss solves this with its **own store** (`correspondents.json`, edi
 keyed **by Paperless correspondent ID** so it survives a rename. Per correspondent: `email`,
 `domains`, `phone`, `address`, `customer_number`, `vat_id`, `context`, `aliases`.
 
-Edited in the panel under **`/korrespondenten`** (all correspondents plus an edit dialog). The
+Edited **in Paperless itself**: the buttons script adds a section *paperlaiss* to the correspondent
+edit dialog (context, aliases, e-mail, mail domains, customer number, VAT ID, phone, address),
+saved together with Paperless' *Save* — allowed for whoever may change that correspondent in
+Paperless. The file can also be filled from outside (your master data system, a script). The
 classifier uses it for grounding: `domains` to match senders, `context` and the identifiers in the
 prompt, `aliases` in the feedback loop — sharper classification.
 
@@ -122,24 +134,25 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 
 ### Buttons in Paperless (optional)
 
-Two buttons in the document view (replacing Paperless' own *Suggest*, which is hidden) and in the
-multi-select bar of the document list (for all selected documents) — without a fork:
+One **KI** button (magic wand: optional hint, then paperlaiss re-reads the document with Mistral OCR
+and re-classifies it) — in the document view instead of Paperless' own *Suggest* (hidden), and as an
+entry in the **Actions** menu of the multi-select. No fork, no tags, no workflow:
 
-- **KI** (magic wand) — an optional hint for the AI, then re-classify (always with Mistral OCR).
-- **OCR** — only re-read the text with Mistral OCR; metadata stays as it is.
-
-Paperless runs scripts from `/custom-cont-init.d` on every container start (documented under
-*Custom Container Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` copies
-`paperlaiss-knoepfe.js` into the static directory and adds one `<script>` line to the start page —
-again after every update, nothing to merge. The buttons only talk to the **Paperless API with the
-user's own session**: they set the redo tag / hint field or the OCR tag, and the existing workflow
-calls paperlaiss. Set up tag, field and workflow once with `deploy/neu-klassifizieren-einrichten.py`.
-Names: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` in the Paperless
-container (defaults `KI-neu`, `KI-OCR`, `KI-Hinweis`). With *Select all* across pages only the
-visible selected documents are processed, and the button says so. The panel runs at most
-`PANEL_PARALLEL` (default 2) of these jobs at once. If Paperless changes its page, the buttons
-are missing — Paperless itself keeps working. After the run the page reloads, so Paperless does
-not save its stale state back over the result.
+- Paperless runs scripts from `/custom-cont-init.d` on every container start (*Custom Container
+  Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` copies
+  `paperlaiss-knoepfe.js` into the static directory and adds one `<script>` line to the start page —
+  again after every update, nothing to merge.
+- The buttons call the panel directly (`POST /knopf`). The browser sends the **Paperless session**
+  along; the panel asks Paperless with it which documents this user may change
+  (`user_can_change`) and processes only those. Without a valid session: 401.
+- `PAPERLAISS_URL` (Paperless container): where the browser reaches the panel. Behind the same
+  reverse proxy a path is enough (default `/paperlaiss`, proxied to the panel without the prefix);
+  on a separate port the full address. In that case also set `PAPERLAISS_KNOPF_ORIGIN` (panel
+  container) to the Paperless address, so the cross-origin call passes CORS.
+- With *Select all* across pages only the visible selected documents are processed, and the menu
+  entry says so. The panel runs at most `PANEL_PARALLEL` (default 2) jobs at once. After the run the
+  page reloads, so Paperless does not save its stale state back over the result. If Paperless
+  changes its page, the buttons are missing — Paperless itself keeps working.
 
 ## Configuration (`classify-config.json`)
 
@@ -151,8 +164,8 @@ not save its stale state back over the result.
 | `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |
 | `tagging_enabled` | `false` | AI assigns content tags (off: type/correspondent/fields only) |
 | `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal |
-| `unsicher_tag` / `redo_tag` | – | optional flag / redo tags (by name) |
-| `summary_field` / `hinweis_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
+| `unsicher_tag` | – | optional flag tag (by name) |
+| `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |

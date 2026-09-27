@@ -26,11 +26,11 @@ Env-Schalter:
   CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
-  CLASSIFY_NUR_OCR=1           nur den Text per Mistral-OCR neu lesen, NICHT klassifizieren
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
-  CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
+  CLASSIFY_SOURCE=knopf|manual|bulk  nur fürs Trace/Log (knopf = KI/OCR-Knopf in Paperless)
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
+  CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
 """
 import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile, subprocess
 
@@ -46,7 +46,6 @@ DRY = os.environ.get("CLASSIFY_DRY") == "1"
 FORCE = os.environ.get("CLASSIFY_FORCE") == "1"
 FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
-NUR_OCR = os.environ.get("CLASSIFY_NUR_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
 # --- Config (vom Panel schreibbar, mit Defaults) ---
@@ -63,10 +62,7 @@ CFG = {
     "tagging_enabled": False,          # KI vergibt KEINE inhaltlichen Tags (Firmen-DMS: Tags sind manuelle Status/Richtung)
     "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
     "unsicher_tag": "",                # optional: Flag-Tag bei Unsicherheit / KI-Tag-Vorschlag
-    "redo_tag": "",                    # optional: Redo-Auslöser-Tag (wird nach Verarbeitung entfernt)
-    "ocr_tag": "",                     # optional: Auslöser „nur Text per OCR neu lesen" (Panel entfernt ihn)
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
-    "hinweis_field": "",               # optional: Nutzer-Feedback-Feld für Redo (nach Gebrauch geleert)
     "mail_context_field": "",          # optional: Herkunft-Kontext (Mail-/Chat-Anschreiben) fürs Prompt
     "mail_from_field": "",             # optional: Absender-Mail → Korrespondent-Domain-Match
     "manual_fields": [],               # Custom-Field-Namen, die die KI NIE anfasst (rein manuell gepflegt, z.B. Bezahlt-Am)
@@ -91,6 +87,10 @@ CFG = {
 # log() noch nicht. Eine kaputte Config darf NICHT still zu Standardwerten fuehren: dann
 # faellt der installationsspezifische Prompt weg, manual_fields ist leer, und der Lauf sieht
 # aeusserlich normal aus, waehrend er gegen die falsche Taxonomie arbeitet.
+# Welche Schlüssel der Klassifizierer kennt — festgehalten VOR dem Einlesen der Datei. Die Panel-
+# Ausgabe (CLASSIFY_DUMP_CONFIG) zeigt nur diese: ein veralteter Schlüssel in einer alten Datei
+# (z. B. redo_tag aus der Zeit des Tag-Auslösers) soll nicht als einstellbar erscheinen.
+_BEKANNT = set(CFG)
 _CFG_FEHLER = None
 try:
     CFG.update(json.load(open(CONFIG)))
@@ -227,7 +227,7 @@ def nachbearbeiten(did, patch, erfolg, lesbar):
     entstanden. Mit der Naht bleibt der Kern ueberall gleich, und das Eigene liegt daneben.
 
     Das Skript bekommt auf stdin:
-      {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…}, "quelle": "redo",
+      {"doc_id": 915, "erfolg": true, "patch": {…}, "lesbar": {…}, "quelle": "knopf",
        "dry": false}
     Es laeuft mit denselben Umgebungsvariablen (PAPERLESS_TOKEN, PAPERLESS_API …), kann also
     selbst die API benutzen. Seine Ausgabe geht ins Log.
@@ -348,7 +348,9 @@ def ctoks(s):
 OCR_REGELN_VORGABE = {
     "min_zeichen": None,              # None = ocr_min_len (aeltere Configs)
     "min_schluesselwoerter": 2,       # so viele Allerweltswoerter muessen vorkommen …
-    "schluesselwoerter": [t.strip() for t in TOKENS],
+    # Wörtlich, MIT Leerzeichen: ' der ' soll „der" als Wort treffen, nicht „oder" oder „Kinder".
+    # (PR #58 hatte sie per strip() gekürzt — die Regel wurde dadurch unbemerkt lockerer.)
+    "schluesselwoerter": list(TOKENS),
     "max_zeichen_je_wort": 40,        # … und auf so viele Zeichen mindestens ein echtes Wort
     "max_muell_anteil": 0.25,         # Anteil von Zeichen, die in keinem Text vorkommen (Zeichensalat)
     # Nach Pass 1 (die KI hat den Text gesehen):
@@ -378,7 +380,7 @@ def ocr_gruende(content, cfg):
         return [f"zu kurz ({len(c)} < {r['min_zeichen']} Zeichen)"]
     gruende = []
     cl = c.lower()
-    treffer = sum(1 for t in r["schluesselwoerter"] if t and t.lower() in cl)
+    treffer = sum(1 for t in r["schluesselwoerter"] if t.strip() and t.lower() in cl)
     if treffer < r["min_schluesselwoerter"]:
         gruende.append(f"zu wenig bekannte Wörter ({treffer} < {r['min_schluesselwoerter']})")
     woerter = re.findall(r"[a-zA-ZäöüÄÖÜß]{3,}", c)
@@ -653,50 +655,37 @@ def baue_system(tpl, types, taglines):
                     + taglines + "\n"
                     "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
                     "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
-    platz = "{TAGBLOCK}" in tpl or "{TAGS}" in tpl
-    system = (tpl.replace("{TYPES}", ", ".join(sorted(types)))
-                 .replace("{TAGBLOCK}", tagblock).replace("{TAGS}", taglines))
-    if tagblock and not platz:
-        system += "\n" + tagblock
-    return system
+    return "".join(t for t, _ in baue_system_teile(tpl, types, taglines))
 
 
-def nur_ocr(did, doc):
-    """Nur den Text neu lesen (OCR-Knopf in Paperless) — Metadaten bleiben, wie sie sind.
+# Platzhalter im Pass-1-Prompt und was fuer sie eingesetzt wird (fuer die Beschriftung im Panel).
+PLATZHALTER = {"TYPES": "Dokumenttypen aus Paperless", "TAGBLOCK": "Tag-Liste samt Anweisung",
+               "TAGS": "nur die Tag-Liste"}
 
-    Der OCR-Tag geht erst mit dem Ergebnis weg, in DEMSELBEN Schreibvorgang: daran erkennt der
-    Knopf, dass der Lauf fertig ist — auch wenn der neue Text dem alten gleicht. Auch bei einem
-    Fehler kommt er weg, sonst haengt der Knopf bis zur Zeitueberschreitung.
-    """
-    content = doc.get("content") or ""
-    mark_running(did, "OCR")
-    TRACE["trigger"] = "OCR aus Paperless (nur Text)"
-    patch = {}
-    ocr_name = norm(CFG.get("ocr_tag") or "")
-    if ocr_name:
-        ocr_id = next((t["id"] for t in get("/tags/?page_size=1000")["results"]
-                       if norm(t["name"]) == ocr_name), None)
-        if ocr_id in (doc.get("tags") or []):
-            patch["tags"] = [t for t in doc["tags"] if t != ocr_id]
-    try:
-        new = mistral_ocr(did)
-    except Exception as e:
-        new = ""
-        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "error": repr(e)}
-        log(f"OCR-neu-fail {did}: {e!r}")
-    if len(new) > 40:
-        patch["content"] = new
-        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "chars": len(new),
-                        "vorher": len(content), "excerpt": new[:600]}
-        log(f"OCR-neu {did}: {len(content)} → {len(new)} Zeichen")
-    elif "ocr" not in TRACE:
-        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen",
-                        "verworfen": f"OCR lieferte nur {len(new)} Zeichen"}
-        log(f"OCR-neu-fail {did}: OCR lieferte nur {len(new)} Zeichen, Text bleibt")
-    if patch and not DRY:
-        send(f"/documents/{did}/", patch, "PATCH")
-    TRACE["_stage"] = "fertig"
-    save_trace(did)
+
+def baue_system_teile(tpl, types, taglines):
+    """Wie baue_system(), aber in Stuecken: (Text, Platzhaltername oder None).
+
+    Der Lauf fuegt die Stuecke zusammen, das Panel markiert die eingesetzten Werte. Eine
+    Funktion fuer beide, damit die Vorschau nie vom gesendeten Prompt abweicht."""
+    if taglines is None:
+        tagblock = ""
+        taglines = ""
+    else:
+        tagblock = ("TAGS — nutze NUR exakte Namen aus dieser Liste, 1-3 wirklich zutreffende, den spezifischsten:\n"
+                    + taglines + "\n"
+                    "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
+                    "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
+    werte = {"TYPES": ", ".join(sorted(types)), "TAGBLOCK": tagblock, "TAGS": taglines}
+    teile = []
+    for i, stueck in enumerate(re.split(r"\{(TYPES|TAGBLOCK|TAGS)\}", tpl)):
+        if i % 2:
+            teile.append((werte[stueck], stueck))
+        elif stueck:
+            teile.append((stueck, None))
+    if tagblock and "{TAGBLOCK}" not in tpl and "{TAGS}" not in tpl:
+        teile.append(("\n" + tagblock, "TAGBLOCK (angehängt, weil der Prompt keinen Platzhalter hat)"))
+    return teile
 
 
 def typ_setzen(dt_id, bisher, ausdruecklich):
@@ -714,11 +703,28 @@ def typ_setzen(dt_id, bisher, ausdruecklich):
     return dt_id
 
 
+# Die kleinen Prompts von Pass 0 und Pass 2 als Konstanten: der Lauf benutzt sie, und die
+# Panel-Seite „Ablauf & Prompt" zeigt genau diese Texte.
+PASS0_SYSTEM = ('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). '
+                'Antworte NUR JSON {"correspondent": <Name|null>}.')
+PASS2_SYSTEM = ('Du ordnest einen Absender bestehenden Korrespondenten zu. '
+                'Antworte NUR JSON {"match": <exakter Name aus der Liste> ODER null}.')
+
+
+def pass2_frage(name, kandidaten, beispiele=""):
+    """Die Zuordnungsfrage, die an die Pass-1-Unterhaltung angehängt wird."""
+    return (f"{PASS2_SYSTEM}\nDein vorgeschlagener Absender: '{name}'.\n"
+            f"Bestehende Korrespondenten, die in Frage kommen: {kandidaten}.\n"
+            "Welcher bezeichnet DIESELBE Firma/Behörde/Person wie im Dokument oben? Rechtsform/Zusätze "
+            f"(GmbH/AG/OG) egal; auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{beispiele}. "
+            "Nur bei echter Übereinstimmung, sonst null.")
+
+
 def reservierte_tags(cfg):
     """Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (normalisiert):
     die konfigurierten plus Marker-, Unsicher- und Ausloeser-Tag."""
     reserved = {norm(x) for x in (cfg.get("reserved_tags") or [])}
-    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag"), cfg.get("redo_tag"), cfg.get("ocr_tag")):
+    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag")):
         if extra:
             reserved.add(norm(extra))
     return reserved
@@ -743,6 +749,11 @@ def pass1_system(cfg, types, tags_all, reserved, mit_summary):
     Eine Funktion fuer den Lauf UND die Vorschau im Panel: zeigte die Vorschau einen selbst
     nachgebauten Prompt, saehe man dort etwas anderes als das, was die KI bekommt.
     """
+    return "".join(t for t, _ in pass1_system_teile(cfg, types, tags_all, reserved, mit_summary))
+
+
+def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
+    """pass1_system() in Stuecken (Text, Name des eingesetzten Teils oder None) — fuers Panel."""
     if cfg.get("tagging_enabled"):
         td = {**TAG_DESC, **(cfg.get("tag_descriptions") or {})}
         taglines = "\n".join(f"- {t['name']}: {td.get(t['name'], t['name'])}"
@@ -750,12 +761,60 @@ def pass1_system(cfg, types, tags_all, reserved, mit_summary):
     else:
         taglines = None
     tpl = cfg.get("system_prompt") or DEFAULT_PROMPT
-    system = baue_system(tpl, types, taglines)
+    teile = baue_system_teile(tpl, types, taglines)
+    system = "".join(t for t, _ in teile)
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
-        system += FELD_ANWEISUNG
+        teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
     if mit_summary:
-        system += SUMMARY_ANWEISUNG
-    return system
+        teile.append((SUMMARY_ANWEISUNG, "Zusammenfassung (automatisch angehängt, weil ein Zusammenfassungs-Feld eingestellt ist)"))
+    return teile
+
+
+# Bis 2026-09-27: „wähle GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen“ —
+# das drängte die KI zur Liste. Ein ähnlicher, aber falscher Name wurde dann exakt übernommen und
+# direkt zugeordnet (Pass 2 prüft nur Namen, die NICHT exakt passen). Jetzt: Angebot, keine Pflicht.
+KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, "
+             "übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):")
+
+
+def pass0_nachricht(mail_ktx, title, content):
+    """Die Nachricht an Pass 0: Mail-Kontext (falls da), Titel, Anfang des Textes."""
+    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):"
+                  "\n" + mail_ktx + "\n\n") if mail_ktx else ""
+    return mail_block + "TITEL: " + title + "\n\nINHALT:\n" + content[:2500]
+
+
+def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, created, dateiname,
+                          fieldspec, title, content):
+    """Die Nachricht je Dokument an Pass 1, in Stuecken (Text, eingesetzter Wert oder None,
+    Bedingung des Blocks oder None). Der Lauf fuegt sie zusammen; das Panel zeigt dieselben
+    Stuecke mit Beispielwerten und markiert, was eingesetzt wird und welcher Block nur manchmal
+    kommt."""
+    T = []
+    if hinweis:
+        w = "nur mit Hinweis vom KI-Knopf"
+        T += [("WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n", None, w),
+              (hinweis, "Hinweis vom KI-Knopf", w), ("\n\n", None, w)]
+    if chint:
+        w = "nur wenn das Dokument schon einen Korrespondenten mit Kontext hat"
+        T += [("HINWEIS zum Korrespondenten '", None, w), (cname, "bisheriger Korrespondent", w), ("': ", None, w),
+              (chint, "Kontext aus seinen Stammdaten", w), ("\n\n", None, w)]
+    if kand_lines:
+        w = "nur wenn Pass 0 passende Korrespondenten gefunden hat"
+        T += [(KAND_KOPF + "\n", None, w), (kand_lines, "bis zu 8 Kandidaten, je mit Aliasen und Kontext", w),
+              ("\n\n", None, w)]
+    if mail_ktx:
+        w = "nur bei Dokumenten aus einer Mail"
+        T += [("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):\n", None, w),
+              (mail_ktx, "Text der Mail", w), ("\n\n", None, w)]
+    T += [("METADATEN:\n- Hinzugefügt am: ", None, None), (added, "Datum", None),
+          ("\n- Aktuelles Dokumentdatum (evtl. falsch): ", None, None), (created, "Datum", None),
+          ("\n- Originaldateiname: ", None, None), (dateiname, "Dateiname", None),
+          ("\n\nVERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n", None, None),
+          (fieldspec, "je Feld: Name (Art), aktueller Wert", None),
+          ("\n\nTITEL: ", None, None), (title, "Titel", None), ("\n\nINHALT:\n", None, None),
+          (content, "Text des Dokuments", None)]
+    return [t for t in T if t[0]]
 
 
 def prompt_vorschau():
@@ -765,20 +824,45 @@ def prompt_vorschau():
     tags_all = get("/tags/?page_size=1000")["results"]
     cfields = get("/custom_fields/?page_size=200")["results"]
     summary_fid = resolve_field(cfields, CFG["summary_field"])
+    # Entwurf aus dem Panel-Editor: dieselbe Rechnung mit dem noch nicht gespeicherten Prompt.
+    # Leer heisst „eingebauter Prompt“, wie beim Speichern.
+    cfg = CFG
+    if "CLASSIFY_PROMPT_ENTWURF" in os.environ:
+        cfg = {**CFG, "system_prompt": os.environ["CLASSIFY_PROMPT_ENTWURF"]}
+    sys_teile = pass1_system_teile(cfg, types, tags_all, reservierte_tags(cfg), bool(summary_fid))
+    bsp = "‹{}›".format
+    nachricht = pass1_nachricht_teile(
+        bsp("Hinweis, den jemand beim KI-Knopf eingegeben hat"), bsp("Korrespondent"),
+        bsp("Kontext aus den Stammdaten"),
+        "- " + bsp("Name") + " (auch: " + bsp("Aliase") + ") [Kontext: " + bsp("Kontext") + "]\n- …",
+        bsp("Text der Mail"), bsp("JJJJ-MM-TT"), bsp("JJJJ-MM-TT"), bsp("Dateiname"),
+        "- " + bsp("Feld") + " (" + bsp("Art") + "), aktuell: " + bsp("Wert") + "\n- …",
+        bsp("Titel"), bsp(f"Text des Dokuments, bis {CFG['content_max_len']} Zeichen"))
     return {
-        "system": pass1_system(CFG, types, tags_all, reservierte_tags(CFG), bool(summary_fid)),
+        "system": "".join(t for t, _ in sys_teile),
+        "system_teile": sys_teile,
+        "nachricht_teile": nachricht,
+        "platzhalter": PLATZHALTER,
+        "vorlage": cfg.get("system_prompt") or DEFAULT_PROMPT,
+        "standard": DEFAULT_PROMPT,
+        "pass0_nachricht": pass0_nachricht(bsp("Text der Mail — nur bei Dokumenten aus einer Mail"), bsp("Titel"),
+                                           bsp("die ersten 2500 Zeichen des Textes")),
+        "pass2_frage": pass2_frage(bsp("Absender laut Pass 1"), bsp("ähnliche Korrespondenten, höchstens 20"),
+                                   beispiel_text(CFG["korrespondent_beispiele"])),
         "eigener_prompt": bool(CFG.get("system_prompt")),
         "typen": len(types), "tags": len(tags_all), "felder": len(cfields),
         "ki_felder": [f["name"] for f in cfields
                       if f["id"] != summary_fid and f["name"] not in (CFG.get("manual_fields") or [])
                       and f.get("data_type") != "documentlink"
                       and norm(f["name"]) not in {norm(CFG.get(k) or "") for k in
-                                                   ("hinweis_field", "mail_context_field", "mail_from_field")}],
+                                                   ("mail_context_field", "mail_from_field")}],
         "einstellungen": {k: CFG.get(k) for k in (
             "model", "ocr_model", "temperature", "content_max_len", "ocr_enabled", "ocr_always",
-            "tagging_enabled", "marker_tag", "unsicher_tag", "redo_tag", "summary_field",
-            "hinweis_field", "manual_fields", "nachbearbeitung")},
+            "tagging_enabled", "marker_tag", "unsicher_tag", "summary_field",
+            "manual_fields", "nachbearbeitung")},
         "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
+        "pass0_system": PASS0_SYSTEM,
+        "pass2_system": PASS2_SYSTEM,
     }
 
 
@@ -806,16 +890,12 @@ def main():
     title = doc.get("title") or ""
     tag_ids_on = list(doc.get("tags", []))
 
-    if NUR_OCR:
-        return nur_ocr(did, doc)
-
     tags_all = get("/tags/?page_size=1000")["results"]
     tagname_by_id = {t["id"]: t["name"] for t in tags_all}
     tagid_by_norm = {norm(t["name"]): t["id"] for t in tags_all}
 
     marker_id = resolve_tag(tagid_by_norm, CFG["marker_tag"])
     unsicher_id = resolve_tag(tagid_by_norm, CFG["unsicher_tag"])
-    redo_id = resolve_tag(tagid_by_norm, CFG["redo_tag"])
 
     if marker_id in tag_ids_on and not DRY and not FORCE and not FORCE_OCR:
         log(f"skip {did}: schon klassifiziert (Marker '{CFG['marker_tag']}')"); return
@@ -831,7 +911,7 @@ def main():
     ocr_versucht = False
     if CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or vorher):
         ocr_versucht = True
-        grund = ("neu klassifizieren aus Paperless" if FORCE_OCR and SOURCE == "redo"
+        grund = ("KI-Knopf in Paperless" if FORCE_OCR and SOURCE == "knopf"
                  else "manuell erzwungen" if FORCE_OCR else "immer-OCR" if CFG["ocr_always"]
                  else "; ".join(vorher))
         try:
@@ -840,7 +920,7 @@ def main():
                 if not DRY:
                     send(f"/documents/{did}/", {"content": new}, "PATCH")
                 content = new; ocr_note = f"OCR-rescue({len(new)})"
-                TRACE["ocr"] = {"triggered": True, "grund": grund, "chars": len(new), "excerpt": new[:600]}
+                TRACE["ocr"] = {"triggered": True, "grund": grund, "chars": len(new), "excerpt": new[:8000]}
                 log(f"OCR-rescue {did}: {len(new)} Zeichen")
             else:
                 TRACE["ocr"] = {"triggered": True, "grund": grund, "verworfen": "neuer Text nicht besser", "chars": len(new)}
@@ -857,27 +937,19 @@ def main():
     cur_vals = {c["field"]: c.get("value") for c in doc.get("custom_fields", [])}
 
     summary_fid = resolve_field(cfields, CFG["summary_field"])
-    hinweis_fid = resolve_field(cfields, CFG["hinweis_field"])
     mailctx_fid = resolve_field(cfields, CFG["mail_context_field"])
     mailfrom_fid = resolve_field(cfields, CFG["mail_from_field"])
     # Felder, die NICHT von der KI gesteuert werden (behalten): Sonderfelder + manuelle Felder
     manual_fids = {resolve_field(cfields, n) for n in (CFG.get("manual_fields") or [])}
-    skip_fids = {x for x in (summary_fid, hinweis_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
+    skip_fids = {x for x in (summary_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
 
     _NL = chr(10)
     mail_ktx = (cur_vals.get(mailctx_fid) or "").strip() if mailctx_fid else ""
     mail_from = (cur_vals.get(mailfrom_fid) or "").strip() if mailfrom_fid else ""
-    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
     TRACE["mail"] = ({"from": mail_from or None, "hat_kontext": bool(mail_ktx)} if (mail_ktx or mail_from) else None)
 
-    # Der Hinweis kann aus zwei Richtungen kommen: aus dem Custom Field (normaler Weg) oder
-    # aus der Umgebung. Letzteres braucht der Vorschlagsmodus: dort raeumt der Anstoss Tag und
-    # Feld, bevor der Lauf startet — sonst bliebe der Ausloeser bei einem verworfenen Vorschlag
-    # stehen. Der gelesene Text wird dabei durchgereicht, damit er nicht verloren geht.
+    # Der Hinweis kommt vom KI-Knopf in Paperless (über das Panel), nicht aus einem Feld.
     hinweis = os.environ.get("CLASSIFY_HINWEIS", "").strip()
-    if not hinweis and hinweis_fid:
-        hinweis = (cur_vals.get(hinweis_fid) or "").strip()
-    hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
 
     # Korrespondent-Metadaten (Panel-Store, per ID an Paperless gebunden) fürs Prompt
     _c_by_id = {c["id"]: c for c in corrs}
@@ -887,26 +959,27 @@ def main():
         return cfull_hint(c) if c else ""
     cname = (_c_by_id.get(doc.get("correspondent")) or {}).get("name") if doc.get("correspondent") else None
     chint = _khint(cname) if cname else ""
-    corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
     TRACE["corr_hint"] = ({"korrespondent": cname, "hinweis": chint} if chint else None)
 
     # --- Pass 0: Absender extrahieren → fokussierte Korrespondent-Kandidaten ---
     set_stage(did, "Absender")
     p0_name = ""
+    p0_trace = {"quelle": "keine"}
     if mail_from:   # Absender-Domain → Korrespondent (aus dem Metadaten-Store: email/domains)
         _dom = mail_from.split("@")[-1].strip().lower().strip(">")
         for c in corrs:
             _m = cmeta(c["id"]); _doms = str(_m.get("domains") or _m.get("email") or "").lower()
             if _doms and _dom and (_dom in _doms or mail_from.lower() in _doms):
-                p0_name = c["name"]; break
+                p0_name = c["name"]; p0_trace = {"quelle": f"Absender-Mail ({_dom})"}; break
     if not p0_name:
+        _p0_user = pass0_nachricht(mail_ktx, title, content)
         try:
-            _p0 = mistral('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). Antworte NUR JSON {"correspondent": <Name|null>}.',
-                          mail_block + 'TITEL: ' + title + _NL + _NL + 'INHALT:' + _NL + content[:2500], 150)
+            _p0 = mistral(PASS0_SYSTEM, _p0_user, 150)
         except Exception as e:
             log(f"pass0-fail {did}: {e!r}")   # ohne Absender weiter, aber sichtbar
-            _p0 = {}
+            _p0 = {"fehler": repr(e)}
         p0_name = (_p0.get("correspondent") or "").strip()
+        p0_trace = {"quelle": "KI", "system": PASS0_SYSTEM, "user": _p0_user[:4000], "response": _p0}
     kand = []
     if p0_name:
         _at = ctoks(p0_name); _ak = " ".join(_at)
@@ -925,9 +998,8 @@ def main():
         a = calias(c)
         return (" (auch: " + a + ")") if a else ""
     kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") for c in kand)
-    kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand else "")
-    TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand]}
-    TRACE["trigger"] = ("Redo mit Nutzer-Hinweis" if hinweis else "Redo aus Paperless" if SOURCE == "redo"
+    TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand], **p0_trace}
+    TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
                         else "manuell (Panel)" if (FORCE or FORCE_OCR) else "automatisch (Post-Consume)")
     TRACE["hinweis"] = hinweis or None
@@ -944,15 +1016,13 @@ def main():
         cur = cur_vals.get(f["id"]); cur = sel_label(f, cur) if t == "select" else cur
         return f"- {f['name']} ({th}), aktuell: {cur if cur not in (None, '') else '—'}"
     fieldspec = "\n".join(fspec(f) for f in ai_flds)
-    meta = (f"METADATEN:\n- Hinzugefügt am: {(doc.get('added') or '')[:10]}\n"
-            f"- Aktuelles Dokumentdatum (evtl. falsch): {(doc.get('created') or '')[:10]}\n"
-            f"- Originaldateiname: {doc.get('original_file_name') or '—'}\n")
 
     set_stage(did, "Pass 1")
     system = pass1_system(CFG, types, tags_all, reserved, bool(summary_fid))
-    user_msg = (f"{hint_block}{corr_hint_block}{kand_block}{mail_block}{meta}\n"
-                f"VERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n{fieldspec}\n\n"
-                f"TITEL: {title}\n\nINHALT:\n{content[:CFG['content_max_len']]}")
+    user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
+        hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
+        (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
+        fieldspec, title, content[:CFG['content_max_len']]))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200)
 
@@ -974,7 +1044,7 @@ def main():
                 content = new
                 ocr_note = (ocr_note + " " if ocr_note else "") + f"OCR-nachgeholt({len(new)})"
                 TRACE["ocr"].update({"triggered": True, "grund": "nach Pass 1: " + "; ".join(nachher),
-                                     "chars": len(new), "excerpt": new[:600]})
+                                     "chars": len(new), "excerpt": new[:8000]})
                 log(f"OCR-nachgeholt {did}: {'; '.join(nachher)} → {len(new)} Zeichen")
                 messages.append({"role": "assistant", "content": assistant_raw})
                 messages.append({"role": "user", "content":
@@ -1010,14 +1080,16 @@ def main():
         else:
             cands = [c for s, c in scored[:20] if s >= 0.28]
             if cands:
-                p2_sys = "Du ordnest einen Absender bestehenden Korrespondenten zu. Antworte NUR JSON {\"match\": <exakter Name aus der Liste> ODER null}."
+                # Pass 2 als weitere Nachricht in DERSELBEN Unterhaltung wie Pass 1: die KI sieht
+                # dabei das ganze Dokument und ihre eigene Analyse, nicht nur einen Namen. (Bis
+                # 2026-09-27 ein eigener Aufruf mit nur dem Namen.) Die Schnittstelle hat kein
+                # Gedächtnis — „dieselbe Unterhaltung" heißt: der Verlauf wird mitgeschickt.
                 bsp_txt = beispiel_text(CFG["korrespondent_beispiele"])
-                p2_usr = (f"Vorgeschlagener Absender: '{corr_name}'.\nBestehende Kandidaten: {[c['name'] for c in cands]}.\n"
-                          "Welcher bezeichnet DIESELBE Firma/Behörde/Person? Rechtsform/Zusätze (GmbH/AG/OG) egal; "
-                          f"auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{bsp_txt}. "
-                          "Nur bei echter Übereinstimmung, sonst null.")
-                pick = mistral(p2_sys, p2_usr, 200)
-                pass2 = {"system": p2_sys, "user": p2_usr, "response": pick}
+                p2_usr = pass2_frage(corr_name, [c["name"] for c in cands], bsp_txt)
+                messages.append({"role": "assistant", "content": assistant_raw})
+                messages.append({"role": "user", "content": p2_usr})
+                pick, assistant_raw = mistral_chat(messages, 200)
+                pass2 = {"user": p2_usr, "response": pick, "im_gespraech": True}
                 m = pick.get("match")
                 if m:
                     for c in cands:
@@ -1060,10 +1132,10 @@ def main():
     # --- Zurückschreiben (KEIN owner/Rechte — macht post-consume.sh) ---
     extra = ([marker_id] if marker_id else []) + ([unsicher_id] if ((new_tags) and unsicher_id) else [])
     keep_tags = tag_ids_on + tag_ids + extra
-    patch = {"tags": [t for t in dict.fromkeys(keep_tags) if not (redo_id and t == redo_id)]}
+    patch = {"tags": list(dict.fromkeys(keep_tags))}
     if corr_id:
         patch["correspondent"] = corr_id
-    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), SOURCE in ("redo", "manual"))
+    neuer_typ = typ_setzen(dt_id, doc.get("document_type"), SOURCE in ("knopf", "manual"))
     if neuer_typ:
         patch["document_type"] = neuer_typ
 
@@ -1074,9 +1146,6 @@ def main():
         patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
     code_flds = {}
-    if hinweis_fid and hinweis:
-        # Nutzer-Hinweis nach Gebrauch entfernen, sonst feuert der Redo-Trigger erneut.
-        code_flds[hinweis_fid] = None
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
     TRACE["writeback"] = {"document_type": dt, "tags": [tagname_by_id.get(i) for i in tag_ids],
@@ -1119,6 +1188,16 @@ def main():
 # Nur beim direkten Aufruf ausführen (Post-Consume / manuell / Panel). So bleibt das Modul
 # importierbar — die Tests prüfen die reinen Hilfsfunktionen, ohne main() oder sys.exit auszulösen.
 if __name__ == "__main__":
+    if os.environ.get("CLASSIFY_DUMP_CONFIG") == "1":
+        wirksam = {k: v for k, v in CFG.items() if k in _BEKANNT and not k.startswith("api_key")}
+        regeln = ocr_regeln(CFG)
+        if (CFG.get("ocr_regeln") or {}).get("min_zeichen") is None:
+            # Nicht eigens gesetzt: dann gilt ocr_min_len. Nicht als Wert ausgeben, sonst schriebe
+            # ein Speichern im Panel die Zahl fest und ocr_min_len wirkte nie wieder.
+            regeln.pop("min_zeichen")
+        wirksam["ocr_regeln"] = regeln
+        print(json.dumps(wirksam, ensure_ascii=False))
+        sys.exit(0)
     if os.environ.get("CLASSIFY_PROMPT_VORSCHAU") == "1":
         print(json.dumps(prompt_vorschau(), ensure_ascii=False))
         sys.exit(0)

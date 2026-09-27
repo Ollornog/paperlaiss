@@ -45,46 +45,6 @@ def doc_id_aus_webhook(rohtext):
     return None
 
 
-# Felder des Korrespondent-Stores, die beim Zusammenführen als Liste behandelt werden:
-# hier gehen Werte nicht verloren, sondern werden vereinigt.
-LISTENFELDER = ("domains", "aliase")
-
-
-def merge_metadaten(ziel, quellen, listenfelder=LISTENFELDER):
-    """Mehrere Store-Einträge zu einem verschmelzen.
-
-    Regeln, in dieser Reihenfolge:
-      1. Was im ZIEL steht, bleibt. Wer zwei Kundennummern hat, will die des Ziels behalten —
-         alles andere wäre eine stille Entscheidung über Kundendaten.
-      2. Leere Zielfelder werden aus der ersten Quelle gefüllt, die etwas hat.
-      3. Listenfelder (Domains, Aliase) werden VEREINIGT statt überschrieben. Genau dafür sind
-         sie da: Ein zusammengeführter Korrespondent soll unter allen bisherigen Namen und
-         Absenderdomains wiedergefunden werden, sonst legt der Feedback-Loop ihn neu an.
-
-    Die Reihenfolge der Listeneinträge bleibt stabil (Ziel zuerst, dann Quellen), Dubletten
-    fallen raus — ohne Rücksicht auf Groß-/Kleinschreibung, aber mit der zuerst gesehenen
-    Schreibweise.
-    """
-    ergebnis = dict(ziel or {})
-    for feld in listenfelder:
-        gesehen, werte = set(), []
-        for eintrag in [ziel or {}] + list(quellen or []):
-            for teil in str((eintrag or {}).get(feld) or "").split(","):
-                teil = teil.strip()
-                if teil and teil.lower() not in gesehen:
-                    gesehen.add(teil.lower())
-                    werte.append(teil)
-        if werte:
-            ergebnis[feld] = ", ".join(werte)
-    for quelle in (quellen or []):
-        for feld, wert in (quelle or {}).items():
-            if feld in listenfelder:
-                continue
-            if not str(ergebnis.get(feld) or "").strip() and str(wert or "").strip():
-                ergebnis[feld] = wert
-    return {k: v for k, v in ergebnis.items() if str(v or "").strip()}
-
-
 def feld_typ(wert):
     """Welches Eingabeelement passt zu diesem Konfigurationswert?
 
@@ -167,7 +127,28 @@ LOG_ARTEN = (
 
 
 def log_art(zeile):
-    """Welche Art von Ereignis beschreibt diese Logzeile?"""
+    """Welche Art von Ereignis beschreibt diese Logzeile?
+
+    Entscheidend ist das ERSTE Wort — es nennt das Ereignis. Bis 2026-09-27 wurde nur nach
+    Teiltexten gesucht, und die Erfolgszeile eines Laufs mit OCR („OK 913 | … | OCR-rescue(340)")
+    traf zuerst auf „OCR-rescue": jeder Lauf mit OCR fehlte bei „klassifiziert" und zählte doppelt
+    als OCR. Die Teiltextsuche bleibt als Rückfall für Zeilen ohne bekanntes erstes Wort.
+    """
+    erstes = (zeile or "").split(maxsplit=1)[0] if (zeile or "").strip() else ""
+    if erstes == "OK":
+        return "klassifiziert"
+    if erstes == "VORSCHLAG":
+        return "vorschlag"
+    if erstes == "skip":
+        return "uebersprungen"
+    if erstes == "repariert":
+        return "repariert"
+    if erstes.startswith("FEHLER") or erstes.endswith("-fail") or erstes.endswith("fehlgeschlagen"):
+        return "fehler"
+    if erstes.startswith("OCR-"):
+        return "ocr"
+    if erstes == "DRY":
+        return None
     for muster, art in LOG_ARTEN:
         if muster in zeile:
             return art
@@ -335,42 +316,102 @@ def auth_einstellungen(env):
     return out
 
 
-def ausloeser_auswerten(tags, custom_fields, redo_id, ocr_id, hinweis_fid, marker_id=None):
-    """Was hat der Nutzer in Paperless ausgeloest, und was muss vor dem Lauf weg?
+KENNZAHL_ARTEN = ("klassifiziert", "ocr", "repariert", "fehler", "uebersprungen")
+_DOC = None
 
-    Drei Auslöser: Tag „neu klassifizieren", Hinweisfeld mit Text, Tag „nur OCR".
-    Rueckgabe (modus, hinweis, patch):
-      modus  "neu"      — neu klassifizieren (mit OCR); gewinnt, wenn mehrere gesetzt sind,
-                          denn der Lauf liest ohnehin per OCR neu
-             "nur_ocr"  — nur den Text neu lesen
-             None       — nichts ausgeloest (der Webhook kam von einer anderen Aenderung)
-      patch  — entfernt BEIDE Tags und das Hinweisfeld, sonst loest die naechste Bearbeitung
-               erneut aus. Leer, wenn nichts zu entfernen ist.
 
-    Beim reinen OCR bleibt der OCR-Tag stehen: der Lauf entfernt ihn erst zusammen mit dem
-    neuen Text, und das ist das Fertig-Signal fuer den Knopf (ein unveraenderter Text aendert
-    das Dokument sonst gar nicht). Beim Neu-Klassifizieren geht auch der Marker-Tag mit weg; der Lauf setzt ihn am Ende wieder.
-    Daran erkennt der KI-Knopf in Paperless, dass das ERGEBNIS da ist — „das Dokument hat sich
-    geaendert" genuegt nicht, denn der OCR-Text wird schon vorher geschrieben.
+def eintrag_lesen(zeile):
+    """Eine Protokollzeile als Eintrag für die Aktivitätsliste — oder None ohne Zeitstempel.
+
+    Die Rohzeile ist für den Klassifizierer geschrieben („OK 913 | exakt='X' id=13 | typ=21 | …").
+    Für die Liste werden die Teile herausgelöst, die man beim Überfliegen braucht; die Rohzeile
+    bleibt als `text` erhalten, damit nichts verloren geht.
     """
-    tags = list(tags or [])
-    cfs = list(custom_fields or [])
-    hinweis = ""
-    if hinweis_fid:
-        for c in cfs:
-            if c.get("field") == hinweis_fid:
-                hinweis = str(c.get("value") or "").strip()
-    neu = bool(redo_id) and redo_id in tags
-    ocr = bool(ocr_id) and ocr_id in tags
-    patch = {}
-    if neu or hinweis:
-        weg = {x for x in (redo_id, ocr_id, marker_id) if x}
-    else:
-        weg = set()
-    rest = [t for t in tags if t not in weg]
-    if len(rest) != len(tags):
-        patch["tags"] = rest
-    if hinweis:
-        patch["custom_fields"] = [c for c in cfs if c.get("field") != hinweis_fid]
-    modus = "neu" if (neu or hinweis) else "nur_ocr" if ocr else None
-    return modus, hinweis, patch
+    import re
+    global _DOC
+    if _DOC is None:
+        _DOC = re.compile(r"^\S+(?:\s+\S+)?\s+(\d+)\b")
+    if len(zeile) < 20 or zeile[4] != "-" or zeile[7] != "-" or zeile[13] != ":":
+        return None
+    rest = zeile[20:].strip()
+    # Trockenläufe (DRY) haben nichts geschrieben — eigene Art, damit man sie nicht für Fehler
+    # oder echte Läufe hält. Alles Übrige ohne bekanntes erstes Wort ist ein Hinweis.
+    art = "trockenlauf" if rest.startswith("DRY") else (log_art(rest) or "hinweis")
+    m = re.match(r"^(?:DRY\s+)?[A-Za-z-]+\s+(\d+)\b", rest)
+    doc = int(m.group(1)) if m else None
+    korr = re.search(r"(exakt|NEU|kandidat\w*)='([^']*)'", rest)
+    typ = re.search(r"\btyp=(\d+|[^|\s][^|]*?)\s*(?:\||$)", rest)
+    ocr = re.search(r"(OCR-[a-z]+\((\d+)\))", rest)
+    return {"ts": zeile[:19], "tag": zeile[:10], "art": art, "doc": doc,
+            "korrespondent": korr.group(2) if korr else None,
+            "korrespondent_neu": bool(korr and korr.group(1) == "NEU"),
+            "typ": typ.group(1).strip() if typ else None,
+            "ocr": ocr.group(1) if ocr else None,
+            "text": rest[:400]}
+
+
+def aktivitaet(zeilen, art=None, tag=None, doc=None, seite=1, je=100):
+    """Die Aktivitätsliste, neueste zuerst, gefiltert und in Seiten zu `je` Einträgen.
+
+    Filter lassen sich kombinieren (Art UND Tag UND Dokument). `seite` wird in den gültigen
+    Bereich gezogen, damit ein veralteter Link auf „Seite 9" nach einem Filter nicht ins Leere
+    zeigt. `kennzahlen` zählt über ALLE Zeilen, nicht über die gefilterten — die Kästen oben
+    sind die Einstiege in die Filter und dürfen nicht mitschrumpfen.
+    """
+    alle = [e for e in (eintrag_lesen(z) for z in (zeilen or [])) if e]
+    kennzahlen = {a: 0 for a in KENNZAHL_ARTEN}
+    for e in alle:
+        if e["art"] in kennzahlen:
+            kennzahlen[e["art"]] += 1
+    treffer = [e for e in reversed(alle)
+               if (not art or e["art"] == art) and (not tag or e["tag"] == tag)
+               and (doc is None or e["doc"] == doc)]
+    je = max(1, int(je))
+    seiten = max(1, -(-len(treffer) // je))
+    seite = min(max(1, int(seite)), seiten)
+    return {"eintraege": treffer[(seite - 1) * je: seite * je], "gesamt": len(treffer),
+            "seite": seite, "seiten": seiten, "je": je, "kennzahlen": kennzahlen,
+            "filter": {"art": art, "tag": tag, "doc": doc}}
+
+
+def knopf_rechte(antwort, gewuenscht):
+    """Welche der gewünschten Dokumente darf der angemeldete Paperless-Nutzer ändern?
+
+    `antwort` ist die JSON-Antwort von `GET /api/documents/?id__in=…&fields=id,user_can_change`,
+    abgefragt MIT der Sitzung des Nutzers. Ein Dokument, das dort fehlt, darf er nicht einmal
+    sehen — es zählt als verweigert, nicht als erlaubt. Rückgabe: (erlaubt, verweigert), sortiert.
+    """
+    darf = {int(d["id"]) for d in (antwort or {}).get("results", []) if d.get("user_can_change")}
+    gewuenscht = sorted({int(x) for x in gewuenscht})
+    return [d for d in gewuenscht if d in darf], [d for d in gewuenscht if d not in darf]
+
+
+# Die Felder des Adressbuchs (correspondents.json), die der Korrespondenten-Dialog in Paperless
+# zeigt — Name, Beschriftung, mehrzeilig. Mehrere Werte (Domains, Aliase) stehen kommagetrennt,
+# so liest sie classify.py (calias, Domain-Abgleich).
+KORR_FELDER = (
+    ("kontext", "Kontext für die KI", True),
+    ("aliase", "Andere Schreibweisen (kommagetrennt)", False),
+    ("email", "E-Mail", False),
+    ("domains", "Mail-Domains (kommagetrennt)", False),
+    ("kundennummer", "Unsere Kundennummer dort", False),
+    ("ustid", "USt-ID", False),
+    ("telefon", "Telefon", False),
+    ("adresse", "Adresse", True),
+)
+
+
+def korr_eintrag(alt, eingabe):
+    """Einen Adressbuch-Eintrag aus der Formulareingabe bilden.
+
+    Nur bekannte Felder, Werte als getrimmter Text, leere Felder fallen weg. Was der Dialog nicht
+    kennt (`quelle`, `extern_id` aus einem Import), bleibt erhalten — sonst löschte jedes
+    Speichern im Dialog die Herkunft eines importierten Eintrags.
+    """
+    neu = {k: v for k, v in (alt or {}).items() if k not in {f for f, _, _ in KORR_FELDER}}
+    for feld, _, _ in KORR_FELDER:
+        wert = str((eingabe or {}).get(feld) or "").strip()
+        if wert:
+            neu[feld] = wert[:4000]
+    return neu
+
