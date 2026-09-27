@@ -16,4 +16,6 @@ COPY static ./static
 EXPOSE 8400
 # --root-path aus PANEL_PFAD: hinter einem Proxy, der den Pfad abschneidet (Caddy handle_path),
 # braucht TinySesam ihn für Weiterleitungen und next=-Ziele (TinySesam T-15).
-CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port 8400 --root-path \"${PANEL_PFAD:-}\""]
+# --no-proxy-headers: die echte Client-IP bestimmt TinySesam selbst (PANEL_TRUSTED_PROXIES). Schriebe
+# uvicorn sie vorher um, hätte TinySesams Prüfung nichts mehr zu prüfen (TinySesam-README).
+CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port 8400 --no-proxy-headers --root-path \"${PANEL_PFAD:-}\""]

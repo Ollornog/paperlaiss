@@ -103,7 +103,10 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
     `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`. Required: `PANEL_BASE_URL` (the address browsers
     use); the user store lives in `PANEL_AUTH_DB` (default `/auth/tinysesam.db`, mount it as a
     volume). A half-configured OIDC or no sign-in method at all stops the container with a message.
-    A set `PANEL_TOKEN` stays valid for scripts.
+    A set `PANEL_TOKEN` stays valid for scripts. Behind a reverse proxy set `PANEL_TRUSTED_PROXIES`
+    (comma-separated networks of **every** proxy in the chain, e.g. the Docker network
+    `172.16.0.0/12` plus an upstream proxy) — otherwise all users share the proxy's IP and rate
+    limiting, lockout and the audit log apply to everyone at once.
 - **Under a sub-path** (e.g. `https://paperless.example.com/paperlaiss`, next to Paperless on the same
   domain): set `PANEL_PFAD=/paperlaiss` and let the reverse proxy strip the prefix (Caddy:
   `handle_path /paperlaiss/* { reverse_proxy panel:8400 }`). The panel prefixes every link and API

@@ -323,6 +323,24 @@ def auth_einstellungen(env):
             # Ohne den Scope `groups` schickt PocketID keine Gruppen mit — dann käme bei gesetzter
             # Gruppensperre niemand hinein, auch der Admin nicht.
             cfg["oidc_scopes"] = "openid profile email groups"
+    # Hinter einem Reverse-Proxy im Container ist der direkte Peer nie 127.0.0.1 (TinySesams Vorgabe).
+    # Ohne diese Liste wertet TinySesam X-Forwarded-For nicht aus, und alle Nutzer erscheinen unter
+    # der Proxy-IP — Rate-Limit, IP-Sperre und Audit-Log gelten dann für alle gemeinsam (2026-09-27,
+    # Warnung von TinySesam im Produktivlog). Einzutragen sind ALLE Proxys der Kette: TinySesam nimmt die
+    # rechteste Adresse, die nicht in der Liste steht.
+    proxies = [p.strip() for p in (env.get("PANEL_TRUSTED_PROXIES") or "").split(",") if p.strip()]
+    if proxies:
+        import ipaddress
+        schlecht = []
+        for p in proxies:
+            try:
+                ipaddress.ip_network(p, strict=False)
+            except ValueError:
+                schlecht.append(p)
+        if schlecht:
+            out["fehler"].append(f"PANEL_TRUSTED_PROXIES enthält Einträge, die kein IP-Netz sind: {schlecht} "
+                                 "— erwartet z. B. 172.16.0.0/12,192.0.2.1/32")
+        cfg["trusted_proxies"] = proxies
     out["tinysesam"] = cfg
     name = (env.get("PANEL_ADMIN_USER") or "").strip()
     pw = env.get("PANEL_ADMIN_PASSWORD") or ""
