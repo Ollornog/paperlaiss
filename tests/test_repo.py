@@ -367,7 +367,10 @@ r.check("jede Testdatei wird von einem Läufer gerufen", not _td, " | ".join(_td
 _vt = hygiene.pruefe_veroeffentlichen_am_tag(str(ROOT))
 r.check("in tag-Workflows hängt jedes Veröffentlichen am Tag", not _vt, " | ".join(_vt[:3]))
 
-_ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT))
+_ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT), ausgenommen={
+    "pruefe_extras_imports":
+        "kein CI-Job ohne Extras (`minimal`) — die Suite läuft immer mit allen Extras, ein ungeschützter Extra-Import kann hier nicht brechen (Kit 0.24.0, T-9)",
+})
 r.check("jede Kit-Prüfung wird gerufen oder ist begründet ausgenommen",
         not _ng, " | ".join(_ng[:3]))
 
