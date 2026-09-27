@@ -7,14 +7,15 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 2/4 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 3/5 erledigt
 
 ## Aufgaben
 
 * ☑ **[T-1](T-1-panel-bloecke-portieren.md)** Vier Panel-Blöcke aus der Flask-Fassung übernehmen · M-1
-* ☐ **[T-2](T-2-eine-linie-statt-vier-staende.md)** Alle Installationen auf den Repo-Stand bringen · M-1
+* ☑ **[T-2](T-2-eine-linie-statt-vier-staende.md)** Alle Installationen auf den Repo-Stand bringen · M-1
 * ☑ **[T-3](T-3-python-untergrenze-bewusst-setzen.md)** Python-Untergrenze bewusst setzen statt von der Testmatrix schieben lassen · M-1
 * ✗ **[T-4](T-4-erneut-verarbeiten-gegen-ki.md)** Paperless' „Erneut verarbeiten" überschreibt den OCR-Text des KI-Knopfs · M-1
+* ☐ **[T-5](T-5-automatischer-export.md)** Automatischer Export nach Regeln (Filter, Turnus, Auslöser) · M-1
 
 ## Entscheidungen (ADR)
 
