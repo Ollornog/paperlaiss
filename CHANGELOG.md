@@ -33,6 +33,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   zuordnen · Schreiben), darin die Teilschritte mit kleinen Pfeilen. Oben stehen die Auslöser je
   mit Symbol (im Popup der eine, der den Lauf gestartet hat), unten „Ende" mit Haken bzw.
   „Abgebrochen" mit Kreuz — beide mit Abstand zum Rand.
+- Panel: kleinere Schrift überall. Ablauf: jeder Block sagt in einem Satz, was er tut („OCR — Text
+  neu erkennen" statt „Text neu lesen"); Eingabe und Ausgabe als abgesetzte Kästen mit farbigem
+  Etikett statt schlichter Aufklapp-Zeilen.
+- Pass 1: ein Feld statt zwei für den System-Prompt — die Anweisung, wie sie an die KI geht, mit
+  hinterlegten eingesetzten Werten; „Bearbeiten" öffnet die Vorlage darüber, und jede Änderung
+  rechnet die Vorschau live neu (`POST /api/prompt-vorschau` mit dem Entwurf, speichert nichts).
+  Unverändert gespeichert heißt: eingebauter Prompt, keine Kopie.
+- Die Nachrichten an Pass 0, Pass 1 und Pass 2 zeigt der Ablauf jetzt im echten Wortlaut, mit
+  Beispielwerten und — bei Pass 1 — der Bedingung je Block. System-Prompt und Pass-1-Nachricht
+  entstehen dafür in `classify.py` aus Stücken (`baue_system_teile`, `pass1_system_teile`,
+  `pass1_nachricht_teile`, `pass0_nachricht`); der Lauf fügt sie zusammen, ein Test vergleicht
+  Zeichen für Zeichen mit der bisherigen Nachricht (Mutation rot).
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
   Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.

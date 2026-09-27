@@ -115,7 +115,7 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
       <div class="ms-auto flex items-center gap-3">{raus}</div>
     </div>
   </header>
-  <main class="flex-1 overflow-y-auto"><div class="mx-auto w-full max-w-5xl p-6">{inhalt}</div></main>
+  <main class="flex-1 overflow-y-auto text-sm"><div class="mx-auto w-full max-w-5xl p-6">{inhalt}</div></main>
 </div>"""
     return rahmen(titel, koerper)
 
@@ -128,7 +128,7 @@ def kopf(titel: str, beschreibung: str = "", aktionen: str = "") -> str:
     # scrollender Inhalt nicht seitlich durchscheint.
     return (f'<div class="sticky top-0 z-10 -mx-6 -mt-6 flex flex-wrap items-end justify-between gap-3 '
             f'border-b bg-background px-6 py-6">'
-            f'<div><h1 class="text-xl font-semibold tracking-tight">{e(titel)}</h1>{text}</div>'
+            f'<div><h1 class="text-lg font-semibold tracking-tight">{e(titel)}</h1>{text}</div>'
             f'<div class="flex flex-wrap items-center gap-2">{aktionen}</div></div>'
             # Luft unter der Linie: Abstandshalter statt mb-8 — das steht nicht im C22-Pack.
             f'<div class="h-8" aria-hidden="true"></div>')

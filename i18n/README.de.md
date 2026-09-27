@@ -86,7 +86,7 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
   Vorgaben; gespeichert werden nur geänderte Schlüssel).
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
 - **JSON-API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
-  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau`.
+  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST mit einem Entwurf für die Live-Vorschau beim Bearbeiten).
 - **Anmeldung** (`PANEL_AUTH`):
   - leer (Vorgabe) — Bearer-Token bzw. Cookie `PANEL_TOKEN`; ohne Token antwortet das Panel mit 503.
   - `none` — keine eigene Anmeldung, weil eine davorhängt (Reverse-Proxy mit Forward-Auth).

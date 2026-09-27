@@ -462,19 +462,40 @@ def ablauf_seite(request: Request):
     return seite("Ablauf & Prompt", "/ablauf", seiten.ablauf())
 
 
-@app.get("/api/prompt-vorschau")
-def api_prompt_vorschau(request: Request):
-    """Der fertig eingesetzte Prompt gegen den aktuellen Bestand — von classify.py selbst
-    gebaut, damit die Vorschau nie vom tatsaechlich gesendeten Prompt abweicht."""
-    guard(request)
+def _prompt_vorschau(entwurf: str | None = None):
     env = dict(os.environ)
     env.update({"CLASSIFY_PROMPT_VORSCHAU": "1", "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK,
                 "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG})
+    env.pop("CLASSIFY_PROMPT_ENTWURF", None)
+    if entwurf is not None:
+        env["CLASSIFY_PROMPT_ENTWURF"] = entwurf
     try:
         r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=60)
         return json.loads(r.stdout)
     except Exception as e:
         raise HTTPException(502, f"Vorschau fehlgeschlagen: {e!r}"[:300])
+
+
+@app.get("/api/prompt-vorschau")
+def api_prompt_vorschau(request: Request):
+    """Der fertig eingesetzte Prompt gegen den aktuellen Bestand — von classify.py selbst
+    gebaut, damit die Vorschau nie vom tatsaechlich gesendeten Prompt abweicht."""
+    guard(request)
+    return _prompt_vorschau()
+
+
+@app.post("/api/prompt-vorschau")
+async def api_prompt_entwurf(request: Request):
+    """Live-Vorschau beim Bearbeiten: derselbe Weg mit dem noch nicht gespeicherten Prompt.
+    Schreibt nichts."""
+    guard(request)
+    try:
+        entwurf = (await request.json()).get("system_prompt")
+    except Exception:
+        raise HTTPException(400, "JSON mit system_prompt erwartet")
+    if not isinstance(entwurf, str) or len(entwurf) > 50000:
+        raise HTTPException(400, "system_prompt muss Text (bis 50000 Zeichen) sein")
+    return _prompt_vorschau(entwurf)
 
 
 @app.get("/api/config")

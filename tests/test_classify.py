@@ -153,6 +153,45 @@ r.check("Prompt-Vorschau = tatsächlich gesendeter System-Prompt", _vorschau["sy
 r.check("Prompt-Vorschau: Typen eingesetzt, keine Platzhalter übrig",
         "Rechnung" in _vorschau["system"] and "{TYPES}" not in _vorschau["system"])
 
+r.check("Prompt-Vorschau: Stücke ergeben genau den System-Prompt",
+        "".join(t for t, _ in _vorschau["system_teile"]) == _vorschau["system"])
+r.check("Prompt-Vorschau: eingesetzte Typen als Platzhalter markiert",
+        any(v == "TYPES" and "Rechnung" in t for t, v in _vorschau["system_teile"]))
+r.check("Prompt-Vorschau: Nachricht zeigt Beispielwerte markiert und Bedingungen",
+        any(v and "‹Titel›" in t for t, v, _ in _vorschau["nachricht_teile"])
+        and any(w and "MÖGLICHE KORRESPONDENTEN" in t for t, _, w in _vorschau["nachricht_teile"]))
+classify.get = _b["get"]
+os.environ["CLASSIFY_PROMPT_ENTWURF"] = "Nur {TYPES} und sonst nichts"
+try:
+    _entwurf = classify.prompt_vorschau()
+finally:
+    classify.get = _alt_get
+    os.environ.pop("CLASSIFY_PROMPT_ENTWURF")
+r.check("Prompt-Vorschau: Entwurf aus dem Editor wird eingesetzt, ohne zu speichern",
+        _entwurf["system"].startswith("Nur ") and "Rechnung" in _entwurf["system"]
+        and not classify.CFG.get("system_prompt", "").startswith("Nur "))
+
+# Die Nachricht an Pass 1 entsteht aus Stücken — zusammengesetzt muss sie Zeichen für Zeichen
+# der bisherigen Nachricht entsprechen (Vergleich gegen die alte Formel, mit und ohne Zusatzblöcke).
+def _alte_nachricht(hinweis, cname, chint, kand_lines, mail_ktx, added, created, fname, fieldspec, title, content):
+    _NL = "\n"
+    hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
+    corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
+    kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand_lines else "")
+    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
+    meta = (f"METADATEN:\n- Hinzugefügt am: {added}\n- Aktuelles Dokumentdatum (evtl. falsch): {created}\n"
+            f"- Originaldateiname: {fname}\n")
+    return (f"{hint_block}{corr_hint_block}{kand_block}{mail_block}{meta}\n"
+            f"VERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n{fieldspec}\n\n"
+            f"TITEL: {title}\n\nINHALT:\n{content}")
+for _args in [("Bitte Typ Mahnung", "Firma A", "zahlt immer spät", "- Firma A\n- Firma B", "Hallo, anbei",
+               "2026-01-02", "2026-01-01", "a.pdf", "- Betrag (Zahl), aktuell: —", "Titel", "Inhalt"),
+              ("", None, "", "", "", "2026-01-02", "", "—", "", "", "Inhalt")]:
+    r.check("Pass-1-Nachricht aus Stücken = bisherige Nachricht" + (" (mit allen Blöcken)" if _args[0] else " (ohne Zusatzblöcke)"),
+            "".join(t for t, _, _ in classify.pass1_nachricht_teile(*_args)) == _alte_nachricht(*_args))
+r.check("Verdrahtung: der Lauf schickt die aus Stücken gebaute Nachricht",
+        _b["chat"][0].startswith("METADATEN:") and "VERFÜGBARE FELDER" in _b["chat"][0] and "\nINHALT:\n" in _b["chat"][0])
+
 # ---- is_null(): die vielen Schreibweisen von „leer"
 r.check("is_null: None", classify.is_null(None) is True)
 r.check("is_null: Leerstring", classify.is_null("  ") is True)

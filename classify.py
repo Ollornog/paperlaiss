@@ -655,12 +655,37 @@ def baue_system(tpl, types, taglines):
                     + taglines + "\n"
                     "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
                     "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
-    platz = "{TAGBLOCK}" in tpl or "{TAGS}" in tpl
-    system = (tpl.replace("{TYPES}", ", ".join(sorted(types)))
-                 .replace("{TAGBLOCK}", tagblock).replace("{TAGS}", taglines))
-    if tagblock and not platz:
-        system += "\n" + tagblock
-    return system
+    return "".join(t for t, _ in baue_system_teile(tpl, types, taglines))
+
+
+# Platzhalter im Pass-1-Prompt und was fuer sie eingesetzt wird (fuer die Beschriftung im Panel).
+PLATZHALTER = {"TYPES": "Dokumenttypen aus Paperless", "TAGBLOCK": "Tag-Liste samt Anweisung",
+               "TAGS": "nur die Tag-Liste"}
+
+
+def baue_system_teile(tpl, types, taglines):
+    """Wie baue_system(), aber in Stuecken: (Text, Platzhaltername oder None).
+
+    Der Lauf fuegt die Stuecke zusammen, das Panel markiert die eingesetzten Werte. Eine
+    Funktion fuer beide, damit die Vorschau nie vom gesendeten Prompt abweicht."""
+    if taglines is None:
+        tagblock = ""
+        taglines = ""
+    else:
+        tagblock = ("TAGS — nutze NUR exakte Namen aus dieser Liste, 1-3 wirklich zutreffende, den spezifischsten:\n"
+                    + taglines + "\n"
+                    "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
+                    "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
+    werte = {"TYPES": ", ".join(sorted(types)), "TAGBLOCK": tagblock, "TAGS": taglines}
+    teile = []
+    for i, stueck in enumerate(re.split(r"\{(TYPES|TAGBLOCK|TAGS)\}", tpl)):
+        if i % 2:
+            teile.append((werte[stueck], stueck))
+        elif stueck:
+            teile.append((stueck, None))
+    if tagblock and "{TAGBLOCK}" not in tpl and "{TAGS}" not in tpl:
+        teile.append(("\n" + tagblock, "TAGBLOCK (angehängt, weil der Prompt keinen Platzhalter hat)"))
+    return teile
 
 
 def typ_setzen(dt_id, bisher, ausdruecklich):
@@ -724,6 +749,11 @@ def pass1_system(cfg, types, tags_all, reserved, mit_summary):
     Eine Funktion fuer den Lauf UND die Vorschau im Panel: zeigte die Vorschau einen selbst
     nachgebauten Prompt, saehe man dort etwas anderes als das, was die KI bekommt.
     """
+    return "".join(t for t, _ in pass1_system_teile(cfg, types, tags_all, reserved, mit_summary))
+
+
+def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
+    """pass1_system() in Stuecken (Text, Name des eingesetzten Teils oder None) — fuers Panel."""
     if cfg.get("tagging_enabled"):
         td = {**TAG_DESC, **(cfg.get("tag_descriptions") or {})}
         taglines = "\n".join(f"- {t['name']}: {td.get(t['name'], t['name'])}"
@@ -731,12 +761,57 @@ def pass1_system(cfg, types, tags_all, reserved, mit_summary):
     else:
         taglines = None
     tpl = cfg.get("system_prompt") or DEFAULT_PROMPT
-    system = baue_system(tpl, types, taglines)
+    teile = baue_system_teile(tpl, types, taglines)
+    system = "".join(t for t, _ in teile)
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
-        system += FELD_ANWEISUNG
+        teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
     if mit_summary:
-        system += SUMMARY_ANWEISUNG
-    return system
+        teile.append((SUMMARY_ANWEISUNG, "Zusammenfassung (automatisch angehängt, weil ein Zusammenfassungs-Feld eingestellt ist)"))
+    return teile
+
+
+KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; "
+             "nur wenn wirklich keiner passt einen neuen):")
+
+
+def pass0_nachricht(mail_ktx, title, content):
+    """Die Nachricht an Pass 0: Mail-Kontext (falls da), Titel, Anfang des Textes."""
+    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):"
+                  "\n" + mail_ktx + "\n\n") if mail_ktx else ""
+    return mail_block + "TITEL: " + title + "\n\nINHALT:\n" + content[:2500]
+
+
+def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, created, dateiname,
+                          fieldspec, title, content):
+    """Die Nachricht je Dokument an Pass 1, in Stuecken (Text, eingesetzter Wert oder None,
+    Bedingung des Blocks oder None). Der Lauf fuegt sie zusammen; das Panel zeigt dieselben
+    Stuecke mit Beispielwerten und markiert, was eingesetzt wird und welcher Block nur manchmal
+    kommt."""
+    T = []
+    if hinweis:
+        w = "nur mit Hinweis vom KI-Knopf"
+        T += [("WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n", None, w),
+              (hinweis, "Hinweis vom KI-Knopf", w), ("\n\n", None, w)]
+    if chint:
+        w = "nur wenn das Dokument schon einen Korrespondenten mit Kontext hat"
+        T += [("HINWEIS zum Korrespondenten '", None, w), (cname, "bisheriger Korrespondent", w), ("': ", None, w),
+              (chint, "Kontext aus seinen Stammdaten", w), ("\n\n", None, w)]
+    if kand_lines:
+        w = "nur wenn Pass 0 passende Korrespondenten gefunden hat"
+        T += [(KAND_KOPF + "\n", None, w), (kand_lines, "bis zu 8 Kandidaten, je mit Aliasen und Kontext", w),
+              ("\n\n", None, w)]
+    if mail_ktx:
+        w = "nur bei Dokumenten aus einer Mail"
+        T += [("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):\n", None, w),
+              (mail_ktx, "Text der Mail", w), ("\n\n", None, w)]
+    T += [("METADATEN:\n- Hinzugefügt am: ", None, None), (added, "Datum", None),
+          ("\n- Aktuelles Dokumentdatum (evtl. falsch): ", None, None), (created, "Datum", None),
+          ("\n- Originaldateiname: ", None, None), (dateiname, "Dateiname", None),
+          ("\n\nVERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n", None, None),
+          (fieldspec, "je Feld: Name (Art), aktueller Wert", None),
+          ("\n\nTITEL: ", None, None), (title, "Titel", None), ("\n\nINHALT:\n", None, None),
+          (content, "Text des Dokuments", None)]
+    return [t for t in T if t[0]]
 
 
 def prompt_vorschau():
@@ -746,8 +821,31 @@ def prompt_vorschau():
     tags_all = get("/tags/?page_size=1000")["results"]
     cfields = get("/custom_fields/?page_size=200")["results"]
     summary_fid = resolve_field(cfields, CFG["summary_field"])
+    # Entwurf aus dem Panel-Editor: dieselbe Rechnung mit dem noch nicht gespeicherten Prompt.
+    # Leer heisst „eingebauter Prompt“, wie beim Speichern.
+    cfg = CFG
+    if "CLASSIFY_PROMPT_ENTWURF" in os.environ:
+        cfg = {**CFG, "system_prompt": os.environ["CLASSIFY_PROMPT_ENTWURF"]}
+    sys_teile = pass1_system_teile(cfg, types, tags_all, reservierte_tags(cfg), bool(summary_fid))
+    bsp = "‹{}›".format
+    nachricht = pass1_nachricht_teile(
+        bsp("Hinweis, den jemand beim KI-Knopf eingegeben hat"), bsp("Korrespondent"),
+        bsp("Kontext aus den Stammdaten"),
+        "- " + bsp("Name") + " (auch: " + bsp("Aliase") + ") [Kontext: " + bsp("Kontext") + "]\n- …",
+        bsp("Text der Mail"), bsp("JJJJ-MM-TT"), bsp("JJJJ-MM-TT"), bsp("Dateiname"),
+        "- " + bsp("Feld") + " (" + bsp("Art") + "), aktuell: " + bsp("Wert") + "\n- …",
+        bsp("Titel"), bsp(f"Text des Dokuments, bis {CFG['content_max_len']} Zeichen"))
     return {
-        "system": pass1_system(CFG, types, tags_all, reservierte_tags(CFG), bool(summary_fid)),
+        "system": "".join(t for t, _ in sys_teile),
+        "system_teile": sys_teile,
+        "nachricht_teile": nachricht,
+        "platzhalter": PLATZHALTER,
+        "vorlage": cfg.get("system_prompt") or DEFAULT_PROMPT,
+        "standard": DEFAULT_PROMPT,
+        "pass0_nachricht": pass0_nachricht(bsp("Text der Mail — nur bei Dokumenten aus einer Mail"), bsp("Titel"),
+                                           bsp("die ersten 2500 Zeichen des Textes")),
+        "pass2_frage": pass2_frage(bsp("Absender laut Pass 1"), bsp("ähnliche Korrespondenten, höchstens 20"),
+                                   beispiel_text(CFG["korrespondent_beispiele"])),
         "eigener_prompt": bool(CFG.get("system_prompt")),
         "typen": len(types), "tags": len(tags_all), "felder": len(cfields),
         "ki_felder": [f["name"] for f in cfields
@@ -845,12 +943,10 @@ def main():
     _NL = chr(10)
     mail_ktx = (cur_vals.get(mailctx_fid) or "").strip() if mailctx_fid else ""
     mail_from = (cur_vals.get(mailfrom_fid) or "").strip() if mailfrom_fid else ""
-    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
     TRACE["mail"] = ({"from": mail_from or None, "hat_kontext": bool(mail_ktx)} if (mail_ktx or mail_from) else None)
 
     # Der Hinweis kommt vom KI-Knopf in Paperless (über das Panel), nicht aus einem Feld.
     hinweis = os.environ.get("CLASSIFY_HINWEIS", "").strip()
-    hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
 
     # Korrespondent-Metadaten (Panel-Store, per ID an Paperless gebunden) fürs Prompt
     _c_by_id = {c["id"]: c for c in corrs}
@@ -860,7 +956,6 @@ def main():
         return cfull_hint(c) if c else ""
     cname = (_c_by_id.get(doc.get("correspondent")) or {}).get("name") if doc.get("correspondent") else None
     chint = _khint(cname) if cname else ""
-    corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
     TRACE["corr_hint"] = ({"korrespondent": cname, "hinweis": chint} if chint else None)
 
     # --- Pass 0: Absender extrahieren → fokussierte Korrespondent-Kandidaten ---
@@ -874,7 +969,7 @@ def main():
             if _doms and _dom and (_dom in _doms or mail_from.lower() in _doms):
                 p0_name = c["name"]; p0_trace = {"quelle": f"Absender-Mail ({_dom})"}; break
     if not p0_name:
-        _p0_user = mail_block + 'TITEL: ' + title + _NL + _NL + 'INHALT:' + _NL + content[:2500]
+        _p0_user = pass0_nachricht(mail_ktx, title, content)
         try:
             _p0 = mistral(PASS0_SYSTEM, _p0_user, 150)
         except Exception as e:
@@ -900,7 +995,6 @@ def main():
         a = calias(c)
         return (" (auch: " + a + ")") if a else ""
     kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") for c in kand)
-    kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand else "")
     TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand], **p0_trace}
     TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
@@ -919,15 +1013,13 @@ def main():
         cur = cur_vals.get(f["id"]); cur = sel_label(f, cur) if t == "select" else cur
         return f"- {f['name']} ({th}), aktuell: {cur if cur not in (None, '') else '—'}"
     fieldspec = "\n".join(fspec(f) for f in ai_flds)
-    meta = (f"METADATEN:\n- Hinzugefügt am: {(doc.get('added') or '')[:10]}\n"
-            f"- Aktuelles Dokumentdatum (evtl. falsch): {(doc.get('created') or '')[:10]}\n"
-            f"- Originaldateiname: {doc.get('original_file_name') or '—'}\n")
 
     set_stage(did, "Pass 1")
     system = pass1_system(CFG, types, tags_all, reserved, bool(summary_fid))
-    user_msg = (f"{hint_block}{corr_hint_block}{kand_block}{mail_block}{meta}\n"
-                f"VERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n{fieldspec}\n\n"
-                f"TITEL: {title}\n\nINHALT:\n{content[:CFG['content_max_len']]}")
+    user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
+        hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
+        (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
+        fieldspec, title, content[:CFG['content_max_len']]))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200)
 

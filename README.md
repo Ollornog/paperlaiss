@@ -87,7 +87,7 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
   saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
 - **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
-  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau`.
+  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST with a draft for the live preview while editing).
 - **Sign-in** (`PANEL_AUTH`):
   - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.
   - `none` — no sign-in of its own, because one sits in front of it (reverse proxy with forward-auth).

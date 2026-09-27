@@ -51,12 +51,34 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
+const CHEV=%CHEV%, CHEVK=%CHEVK%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
 const ART={paperless:['Paperless','info','inbox'],code:['paperlaiss','outline','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
+// Eingesetzte Werte und Platzhalter farbig hinterlegt — so sieht man, was fest im Prompt steht
+// und was je Dokument eingesetzt wird (Muster aus Prompt-Editoren wie Langfuse).
+const MARK='rounded-sm bg-info/10 px-1 text-info';
+const markiere=h=>h.replace(/‹[^›]*›/g,m=>'<span class="'+MARK+'">'+m+'</span>');
 // Lesbar statt Code: Text mit Absätzen und Zeilenumbrüchen in normaler Schrift, Objekte als Tabelle.
 function prosa(t){
-  const abs=String(t||'').trim().split(/\n\s*\n/).map(a=>'<p>'+txt(a).replace(/\n/g,'<br>')+'</p>').join('');
-  return '<div class="grid max-h-96 gap-2 overflow-y-auto rounded-md border bg-background/70 p-3 leading-relaxed">'+(abs||'<p>—</p>')+'</div>';
+  const abs=String(t||'').trim().split(/\n\s*\n/).map(a=>'<p>'+markiere(txt(a)).replace(/\n/g,'<br>')+'</p>').join('');
+  return '<div class="grid max-h-96 gap-2 overflow-y-auto leading-relaxed">'+(abs||'<p>—</p>')+'</div>';
+}
+// Stücke aus classify.py: [Text, eingesetzt als …, nur wenn …]. Fester Text normal, Eingesetztes
+// hinterlegt; ein Block, der nur manchmal kommt, bekommt seine Bedingung als kleine Zeile davor.
+function teileHtml(T,PL){
+  let aus='', w0=null;
+  for(const [t,v,w] of (T||[])){
+    if(w&&w!==w0) aus+='<span class="text-muted-foreground text-xs">'+txt(w)+'</span><br>';
+    w0=w||null;
+    const h=txt(t).replace(/\n/g,'<br>');
+    if(!v){ aus+=h; continue; }
+    const pl=PL&&PL[v];
+    // Angehängter fester Text (etwa die Feld-Anweisung): beschriftet, aber nicht hinterlegt.
+    if(!pl&&PL){ aus+='<br><span class="text-muted-foreground text-xs">'+txt(v)+'</span><br>'+h; continue; }
+    // Leerer Platzhalter (etwa {TAGBLOCK} bei ausgeschaltetem Tagging): sagen, dass hier nichts kommt.
+    if(!t.trim()){ aus+='<span class="text-muted-foreground text-xs">[{'+txt(v)+'} leer]</span> '; continue; }
+    aus+='<span class="'+MARK+'" title="'+txt(pl?'{'+v+'} — '+pl:v)+'">'+h+'</span>';
+  }
+  return '<div class="max-h-96 overflow-y-auto leading-relaxed">'+(aus||'—')+'</div>';
 }
 function wertText(v){ if(v===null||v===undefined) return '<span class="text-muted-foreground">leer</span>';
   if(Array.isArray(v)) return v.length?v.map(x=>txt(typeof x==='object'?JSON.stringify(x):x)).join(', '):'<span class="text-muted-foreground">keine</span>';
@@ -69,7 +91,16 @@ function tabelle(obj,kopf){
   return '<div class="overflow-x-auto"><table class="table"><thead><tr><th>'+txt((kopf||['Feld','Wert'])[0])+'</th><th>'+txt((kopf||['Feld','Wert'])[1])+'</th></tr></thead><tbody>'+
     zeilen.map(([k,v])=>'<tr><td class="whitespace-nowrap font-medium">'+txt(k)+'</td><td>'+wertText(v)+'</td></tr>').join('')+'</tbody></table></div>';
 }
-function klapp(titel,inhalt,offen){return '<details class="min-w-0"'+(offen?' open':'')+'><summary>'+txt(titel)+CHEV+'</summary><div class="min-w-0">'+inhalt+'</div></details>'}
+// Eingabe und Ausgabe als eigene, abgesetzte Kästen mit farbigem Etikett — wie die Input-/Output-
+// Bereiche in Trace-Ansichten (Langfuse, n8n), statt schlichter Aufklapp-Zeilen.
+function klapp(titel,inhalt,offen){
+  const m=/^(Eingabe|Ausgabe)(?: — )?(.*)$/.exec(titel), art=m?m[1]:'', rest=m?m[2]:titel;
+  const etikett=art?'<span class="badge" data-variant="'+(art==='Eingabe'?'info':'success')+'">'+art+'</span>':'';
+  return '<details class="min-w-0 rounded-lg border bg-background/70"'+(offen?' open':'')+'>'+
+    '<summary class="flex cursor-pointer list-none items-center gap-3 px-4 py-3 font-medium select-none">'+etikett+
+    '<span>'+txt(rest)+'</span><span class="ms-auto">'+CHEVK+'</span></summary>'+
+    '<div class="grid min-w-0 gap-3 border-t p-4">'+inhalt+'</div></details>';
+}
 function schritt(o){
   // Auslöser oben (jeder mit Symbol) und Ende unten (Haken oder Kreuz), mit Luft zum Rand.
   const pille=(sym,t)=>'<div class="flex items-center gap-2 rounded-full border bg-muted px-4 py-2 text-sm font-medium">'+sym+txt(t)+'</div>';
@@ -85,11 +116,11 @@ function schritt(o){
     o.regeln.map(r=>'<tr><td>'+txt(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</tbody></table></div>':'';
   const stand=(o.stand||[]).length?'<p class="text-muted-foreground text-xs">Aktuell: '+o.stand.map(x=>txt(x[0])+' <b>'+txt(x[1])+'</b>').join(' · ')+'</p>':'';
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
-  const klappen=(o.klappen||[]).length?'<div class="accordion min-w-0" data-multiple>'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
+  const klappen=(o.klappen||[]).length?'<div class="grid min-w-0 gap-3">'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
   return '<div class="card bg-muted shadow-md"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-3">'+
-    '<h3 class="flex items-center gap-3 text-base font-semibold">'+badge+txt(o.titel)+'</h3>'+
+    '<h3 class="flex items-center gap-3 text-sm font-semibold">'+badge+txt(o.titel)+'</h3>'+
     '<div class="flex items-center gap-2">'+erg+(o.knopf||'')+'</div></header>'+
-    '<section class="grid min-w-0 gap-4 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
+    '<section class="grid min-w-0 gap-4">'+(o.was?'<p class="text-muted-foreground">'+o.was+'</p>':'')+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
 }
 // Ein Schritt ist ein Container um alles, was zu ihm gehört: aufeinanderfolgende Einträge mit
 // derselben Phase werden zu einem nummerierten Schritt zusammengefasst, darin kleine Pfeile.
@@ -100,7 +131,7 @@ function kette(liste){
   let n=0;
   return gruppen.map(g=>{
     if(!g.phase) return g.teile.map(schritt).join(PFEIL_K);
-    return '<div class="card shadow-md"><header><h2 class="flex items-center gap-3 text-xl font-semibold">'+
+    return '<div class="card shadow-md"><header><h2 class="flex items-center gap-3 text-base font-semibold">'+
       '<span class="text-muted-foreground tabular-nums">'+(++n)+'</span>'+txt(g.phase)+'</h2></header>'+
       '<section class="grid min-w-0">'+g.teile.map(schritt).join(PFEIL_I)+'</section></div>';
   }).join(PFEIL_K);
@@ -238,24 +269,24 @@ async function lauf(doc){
   const L=[{art:'grenze',ausloeser:[[trSym,tr+(t.ts?' · '+t.ts:'')]]}];
   if(t.hinweis) L.push({phase:'Vorbereiten',art:'code',titel:'Hinweis vom Knopf',text:txt(t.hinweis)});
   // Nur Schritte, die in DIESEM Lauf passiert sind: was fehlt, lief nicht.
-  if(o.triggered) L.push({phase:'Text beschaffen',art:'ocr',titel:'Text neu lesen',
+  if(o.triggered) L.push({phase:'Text beschaffen',art:'ocr',titel:'OCR — Text neu erkennen',
     ergebnis:o.triggered?(o.error?'OCR-Fehler':o.verworfen?'OCR verworfen':'OCR gelesen'):'Paperless-Text',
     variante:o.error?'destructive':o.triggered?'info':'success',
     text:txt(o.grund||'')+(o.chars?' · '+o.chars+' Zeichen':'')+(o.verworfen?' · '+txt(o.verworfen):'')+(o.error?' · '+txt(o.error):''),
-    klappen:o.excerpt?[['Ausgabe — gelesener Text','<div class="grid gap-2">'+md(o.excerpt)+'</div>']]:[]});
-  if(t.pass0) L.push({phase:'Absender erkennen',art:'ki',titel:'Pass 0 — Absender',ergebnis:p0.vorschlag||'keiner',
+    klappen:o.excerpt?[['Ausgabe — erkannter Text','<div class="grid gap-2">'+md(o.excerpt)+'</div>']]:[]});
+  if(t.pass0) L.push({phase:'Absender erkennen',art:'ki',titel:'Pass 0 — Absender erkennen',ergebnis:p0.vorschlag||'keiner',
     text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+(p0.kandidaten||[]).map(txt).join(', '),
-    klappen:p0.system?[['Eingabe — Anweisung',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
-  if(t.pass1) L.push({phase:'Analysieren',art:'ki',titel:'Pass 1 — Analyse',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
+    klappen:p0.system?[['Eingabe — Anweisung (System-Prompt)',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
+  if(t.pass1) L.push({phase:'Analysieren',art:'ki',titel:'Pass 1 — Dokument analysieren',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
     text:'Korrespondent: '+txt(r.correspondent||'—')+' · Datum: '+txt(r.document_date||'—')+(r.needs_ocr?' · meldet unlesbaren Text':''),
-    klappen:[['Eingabe — System-Prompt',prosa(p1.system||'—')],['Eingabe — Nachricht',prosa(p1.user||'—')],['Ausgabe',tabelle(r),true]]});
+    klappen:[['Eingabe — Anweisung (System-Prompt)',prosa(p1.system||'—')],['Eingabe — Nachricht',prosa(p1.user||'—')],['Ausgabe',tabelle(r),true]]});
   if(o.nach_pass1) L.push({phase:'Analysieren',art:'entscheidung',titel:'OCR-Nachlauf',ergebnis:o.nachlauf_fehler?'Fehler':o.nachlauf_verworfen?'verworfen':'nachgeholt',
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
   if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',ergebnis:kart+(kname!=='—'?': '+kname:''),
     variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
-    klappen:k.pass2?[['Pass 2 — Eingabe'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Pass 2 — Ausgabe',tabelle(k.pass2.response||{})]]:[]});
+    klappen:k.pass2?[['Eingabe — Pass 2'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Ausgabe — Pass 2',tabelle(k.pass2.response||{})]]:[]});
   const felder=Object.entries(w.fields_ki||{});
   if(t.writeback||t.error) L.push({phase:'Schreiben',art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
@@ -327,52 +358,57 @@ function zeichnen(){
   const o=CFG.ocr_regeln||{}, mz=o.min_zeichen??CFG.ocr_min_len;
   const L=[
     {art:'grenze',ausloeser:[['file-plus','nach dem Import (automatisch)'],['bot','KI-Knopf in Paperless'],['message-square','KI-Knopf mit Hinweis'],['layout-dashboard','Panel'],['list','Bestands-Durchlauf']]},
-    {phase:'Vorbereiten',art:'paperless',titel:'Dokument laden',text:'Titel, Text, Metadaten und Felder aus Paperless.'},
+    {phase:'Vorbereiten',art:'paperless',titel:'Dokument laden',
+      was:'Holt Titel, Text, Metadaten und Felder des Dokuments über die Paperless-API.'},
     {phase:'Vorbereiten',art:'entscheidung',id:'vorpruefung',titel:'Schon klassifiziert?',knopf:knopf('vorpruefung'),
+      was:'Schutz vor doppelter Arbeit: Ein automatischer Lauf bearbeitet jedes Dokument nur einmal.',
       regeln:[['der Klassifizierer ist ausgeschaltet (automatischer Lauf)','Ende'],
-              ['automatischer Lauf und das Dokument trägt den Marker-Tag','Ende — schon klassifiziert (Schleifenschutz)'],
+              ['automatischer Lauf und das Dokument trägt den Marker-Tag','Ende — schon klassifiziert'],
               ['KI-Knopf oder Panel','immer weiter'],['sonst','weiter']],
       stand:[['Klassifizierer',an(CFG.enabled)],['Marker-Tag',CFG.marker_tag]]},
-    {phase:'Text beschaffen',art:'ocr',id:'ocr',titel:'Text neu lesen',knopf:knopf('ocr'),
-      text:'Liest das Dokument mit <b>'+txt(CFG.ocr_model)+'</b> neu und ersetzt den Paperless-Text — aber nur unter diesen Bedingungen:',
-      regeln:[['KI-Knopf in Paperless','lesen'],['„Immer OCR“ ist eingeschaltet','lesen'],
-              ['der Text ist kürzer als '+mz+' Zeichen','lesen'],
-              ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter im Text','lesen'],
-              ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','lesen'],
-              ['sonst','nicht lesen — Paperless-Text verwenden']],
+    {phase:'Text beschaffen',art:'ocr',id:'ocr',titel:'OCR — Text neu erkennen',knopf:knopf('ocr'),
+      was:'Texterkennung: <b>'+txt(CFG.ocr_model)+'</b> liest das PDF neu und ersetzt den Text, den Paperless beim Import erkannt hat. '+
+          'Das lohnt sich nur, wenn dieser Text schlecht ist — sonst bleibt er.',
+      regeln:[['KI-Knopf in Paperless','neu erkennen'],['„Immer OCR“ ist eingeschaltet','neu erkennen'],
+              ['der Text ist kürzer als '+mz+' Zeichen','neu erkennen'],
+              ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter im Text','neu erkennen'],
+              ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','neu erkennen'],
+              ['sonst','Paperless-Text behalten']],
       stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
-      klappen:[['Eingabe','<p>Das Dokument als PDF.</p>'],['Ausgabe','<p>Der Text als Markdown (Überschriften, Tabellen).</p>']]},
+      klappen:[['Eingabe — das Dokument','<p>Die PDF-Datei aus Paperless.</p>'],['Ausgabe — der erkannte Text','<p>Text als Markdown, mit Überschriften und Tabellen.</p>']]},
     {phase:'Absender erkennen',art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
-      text:'Modell <b>'+txt(CFG.model)+'</b>, kurzer Aufruf.',
-      regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, kein KI-Aufruf'],['sonst','KI-Aufruf']],
-      klappen:[['Eingabe — Anweisung',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa('TITEL: <Titel>\n\nINHALT:\n<die ersten 2500 Zeichen>')],
+      was:'Eine kurze KI-Anfrage mit dem Anfang des Textes. Sie nennt nur den Absender, damit Pass 1 die passenden Korrespondenten samt Stammdaten bekommt. Modell <b>'+txt(CFG.model)+'</b>.',
+      regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, keine KI-Anfrage'],['sonst','KI-Anfrage']],
+      klappen:[['Eingabe — Anweisung (System-Prompt)',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa(V.pass0_nachricht||'')],
                ['Ausgabe',tabelle({correspondent:'Name des Absenders oder leer'},['Feld','Bedeutung'])]]},
-    {phase:'Absender erkennen',art:'code',titel:'Kandidaten suchen',text:'Namensabgleich des Absenders gegen alle Korrespondenten (auch Aliase). Die besten gehen samt Kontext an Pass 1.'},
-    {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Analyse',knopf:knopf('pass1'),
-      text:'Modell <b>'+txt(CFG.model)+'</b> · Temperatur '+txt(CFG.temperature)+' · Text bis '+txt(CFG.content_max_len)+' Zeichen.',
-      klappen:[['Eingabe — System-Prompt (bearbeitbar)','<textarea class="textarea max-h-96 w-full font-mono" rows="12" id="prompt-vorlage">'+txt(CFG.system_prompt||'')+'</textarea>'+
-                  '<div class="mt-2 flex items-center gap-2"><button type="button" class="btn" data-size="sm" onclick="promptSpeichern()">Prompt speichern</button>'+
-                  '<span id="prompt-meldung" class="text-muted-foreground text-sm">Leer = eingebauter Prompt. {TYPES} = Dokumenttypen, {TAGBLOCK} = Tag-Liste.</span></div>',true],
-               ['Eingabe — so geht der System-Prompt an die KI',prosa(V.system||'')],
-               ['Eingabe — Nachricht je Dokument',prosa('HINWEIS vom KI-Knopf (falls eingegeben)\nMÖGLICHE KORRESPONDENTEN — die Kandidaten aus Pass 0, je mit Kontext\nMETADATEN: hinzugefügt · Dokumentdatum · Dateiname\nVERFÜGBARE FELDER: '+(V.ki_felder||[]).join(', ')+'\nTITEL\n\nINHALT (bis '+txt(CFG.content_max_len)+' Zeichen)')],
+    {phase:'Absender erkennen',art:'code',titel:'Kandidaten suchen',
+      was:'Ohne KI: Der Absender wird mit allen Korrespondenten in Paperless verglichen, auch mit ihren Aliasen. Die bis zu 8 ähnlichsten gehen mit ihren Stammdaten an Pass 1.'},
+    {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Dokument analysieren',knopf:knopf('pass1'),
+      was:'Die Hauptanfrage: Die KI liest den Text und bestimmt Dokumenttyp, Absender, Datum, Felder, Zusammenfassung und Tags. '+
+          'Modell <b>'+txt(CFG.model)+'</b>, Temperatur '+txt(CFG.temperature)+', Text bis '+txt(CFG.content_max_len)+' Zeichen.',
+      klappen:[['Eingabe — Anweisung (System-Prompt)',promptEditor()],
+               ['Eingabe — Nachricht je Dokument',teileHtml(V.nachricht_teile)],
                ['Ausgabe',tabelle({document_type:'Dokumenttyp aus der Liste, oder leer',correspondent:'Name des Absenders, oder leer',
                   fields:'je Feld: Wert · leer (löschen) · „BEHALTEN“',document_date:'tatsächliches Dokumentdatum (JJJJ-MM-TT)',
                   summary:'kurze Zusammenfassung',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
     {phase:'Analysieren',art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),
-      regeln:[['in diesem Lauf wurde schon per OCR gelesen','weiter — kein zweites OCR'],
+      was:'Meldet die KI unlesbaren Text, wird die OCR nachgeholt und Pass 1 mit dem neuen Text wiederholt — in derselben Unterhaltung.',
+      regeln:[['in diesem Lauf lief die OCR schon','weiter — kein zweites Mal'],
               ['die KI meldet unlesbaren Text','OCR nachholen, Pass 1 wiederholen'],
               ['kein Dokumenttyp erkannt','ebenso (wenn eingeschaltet)'],['kein Korrespondent erkannt','ebenso (wenn eingeschaltet)'],
               ['sonst','weiter']],
       stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
     {phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
-      regeln:[['der Name passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2 — die KI wählt in derselben Unterhaltung einen oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
-      klappen:[['Pass 2 — Eingabe (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa((V.pass2_system||'')+"\nDein vorgeschlagener Absender: <Name>\nBestehende Korrespondenten, die in Frage kommen: <Namen>")],
-               ['Pass 2 — Ausgabe',tabelle({match:'exakter Name aus der Kandidatenliste, oder leer'},['Feld','Bedeutung'])]]},
+      was:'Ordnet den Absender aus Pass 1 einem Korrespondenten in Paperless zu — oder legt einen neuen an.',
+      regeln:[['der Name passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2: Die KI wählt einen davon oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
+      klappen:[['Eingabe — Pass 2 (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa(V.pass2_frage||'')],
+               ['Ausgabe — Pass 2',tabelle({match:'exakter Name aus der Liste, oder leer'},['Feld','Bedeutung'])]]},
     {phase:'Schreiben',art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
-      text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
-      regeln:[['Paperless lehnt einen Wert ab','Selbstkorrektur (mehrere Runden)']]},
+      was:'Schreibt das Ergebnis über die API zurück nach Paperless. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
+      text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.'},
     {phase:'Schreiben',art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
-      text:CFG.nachbearbeitung?'Skript <b>'+txt(CFG.nachbearbeitung)+'</b> bekommt das Ergebnis.':'nicht eingerichtet — nur für Zusatzschritte einer einzelnen Installation, etwa eine Verknüpfung in ein eigenes System'},
+      was:'Optional: Ein eigenes Skript bekommt das Ergebnis, etwa für eine Verknüpfung in ein anderes System.',
+      text:CFG.nachbearbeitung?'Eingerichtet: <b>'+txt(CFG.nachbearbeitung)+'</b>':'Nicht eingerichtet.'},
     {art:'grenze',ende:true,titel:'Ende'}];
   document.getElementById('schritte').innerHTML=kette(L);
 }
@@ -381,9 +417,44 @@ async function laden(){
   try{ V=await holen('/api/prompt-vorschau'); }catch(e){ V={system:'Vorschau nicht verfügbar: '+e.message}; }
   zeichnen();
 }
+// Ein Feld statt zwei: die Anweisung so, wie sie an die KI geht, eingesetzte Werte hinterlegt.
+// „Bearbeiten“ zeigt die Vorlage darüber; jede Änderung rechnet classify.py sofort neu durch.
+function promptEditor(){
+  const pl=Object.entries(V.platzhalter||{}).map(([k,b])=>'<span class="'+MARK+'">{'+txt(k)+'}</span> '+txt(b)).join(' · ');
+  return '<div class="flex flex-wrap items-center gap-2"><span class="text-muted-foreground text-xs">'+
+      (V.eigener_prompt?'Eigener Prompt.':'Eingebauter Prompt.')+' Hinterlegt = wird beim Senden eingesetzt.</span>'+
+      '<button type="button" id="p-auf" class="btn ms-auto" data-variant="outline" data-size="sm" onclick="promptAuf()">'+%STIFT%+'Bearbeiten</button></div>'+
+    '<div id="p-editor" class="grid gap-2" hidden>'+
+      '<textarea class="textarea max-h-96 w-full font-mono" rows="14" id="prompt-vorlage" oninput="promptLive()"></textarea>'+
+      '<p class="text-muted-foreground text-xs">Platzhalter: '+pl+'</p>'+
+      '<div class="flex flex-wrap items-center gap-2"><button type="button" class="btn" data-size="sm" onclick="promptSpeichern()">Speichern</button>'+
+      '<button type="button" class="btn" data-variant="outline" data-size="sm" onclick="promptZu()">Verwerfen</button>'+
+      '<button type="button" class="btn" data-variant="ghost" data-size="sm" onclick="promptStandard()">Eingebauten Prompt einsetzen</button>'+
+      '<span id="prompt-meldung" class="text-muted-foreground text-sm"></span></div></div>'+
+    '<p class="text-muted-foreground text-xs" id="p-titel" hidden>Vorschau — so geht die Anweisung an die KI:</p>'+
+    '<div id="p-vorschau">'+teileHtml(V.system_teile,V.platzhalter)+'</div>';
+}
+function promptAuf(){
+  const t=document.getElementById('prompt-vorlage'); t.value=V.vorlage||'';
+  document.getElementById('p-editor').hidden=false; document.getElementById('p-titel').hidden=false;
+  document.getElementById('p-auf').hidden=true; t.focus();
+}
+function promptZu(){ zeichnen(); }
+function promptStandard(){ const t=document.getElementById('prompt-vorlage'); t.value=V.standard||''; promptLive(); }
+let LIVE=null, LIVE_NR=0;
+function promptLive(){
+  clearTimeout(LIVE); const m=document.getElementById('prompt-meldung'); m.textContent='Vorschau wird gerechnet…';
+  LIVE=setTimeout(async()=>{ const nr=++LIVE_NR;
+    try{ const r=await senden('/api/prompt-vorschau',{system_prompt:document.getElementById('prompt-vorlage').value});
+      if(nr!==LIVE_NR) return;   // eine spätere Eingabe hat schon neu gerechnet
+      document.getElementById('p-vorschau').innerHTML=teileHtml(r.system_teile,r.platzhalter); m.textContent='';
+    }catch(e){ m.textContent='Vorschau fehlgeschlagen: '+e.message; } },500);
+}
 async function promptSpeichern(){
   const m=document.getElementById('prompt-meldung');
-  try{ const d=await senden('/api/config',{system_prompt:document.getElementById('prompt-vorlage').value});
+  let wert=document.getElementById('prompt-vorlage').value;
+  if(wert.trim()===(V.standard||'').trim()) wert='';   // unverändert = eingebauter Prompt, keine Kopie ablegen
+  try{ const d=await senden('/api/config',{system_prompt:wert});
     m.textContent=(d.uebergangen||[]).length?'übergangen: '+d.uebergangen.join(', '):'gespeichert'; await laden();
   }catch(e){ m.textContent='Fehler: '+e.message; }
 }
@@ -588,6 +659,7 @@ def _json(x):
 
 
 _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down")))
+                       .replace("%CHEVK%", _json(symbol("chevron-down", "size-4 shrink-0 text-muted-foreground")))
                        .replace("%PFEILK%", _json('<div class="flex justify-center py-3 text-muted-foreground">'
                                                   + symbol("arrow-down", "size-14") + "</div>"))
                        .replace("%PFEILI%", _json('<div class="flex justify-center py-2 text-muted-foreground">'
