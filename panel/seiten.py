@@ -219,7 +219,7 @@ async function lauf(doc){
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
   L.push({art:'entscheidung',titel:'Korrespondent zuordnen',ergebnis:kart+(kname!=='—'?': '+kname:''),
     variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
-    klappen:k.pass2?[['Pass 2 — Eingabe',prosa((k.pass2.system||'')+'\n\n'+(k.pass2.user||''))],['Pass 2 — Ausgabe',tabelle(k.pass2.response||{})]]:[]});
+    klappen:k.pass2?[['Pass 2 — Eingabe'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Pass 2 — Ausgabe',tabelle(k.pass2.response||{})]]:[]});
   const felder=Object.entries(w.fields_ki||{});
   L.push({art:'paperless',titel:'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
@@ -264,7 +264,7 @@ KNOTEN_FELDER = {
                                                ("reserved_tags", "Reservierte Tags"),
                                                ("summary_field", "Feld für die Zusammenfassung"),
                                                ("unsicher_tag", "Tag bei Unsicherheit")]),
-    "nachbearbeitung": ("Nachbearbeitung", [("nachbearbeitung", "Skript-Pfad")]),
+    "nachbearbeitung": ("Eigenes Skript danach", [("nachbearbeitung", "Skript-Pfad")]),
 }
 
 
@@ -323,14 +323,14 @@ function zeichnen(){
               ['kein Dokumenttyp ('+an(o.wenn_kein_typ)+')','ebenso'],['kein Korrespondent ('+an(o.wenn_kein_korrespondent)+')','ebenso'],
               ['OCR lief schon','kein zweites Mal']]},
     {art:'entscheidung',titel:'Korrespondent zuordnen',
-      regeln:[['Name passt exakt','zuordnen'],['ähnliche Kandidaten','Pass 2: die KI wählt einen oder keinen'],['kein Treffer','neu anlegen']],
-      klappen:[['Pass 2 — Eingabe',prosa((V.pass2_system||'')+"\n\nVorgeschlagener Absender: <Name>\nBestehende Kandidaten: <Namen>")],
+      regeln:[['Name passt exakt','zuordnen'],['ähnliche Kandidaten','Pass 2: dieselbe KI-Unterhaltung wie Pass 1 bekommt die Kandidaten und wählt einen oder keinen'],['kein Treffer','neu anlegen']],
+      klappen:[['Pass 2 — Eingabe (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa((V.pass2_system||'')+"\nDein vorgeschlagener Absender: <Name>\nBestehende Korrespondenten, die in Frage kommen: <Namen>")],
                ['Pass 2 — Ausgabe',tabelle({match:'exakter Name aus der Kandidatenliste, oder leer'},['Feld','Bedeutung'])]]},
     {art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.',
-      regeln:[['Paperless lehnt einen Wert ab','die KI korrigiert in derselben Unterhaltung']]},
-    {art:'code',id:'nachbearbeitung',titel:'Nachbearbeitung',knopf:knopf('nachbearbeitung'),
-      text:CFG.nachbearbeitung?'Skript <b>'+txt(CFG.nachbearbeitung)+'</b> bekommt das Ergebnis.':'keine eingerichtet'},
+      regeln:[['Paperless lehnt einen Wert ab','Selbstkorrektur: die Fehlermeldung geht in dieselbe KI-Unterhaltung, die KI korrigiert, es wird erneut geschrieben (mehrere Runden)']]},
+    {art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
+      text:CFG.nachbearbeitung?'Skript <b>'+txt(CFG.nachbearbeitung)+'</b> bekommt das Ergebnis.':'nicht eingerichtet — nur für Zusatzschritte einer einzelnen Installation, etwa eine Verknüpfung in ein eigenes System'},
     {art:'grenze',titel:'Ende'}];
   document.getElementById('schritte').innerHTML=kette(L);
 }
@@ -478,7 +478,7 @@ EINSTELLUNGEN = {
                         "Custom Field mit der Absenderadresse; hilft, den Korrespondenten über die Domain zu finden. Leer = aus."),
     "korrespondent_beispiele": ("Korrespondenten", "Beispielpaare für den Abgleich",
                                 "Paare [\"falsch geschrieben\", \"richtiger Name\"] — helfen der KI bei OCR-Fehlern im Absender."),
-    "nachbearbeitung": ("Erweitert", "Nachbearbeitung (Skript)",
+    "nachbearbeitung": ("Erweitert", "Eigenes Skript danach",
                         "Pfad zu einem Skript, das nach dem Schreiben läuft — für alles, was nur diese Installation braucht. Leer = aus."),
 }
 

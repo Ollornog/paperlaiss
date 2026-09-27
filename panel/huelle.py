@@ -116,10 +116,12 @@ def kopf(titel: str, beschreibung: str = "", aktionen: str = "") -> str:
     # Klebt oben im Inhaltsbereich (sticky): Titel und Aktionen wie „Speichern" scrollen nicht mit.
     # -mx-6/-mt-6 + px-6/pt-6 ziehen die Leiste bis an die Ränder der Spur, damit darunter
     # scrollender Inhalt nicht seitlich durchscheint.
-    return (f'<div class="sticky top-0 z-10 -mx-6 -mt-6 mb-6 flex flex-wrap items-end justify-between gap-3 '
-            f'border-b bg-background px-6 pt-6 pb-4">'
+    return (f'<div class="sticky top-0 z-10 -mx-6 -mt-6 flex flex-wrap items-end justify-between gap-3 '
+            f'border-b bg-background px-6 py-6">'
             f'<div><h1 class="text-xl font-semibold tracking-tight">{e(titel)}</h1>{text}</div>'
-            f'<div class="flex flex-wrap items-center gap-2">{aktionen}</div></div>')
+            f'<div class="flex flex-wrap items-center gap-2">{aktionen}</div></div>'
+            # Luft unter der Linie: Abstandshalter statt mb-8 — das steht nicht im C22-Pack.
+            f'<div class="h-8" aria-hidden="true"></div>')
 
 
 def abschnitt(titel: str, koerper: str, aktionen: str = "", kennung: str = "") -> str:

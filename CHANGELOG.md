@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Korrespondent zuordnen (Pass 2) in derselben KI-Unterhaltung wie Pass 1
+
+- Pass 2 ist kein eigener Aufruf mit nur dem Namen mehr, sondern eine weitere Nachricht in der
+  Pass-1-Unterhaltung: die KI sieht dabei das ganze Dokument und ihre eigene Analyse
+  (`pass2_frage()`). Die Schnittstelle hat kein Gedächtnis — der Verlauf wird mitgeschickt, wie
+  schon beim OCR-Nachlauf und der Selbstkorrektur. Test belegt die Verdrahtung (Mutation rot).
+- Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
+  Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.
+
 ### Hinzugefügt — Stammdaten der Korrespondenten im Paperless-Dialog
 
 - Das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten den Abschnitt *paperlaiss*

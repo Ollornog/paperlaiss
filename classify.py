@@ -686,6 +686,15 @@ PASS2_SYSTEM = ('Du ordnest einen Absender bestehenden Korrespondenten zu. '
                 'Antworte NUR JSON {"match": <exakter Name aus der Liste> ODER null}.')
 
 
+def pass2_frage(name, kandidaten, beispiele=""):
+    """Die Zuordnungsfrage, die an die Pass-1-Unterhaltung angehängt wird."""
+    return (f"{PASS2_SYSTEM}\nDein vorgeschlagener Absender: '{name}'.\n"
+            f"Bestehende Korrespondenten, die in Frage kommen: {kandidaten}.\n"
+            "Welcher bezeichnet DIESELBE Firma/Behörde/Person wie im Dokument oben? Rechtsform/Zusätze "
+            f"(GmbH/AG/OG) egal; auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{beispiele}. "
+            "Nur bei echter Übereinstimmung, sonst null.")
+
+
 def reservierte_tags(cfg):
     """Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (normalisiert):
     die konfigurierten plus Marker-, Unsicher- und Ausloeser-Tag."""
@@ -976,14 +985,16 @@ def main():
         else:
             cands = [c for s, c in scored[:20] if s >= 0.28]
             if cands:
-                p2_sys = PASS2_SYSTEM
+                # Pass 2 als weitere Nachricht in DERSELBEN Unterhaltung wie Pass 1: die KI sieht
+                # dabei das ganze Dokument und ihre eigene Analyse, nicht nur einen Namen. (Bis
+                # 2026-09-27 ein eigener Aufruf mit nur dem Namen.) Die Schnittstelle hat kein
+                # Gedächtnis — „dieselbe Unterhaltung" heißt: der Verlauf wird mitgeschickt.
                 bsp_txt = beispiel_text(CFG["korrespondent_beispiele"])
-                p2_usr = (f"Vorgeschlagener Absender: '{corr_name}'.\nBestehende Kandidaten: {[c['name'] for c in cands]}.\n"
-                          "Welcher bezeichnet DIESELBE Firma/Behörde/Person? Rechtsform/Zusätze (GmbH/AG/OG) egal; "
-                          f"auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{bsp_txt}. "
-                          "Nur bei echter Übereinstimmung, sonst null.")
-                pick = mistral(p2_sys, p2_usr, 200)
-                pass2 = {"system": p2_sys, "user": p2_usr, "response": pick}
+                p2_usr = pass2_frage(corr_name, [c["name"] for c in cands], bsp_txt)
+                messages.append({"role": "assistant", "content": assistant_raw})
+                messages.append({"role": "user", "content": p2_usr})
+                pick, assistant_raw = mistral_chat(messages, 200)
+                pass2 = {"user": p2_usr, "response": pick, "im_gespraech": True}
                 m = pick.get("match")
                 if m:
                     for c in cands:

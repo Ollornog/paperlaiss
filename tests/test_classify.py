@@ -88,12 +88,12 @@ r.check("Typ: gleich oder nichts erkannt → nichts schreiben",
 import contextlib as _ctx, io as _io
 
 
-def _lauf(chat_antworten, force_ocr=False, text=_gut):
+def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=()):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
                                 "custom_fields": [], "created": "2026-01-01"},
               "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}]},
-              "/correspondents/": {"results": []}, "/custom_fields/": {"results": []}}
+              "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": []}}
 
     def get(pfad, raw=False):
         return next(v for k, v in routen.items() if pfad.startswith(k))
@@ -105,6 +105,7 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut):
 
     def chat(messages, max_tokens=900):
         aufrufe["chat"].append(messages[-1]["content"])
+        aufrufe.setdefault("laengen", []).append(len(messages))
         aufrufe.setdefault("system", messages[0]["content"])
         return dict(antworten.pop(0)), "{}"
     alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR")}
@@ -133,6 +134,13 @@ r.check("Verdrahtung: alles lesbar → kein OCR", _b["ocr"] == 0 and len(_b["cha
 _c = _lauf([{**_ok, "needs_ocr": True}], force_ocr=True)
 r.check("Verdrahtung: OCR lief schon vor Pass 1 → kein zweites Mal", _c["ocr"] == 1 and len(_c["chat"]) == 1,
         f"ocr={_c['ocr']} chat={len(_c['chat'])}")
+
+# Pass 2 hängt an die Pass-1-Unterhaltung an: die KI sieht das Dokument, nicht nur den Namen.
+_e = _lauf([{**_ok, "correspondent": "Mustr Autoteile"}, {"match": "Muster Autoteile GmbH"}],
+           korrespondenten=[{"id": 7, "name": "Muster Autoteile GmbH"}, {"id": 8, "name": "Anderes Haus"}])
+r.check("Pass 2: zweiter Aufruf in derselben Unterhaltung (Dokument + Analyse + Frage)",
+        len(_e["chat"]) == 2 and _e["laengen"] == [2, 4] and "Muster Autoteile GmbH" in _e["chat"][1],
+        f"{len(_e['chat'])} Aufrufe, Längen {_e.get('laengen')}")
 
 # Die Vorschau im Panel muss GENAU den Prompt zeigen, den die KI bekommt — nicht einen Nachbau.
 _alt_get = classify.get
