@@ -53,7 +53,22 @@ function md(roh){
 _JS_SCHRITTE = r"""
 const CHEV=%CHEV%, PFEIL_K=%PFEILK%;
 const ART={paperless:['Paperless','info'],code:['Schritt','secondary'],ki:['KI',''],entscheidung:['Entscheidung','outline'],grenze:['','']};
-function code(v){return '<pre class="code-block max-h-96 w-full overflow-auto"><code>'+txt(typeof v==='string'?v:JSON.stringify(v,null,2))+'</code></pre>'}
+// Lesbar statt Code: Text mit Absätzen und Zeilenumbrüchen in normaler Schrift, Objekte als Tabelle.
+function prosa(t){
+  const abs=String(t||'').trim().split(/\n\s*\n/).map(a=>'<p>'+txt(a).replace(/\n/g,'<br>')+'</p>').join('');
+  return '<div class="grid max-h-96 gap-2 overflow-y-auto rounded-md border bg-muted/40 p-3 leading-relaxed">'+(abs||'<p>—</p>')+'</div>';
+}
+function wertText(v){ if(v===null||v===undefined) return '<span class="text-muted-foreground">leer</span>';
+  if(Array.isArray(v)) return v.length?v.map(x=>txt(typeof x==='object'?JSON.stringify(x):x)).join(', '):'<span class="text-muted-foreground">keine</span>';
+  if(typeof v==='object') return txt(JSON.stringify(v)); if(typeof v==='boolean') return v?'ja':'nein'; return txt(v); }
+function tabelle(obj,kopf){
+  const zeilen=[]; const rein=(o,vor)=>{ for(const [k,v] of Object.entries(o||{})){
+      if(v&&typeof v==='object'&&!Array.isArray(v)) rein(v,vor+k+' · '); else zeilen.push([vor+k,v]); } };
+  rein(obj,'');
+  if(!zeilen.length) return '<p class="text-muted-foreground">—</p>';
+  return '<div class="overflow-x-auto"><table class="table"><thead><tr><th>'+txt((kopf||['Feld','Wert'])[0])+'</th><th>'+txt((kopf||['Feld','Wert'])[1])+'</th></tr></thead><tbody>'+
+    zeilen.map(([k,v])=>'<tr><td class="whitespace-nowrap font-medium">'+txt(k)+'</td><td>'+wertText(v)+'</td></tr>').join('')+'</tbody></table></div>';
+}
 function klapp(titel,inhalt,offen){return '<details class="min-w-0"'+(offen?' open':'')+'><summary>'+txt(titel)+CHEV+'</summary><div class="min-w-0">'+inhalt+'</div></details>'}
 function schritt(o){
   if(o.art==='grenze') return '<div class="mx-auto w-fit rounded-full border bg-muted/40 px-6 py-2 text-center text-sm font-medium">'+txt(o.titel)+'</div>';
@@ -194,21 +209,21 @@ async function lauf(doc){
     klappen:o.excerpt?[['Ausgabe — gelesener Text','<div class="grid gap-2">'+md(o.excerpt)+'</div>']]:[]});
   if(t.pass0) L.push({art:'ki',titel:'Pass 0 — Absender',ergebnis:p0.vorschlag||'keiner',
     text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+(p0.kandidaten||[]).map(txt).join(', '),
-    klappen:p0.system?[['Eingabe — System',code(p0.system)],['Eingabe — Nachricht',code(p0.user||'')],['Ausgabe',code(p0.response||{})]]:[]});
+    klappen:p0.system?[['Eingabe — Anweisung',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
   L.push({art:'ki',titel:'Pass 1 — Analyse',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
     text:'Korrespondent: '+txt(r.correspondent||'—')+' · Datum: '+txt(r.document_date||'—')+(r.needs_ocr?' · meldet unlesbaren Text':''),
-    klappen:[['Eingabe — System-Prompt',code(p1.system||'—')],['Eingabe — Nachricht',code(p1.user||'—')],['Ausgabe',code(r),true]]});
+    klappen:[['Eingabe — System-Prompt',prosa(p1.system||'—')],['Eingabe — Nachricht',prosa(p1.user||'—')],['Ausgabe',tabelle(r),true]]});
   if(o.nach_pass1) L.push({art:'entscheidung',titel:'OCR-Nachlauf',ergebnis:o.nachlauf_fehler?'Fehler':o.nachlauf_verworfen?'verworfen':'nachgeholt',
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
   L.push({art:'entscheidung',titel:'Korrespondent zuordnen',ergebnis:kart+(kname!=='—'?': '+kname:''),
     variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
-    klappen:k.pass2?[['Pass 2 — Eingabe',code((k.pass2.system||'')+'\n\n'+(k.pass2.user||''))],['Pass 2 — Ausgabe',code(k.pass2.response||{})]]:[]});
+    klappen:k.pass2?[['Pass 2 — Eingabe',prosa((k.pass2.system||'')+'\n\n'+(k.pass2.user||''))],['Pass 2 — Ausgabe',tabelle(k.pass2.response||{})]]:[]});
   const felder=Object.entries(w.fields_ki||{});
   L.push({art:'paperless',titel:'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
-    klappen:[['Ausgabe — geschrieben',code(w)]]});
+    klappen:[['Ausgabe — geschrieben',tabelle(w)]]});
   L.push({art:'grenze',titel:'Ende'});
   ziel.innerHTML=kette(L);
 }
@@ -290,27 +305,27 @@ function zeichnen(){
     {art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
       text:'Modell <b>'+txt(CFG.model)+'</b>, kurzer Aufruf.',
       regeln:[['Absender-Mail passt zu einer bekannten Domain','Aufruf entfällt']],
-      klappen:[['Eingabe — System',code(V.pass0_system||'')],['Eingabe — Nachricht',code('TITEL: <Titel>\n\nINHALT:\n<die ersten 2500 Zeichen>')],
-               ['Ausgabe',code('{"correspondent": "<Name des Absenders> oder null"}')]]},
+      klappen:[['Eingabe — Anweisung',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa('TITEL: <Titel>\n\nINHALT:\n<die ersten 2500 Zeichen>')],
+               ['Ausgabe',tabelle({correspondent:'Name des Absenders oder leer'},['Feld','Bedeutung'])]]},
     {art:'code',titel:'Kandidaten suchen',text:'Namensabgleich des Absenders gegen alle Korrespondenten (auch Aliase). Die besten gehen samt Kontext an Pass 1.'},
     {art:'ki',id:'pass1',titel:'Pass 1 — Analyse',knopf:knopf('pass1'),
       text:'Modell <b>'+txt(CFG.model)+'</b> · Temperatur '+txt(CFG.temperature)+' · Text bis '+txt(CFG.content_max_len)+' Zeichen.',
       klappen:[['Eingabe — System-Prompt (bearbeitbar)','<textarea class="textarea max-h-96 w-full font-mono" rows="12" id="prompt-vorlage">'+txt(CFG.system_prompt||'')+'</textarea>'+
                   '<div class="mt-2 flex items-center gap-2"><button type="button" class="btn" data-size="sm" onclick="promptSpeichern()">Prompt speichern</button>'+
                   '<span id="prompt-meldung" class="text-muted-foreground text-sm">Leer = eingebauter Prompt. {TYPES} = Dokumenttypen, {TAGBLOCK} = Tag-Liste.</span></div>',true],
-               ['Eingabe — so geht der System-Prompt an die KI',code(V.system||'')],
-               ['Eingabe — Nachricht je Dokument',code('[HINWEIS vom KI-Knopf, falls eingegeben]\n[MÖGLICHE KORRESPONDENTEN — Kandidaten mit Kontext]\nMETADATEN: hinzugefügt · Dokumentdatum · Dateiname\nVERFÜGBARE FELDER: '+(V.ki_felder||[]).join(', ')+'\nTITEL: …\n\nINHALT:\n…')],
-               ['Ausgabe',code({document_type:'<Typ aus der Liste> oder null',correspondent:'<Name> oder null',
-                  fields:{'<Feld>':'<Wert> | null (leeren) | "BEHALTEN"'},document_date:'JJJJ-MM-TT oder null',
-                  summary:'<Zusammenfassung>',tags:['<Tag>'],needs_ocr:'true, wenn der Text unlesbar ist'})]]},
+               ['Eingabe — so geht der System-Prompt an die KI',prosa(V.system||'')],
+               ['Eingabe — Nachricht je Dokument',prosa('HINWEIS vom KI-Knopf (falls eingegeben)\nMÖGLICHE KORRESPONDENTEN — die Kandidaten aus Pass 0, je mit Kontext\nMETADATEN: hinzugefügt · Dokumentdatum · Dateiname\nVERFÜGBARE FELDER: '+(V.ki_felder||[]).join(', ')+'\nTITEL\n\nINHALT (bis '+txt(CFG.content_max_len)+' Zeichen)')],
+               ['Ausgabe',tabelle({document_type:'Dokumenttyp aus der Liste, oder leer',correspondent:'Name des Absenders, oder leer',
+                  fields:'je Feld: Wert · leer (löschen) · „BEHALTEN“',document_date:'tatsächliches Dokumentdatum (JJJJ-MM-TT)',
+                  summary:'kurze Zusammenfassung',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
     {art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),
       regeln:[['KI meldet unlesbaren Text ('+an(o.nach_ki_meldung)+')','OCR nachholen, Pass 1 wiederholen'],
               ['kein Dokumenttyp ('+an(o.wenn_kein_typ)+')','ebenso'],['kein Korrespondent ('+an(o.wenn_kein_korrespondent)+')','ebenso'],
               ['OCR lief schon','kein zweites Mal']]},
     {art:'entscheidung',titel:'Korrespondent zuordnen',
       regeln:[['Name passt exakt','zuordnen'],['ähnliche Kandidaten','Pass 2: die KI wählt einen oder keinen'],['kein Treffer','neu anlegen']],
-      klappen:[['Pass 2 — Eingabe',code((V.pass2_system||'')+"\n\nVorgeschlagener Absender: '<Name>'.\nBestehende Kandidaten: [<Namen>]. …")],
-               ['Pass 2 — Ausgabe',code('{"match": "<exakter Name aus der Liste> oder null"}')]]},
+      klappen:[['Pass 2 — Eingabe',prosa((V.pass2_system||'')+"\n\nVorgeschlagener Absender: <Name>\nBestehende Kandidaten: <Namen>")],
+               ['Pass 2 — Ausgabe',tabelle({match:'exakter Name aus der Kandidatenliste, oder leer'},['Feld','Bedeutung'])]]},
     {art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.',
       regeln:[['Paperless lehnt einen Wert ab','die KI korrigiert in derselben Unterhaltung']]},
