@@ -104,7 +104,7 @@ _log = [
     "2026-09-02 09:01:00 OK 4 | x",
     "kaputte Zeile ohne Datum",
 ]
-_v = kern.verlauf(_log)
+_v = [t for t in kern.verlauf(_log) if not t.get("vor_beginn")]
 r.check("verlauf: ein Eintrag je Tag", len(_v) == 2)
 r.check("verlauf: zählt je Art", _v[0]["tag"] == "2026-09-01" and _v[0]["klassifiziert"] == 2
         and _v[0]["ocr"] == 1)
@@ -115,11 +115,25 @@ r.check("verlauf: schneidet auf die gewünschte Anzahl Tage",
         len(kern.verlauf(_log, tage=1)) == 1)
 
 # Lücken gehören dazu — "seit drei Wochen läuft nichts" sieht man nur mit leeren Tagen.
-_luecke = kern.verlauf(["2026-09-01 10:00:00 OK 1 | x", "2026-09-05 10:00:00 OK 2 | x"])
+_luecke = [t for t in kern.verlauf(["2026-09-01 10:00:00 OK 1 | x", "2026-09-05 10:00:00 OK 2 | x"])
+           if not t.get("vor_beginn")]
 r.check("verlauf: Lücken werden aufgefüllt", len(_luecke) == 5)
 r.check("verlauf: leere Tage sind leer, nicht erfunden",
         _luecke[1] == {"tag": "2026-09-02"} and _luecke[0]["klassifiziert"] == 1)
-r.check("verlauf: beginnt nicht vor dem ersten Ereignis", _luecke[0]["tag"] == "2026-09-01")
+r.check("verlauf: ab der ersten Logzeile ohne vor_beginn", _luecke[0]["tag"] == "2026-09-01")
+# Volles Fenster auch bei frischer Installation (PO 2026-09-27: „nur ein Tag statt vieler“).
+_frisch = kern.verlauf(["2026-09-27 04:51:34 OK 1 | x"], tage=60, heute="2026-09-27")
+r.check("verlauf: frische Installation — trotzdem 60 Tage bis heute, davor vor_beginn",
+        len(_frisch) == 60 and _frisch[0] == {"tag": "2026-07-30", "vor_beginn": True}
+        and _frisch[-1] == {"tag": "2026-09-27", "klassifiziert": 1}
+        and sum(1 for t in _frisch if t.get("vor_beginn")) == 59, str(_frisch[:2] + _frisch[-1:]))
+_still = kern.verlauf(["2026-09-20 10:00:00 OK 1 | x"], tage=10, heute="2026-09-27")
+r.check("verlauf: Fenster endet heute, auch wenn seitdem nichts lief (leere Tage, nicht vor_beginn)",
+        _still[-1] == {"tag": "2026-09-27"} and _still[-8] == {"tag": "2026-09-20", "klassifiziert": 1}
+        and _still[0] == {"tag": "2026-09-18", "vor_beginn": True}, str(_still))
+r.check("verlauf: leeres Log mit heute — Fenster ganz vor_beginn",
+        len(kern.verlauf([], tage=3, heute="2026-09-27")) == 3
+        and all(t.get("vor_beginn") for t in kern.verlauf([], tage=3, heute="2026-09-27")))
 
 # ---- auffaelligkeiten(): was ist inzwischen gelöst?
 _a = kern.auffaelligkeiten(_log)

@@ -162,9 +162,11 @@ def verlauf(zeilen, tage=30, heute=None):
     Erwartet Logzeilen der Form "JJJJ-MM-TT HH:MM:SS <text>". Zeilen ohne Datum werden
     uebergangen; ein unlesbares Log soll keine Auswertung sprengen.
 
-    `heute` ist ein Datum als Text (JJJJ-MM-TT) und wird nur zum Abschneiden gebraucht —
-    ohne Angabe wird der spaeteste im Log gefundene Tag genommen. So bleibt die Funktion
-    ohne Uhr testbar und liefert bei einem alten Log trotzdem etwas Sinnvolles.
+    Das Fenster sind immer `tage` Tage bis `heute` (Datum als Text, JJJJ-MM-TT; ohne Angabe der
+    spaeteste Tag im Log — so bleibt die Funktion ohne Uhr testbar). Tage vor der ersten Logzeile
+    tragen `vor_beginn`: dort gab es noch keine Aufzeichnung, das ist etwas anderes als „nichts
+    lief“. Bis 2026-09-27 begann der Verlauf erst mit der ersten Logzeile — bei einer frischen
+    Installation war er ein einziger Balken über die ganze Breite (PO).
     """
     proTag = {}
     for zeile in zeilen or []:
@@ -176,7 +178,7 @@ def verlauf(zeilen, tage=30, heute=None):
             continue
         proTag.setdefault(tag, {}).setdefault(art, 0)
         proTag[tag][art] += 1
-    if not proTag:
+    if not proTag and not heute:
         return []
     letzter = heute or max(proTag)
     # Luecken auffuellen: ein Verlauf ohne leere Tage ist eine Liste, keine Kurve. Gerade die
@@ -185,13 +187,14 @@ def verlauf(zeilen, tage=30, heute=None):
     import datetime as _dt
     ende = _dt.date.fromisoformat(letzter)
     start = ende - _dt.timedelta(days=tage - 1)
-    frueheste = _dt.date.fromisoformat(min(proTag))
-    if frueheste > start:
-        start = frueheste
+    beginn = min(proTag) if proTag else None
     out, tag = [], start
     while tag <= ende:
         schluessel = tag.isoformat()
-        out.append({"tag": schluessel, **proTag.get(schluessel, {})})
+        if beginn is None or schluessel < beginn:
+            out.append({"tag": schluessel, "vor_beginn": True})
+        else:
+            out.append({"tag": schluessel, **proTag.get(schluessel, {})})
         tag += _dt.timedelta(days=1)
     return out
 

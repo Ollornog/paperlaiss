@@ -258,6 +258,8 @@ async function verlauf(){
   const tage=d.verlauf||[], el=document.getElementById('verlauf');
   const max=Math.max(1,...tage.map(t=>SERIEN.reduce((a,[k])=>a+(t[k]||0),0)));
   const saeulen=tage.map((t,i)=>{
+    // Vor der ersten Logzeile gab es keine Aufzeichnung — leerer Platz, kein Filter.
+    if(t.vor_beginn) return '<span class="flex h-full flex-1" title="'+txt(t.tag+': vor Beginn der Aufzeichnung')+'"></span>';
     const teile=SERIEN.filter(([k])=>t[k]).map(([k,n,c])=>'<div class="'+c+'" style="height:'+(t[k]/max*100)+'%"></div>').join('');
     const summe=SERIEN.reduce((a,[k])=>a+(t[k]||0),0);
     const titel=t.tag+': '+(summe?SERIEN.filter(([k])=>t[k]).map(([k,n])=>n+' '+t[k]).join(', '):'nichts');
@@ -265,8 +267,10 @@ async function verlauf(){
   }).join('');
   const achse=tage.map((t,i)=>'<span class="flex-1 text-center text-muted-foreground text-xs">'+((i%7===0||i===tage.length-1)?t.tag.slice(8)+'.'+t.tag.slice(5,7)+'.':'')+'</span>').join('');
   const legende=SERIEN.map(([k,n,c])=>'<span class="flex items-center gap-1"><span class="size-2 rounded-sm '+c+'"></span>'+n+'</span>').join('');
+  const erster=tage.find(t=>!t.vor_beginn), seit=(erster&&tage[0].vor_beginn)
+    ?'<div class="mt-1 text-center text-muted-foreground text-xs">Aufzeichnung seit '+erster.tag.slice(8)+'.'+erster.tag.slice(5,7)+'.'+erster.tag.slice(0,4)+'</div>':'';
   el.innerHTML='<div class="flex h-40 w-full items-end gap-0.5 border-b">'+saeulen+'</div>'+
-    '<div class="mt-1 flex w-full gap-0.5">'+achse+'</div>'+
+    '<div class="mt-1 flex w-full gap-0.5">'+achse+'</div>'+seit+
     '<div class="mt-3 flex flex-wrap justify-center gap-4 text-muted-foreground text-xs">'+legende+'</div>';
 }
 async function laufend(){
