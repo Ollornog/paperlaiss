@@ -65,38 +65,96 @@
     if (art === "success") setTimeout(() => el.remove(), 5000);
   }
 
+  // Fortschrittskarte unten rechts: Spinner, aktueller Schritt, Balken. Der Prozentwert kommt vom
+  // Panel und schätzt nach der Reihenfolge der Schritte — keine gemessene Restzeit.
+  function fortschritt(titel, schritt, prozent) {
+    meldung("", "info");
+    const el = document.getElementById(MARKE + "-meldung");
+    el.innerHTML =
+      '<div class="d-flex align-items-center gap-2"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span>' +
+      '<strong></strong></div><div class="small mt-1"></div>' +
+      '<div class="progress mt-2" style="height:6px" role="progressbar"><div class="progress-bar progress-bar-striped progress-bar-animated"></div></div>';
+    el.querySelector("strong").textContent = titel;
+    el.querySelector(".small").textContent = schritt;
+    const p = Math.max(3, Math.min(100, Math.round(prozent || 0)));
+    el.querySelector(".progress-bar").style.width = p + "%";
+    el.querySelector(".progress").setAttribute("aria-valuenow", String(p));
+  }
+
+  // Der KI-Knopf der Dokumentansicht: während eines Laufs gesperrt, mit Spinner — ein zweiter Klick
+  // aus Ungeduld startet keinen zweiten Lauf (das Panel lehnt ihn ohnehin ab).
+  const LAUFEND = new Set();
+  function knopfBeschaeftigt(an) {
+    const b = document.querySelector(".btn-group." + MARKE + " button");
+    if (!b) return;
+    b.disabled = an;
+    b.innerHTML = an
+      ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span class="d-none d-lg-inline ps-1">KI arbeitet …</span>'
+      : ICON.ki + '<span class="d-none d-lg-inline ps-1">KI</span>';
+  }
+
+  const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
   // Wartet, bis paperlaiss alle Läufe beendet hat, und lädt dann neu — sonst speichert
   // Paperless beim nächsten „Speichern" seinen alten Stand über das Ergebnis.
   async function warten(ids, text) {
-    for (let i = 0; i < 120; i++) {
-      await new Promise((ok) => setTimeout(ok, 3000));
+    ids.forEach((d) => LAUFEND.add(d));
+    if (ids.includes(dokId())) knopfBeschaeftigt(true);
+    for (let i = 0; i < 300; i++) {
+      await pause(2000);
       let st;
       try { st = await panel("/knopf/status?docs=" + ids.join(",")); } catch (e) { continue; }
-      const offen = ids.filter((d) => ["wartet", "laeuft"].includes(st[d]));
-      const fehler = ids.filter((d) => st[d] === "fehler");
-      meldung(`${text} — ${ids.length - offen.length} von ${ids.length} fertig` +
-              (fehler.length ? `, ${fehler.length} mit Fehler` : "") + " …");
-      if (!offen.length) {
-        meldung(fehler.length ? `paperlaiss: ${fehler.length} Dokument(e) mit Fehler — Protokoll im Panel.`
-                              : "paperlaiss ist fertig — lade neu …", fehler.length ? "warning" : "success");
-        setTimeout(() => location.reload(), fehler.length ? 4000 : 900);
-        return;
+      const e = (d) => st[d] || { status: "unbekannt", schritt: "", prozent: 0 };
+      const offen = ids.filter((d) => ["wartet", "laeuft"].includes(e(d).status));
+      const fehler = ids.filter((d) => e(d).status === "fehler");
+      if (offen.length) {
+        const aktiv = offen.map(e).find((x) => x.status === "laeuft") || e(offen[0]);
+        const prozent = ids.reduce((s, d) => s + (offen.includes(d) ? e(d).prozent || 0 : 100), 0) / ids.length;
+        fortschritt(text, (ids.length > 1 ? `${ids.length - offen.length} von ${ids.length} fertig · ` : "") + aktiv.schritt, prozent);
+        continue;
       }
+      ids.forEach((d) => LAUFEND.delete(d));
+      meldung(fehler.length ? `paperlaiss: ${fehler.length} Dokument(e) mit Fehler — Protokoll im Panel.`
+                            : "paperlaiss ist fertig — lade neu …", fehler.length ? "warning" : "success");
+      setTimeout(() => location.reload(), fehler.length ? 4000 : 900);
+      return;
     }
+    ids.forEach((d) => LAUFEND.delete(d));
+    knopfBeschaeftigt(false);
     meldung("paperlaiss antwortet nicht (Zeitüberschreitung). Panel und Protokoll prüfen.", "warning");
   }
 
   async function ausloesen(ids, hinweis) {
     const text = "paperlaiss klassifiziert neu (mit OCR)";
+    if (ids.includes(dokId())) knopfBeschaeftigt(true);
+    fortschritt(text, "wird gestartet …", 2);
     try {
       const d = await panel("/knopf", { docs: ids, hinweis: hinweis || "" });
-      if (d.verweigert.length) meldung(`paperlaiss: ${d.verweigert.length} Dokument(e) darfst du nicht ändern — übersprungen.`, "warning");
-      if (!d.gestartet.length) return;
-      meldung(text + " …");
-      warten(d.gestartet, text);
+      const schon = d.laeuft_schon || [];
+      const beobachten = d.gestartet.concat(schon);
+      if (!beobachten.length) {
+        knopfBeschaeftigt(false);
+        meldung(d.verweigert.length ? `paperlaiss: ${d.verweigert.length} Dokument(e) darfst du nicht ändern.`
+                                    : "paperlaiss: nichts zu tun.", "warning");
+        return;
+      }
+      warten(beobachten, schon.length && !d.gestartet.length ? "paperlaiss arbeitet bereits daran" :
+        text + (schon.length ? ` — ${schon.length} lief(en) schon` : "") +
+        (d.verweigert.length ? ` — ${d.verweigert.length} ohne Recht übersprungen` : ""));
     } catch (e) {
+      knopfBeschaeftigt(false);
       meldung("paperlaiss: " + e.message, "danger");
     }
+  }
+
+  // Beim Öffnen eines Dokuments: läuft schon ein KI-Lauf (anderer Tab, Seite neu geladen), sofort
+  // sperren und den Fortschritt zeigen, statt einen zweiten Start zu erlauben.
+  async function pruefeLaufend(id) {
+    if (!id || LAUFEND.has(id)) return;
+    try {
+      const st = await panel("/knopf/status?docs=" + id);
+      if (st[id] && ["wartet", "laeuft"].includes(st[id].status)) warten([id], "paperlaiss arbeitet an diesem Dokument");
+    } catch (e) { /* ohne Panel keine Anzeige — der Knopf bleibt benutzbar */ }
   }
 
   function dialogKi(anzahl, weiter) {
@@ -142,6 +200,7 @@
       () => dialogKi(1, (h) => ausloesen([dokId()], h))));
     gruppe.after(g);
     gruppe.style.display = "none";   // Paperless' eigenes „Suggest" — paperlaiss ersetzt es
+    pruefeLaufend(dokId());
   }
 
   // ---------- Mehrfachauswahl: Einträge im Menü „Actions" ----------

@@ -443,3 +443,38 @@ def korr_eintrag(alt, eingabe):
         neu.pop("erfasst", None)
     return neu
 
+
+# ---- KI-Knopf: Sperre gegen Doppelstart und Fortschritt fürs Paperless-Fenster ----
+# Die Schritte meldet classify.py über set_stage() in scripts/running/<id>.json. Der Prozentwert ist
+# eine Schätzung nach der Reihenfolge der Schritte, keine gemessene Restzeit.
+KNOPF_SCHRITTE = (
+    ("OCR-Rescue", "Text per OCR lesen", 15), ("Kandidaten", "Korrespondenten suchen", 30),
+    ("Pass 1", "KI analysiert das Dokument", 50), ("OCR-Nachlauf", "OCR nachholen, erneut analysieren", 60),
+    ("Korrespondent", "Korrespondent zuordnen", 75), ("Tags & Schreiben", "In Paperless schreiben", 90),
+    ("Feld-Korrektur", "Felder korrigieren", 93),
+)
+_KNOPF_AKTIV = ("wartet", "laeuft")
+
+
+def knopf_annehmen(jobs, ids):
+    """(starten, laeuft_schon): ein Dokument, das schon wartet oder läuft, wird nicht noch einmal
+    angenommen — ein zweiter Klick, ein zweiter Tab oder ein Kollege startet sonst einen zweiten Lauf
+    auf dasselbe Dokument, und der spätere überschreibt den früheren."""
+    starten, schon = [], []
+    for d in ids:
+        (schon if (jobs.get(d) or {}).get("status") in _KNOPF_AKTIV else starten).append(d)
+    return starten, schon
+
+
+def knopf_fortschritt(status, stufe=None):
+    """{"status", "schritt", "prozent"} für die Anzeige in Paperless."""
+    if status == "wartet":
+        return {"status": status, "schritt": "wartet auf einen freien Platz", "prozent": 3}
+    if status == "laeuft":
+        for name, text, prozent in KNOPF_SCHRITTE:
+            if stufe and str(stufe).startswith(name):
+                return {"status": status, "schritt": text, "prozent": prozent}
+        return {"status": status, "schritt": "startet", "prozent": 8}
+    if status == "fertig":
+        return {"status": status, "schritt": "fertig", "prozent": 100}
+    return {"status": status, "schritt": status, "prozent": 100 if status == "fehler" else 0}

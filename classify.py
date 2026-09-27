@@ -993,6 +993,12 @@ def baue_system_teile(tpl, types, taglines):
     return teile
 
 
+def korrespondent_behalten(bisher, ki_meldet_unlesbar, hinweis):
+    """Den bisherigen Korrespondenten stehen lassen, statt einen neuen anzulegen? Nur wenn es einen
+    gibt, die KI den Text als unlesbar meldet und kein Hinweis vorliegt."""
+    return bool(bisher) and bool(ki_meldet_unlesbar) and not (hinweis or "").strip()
+
+
 def typ_ueberschreibbar(source, force):
     """Darf dieser Lauf einen schon gesetzten Dokumenttyp ersetzen? Siehe typ_setzen().
 
@@ -1435,7 +1441,13 @@ def main():
                         if norm(c["name"]) == norm(m):
                             corr_id = c["id"]; corr_info = f"gewählt='{c['name']}'"; break
             if corr_id is None:
-                if doc.get("correspondent") and bad_ocr(content):   # kein Halluzinat bei Müll-Text
+                # Kein erfundener Absender aus Zeichensalat: den bisherigen Korrespondenten nur
+                # behalten, wenn die KI den Text SELBST als unlesbar meldet — sie hat ihn gelesen —
+                # und niemand per Hinweis gesagt hat, wer es ist. Bis 2026-09-27 entschied das die
+                # Faustregel bad_ocr() (Länge, Wortanteil): ein kurzer, frisch per OCR gelesener
+                # Beleg (576 Zeichen) galt als „unsicher", der richtig erkannte neue Absender
+                # wurde nicht angelegt — auch nicht mit ausdrücklichem Hinweis.
+                if korrespondent_behalten(doc.get("correspondent"), prop.get("needs_ocr"), hinweis):
                     corr_id = doc["correspondent"]; corr_info = "bestehenden behalten (Text unsicher)"
                 elif DRY:
                     corr_info = f"NEU='{corr_name}' (dry)"

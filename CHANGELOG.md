@@ -6,6 +6,23 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — neuer Absender auf kurzem Beleg; Hinzugefügt — KI-Knopf mit Fortschritt und Sperre
+
+- **Neuer Korrespondent wurde nicht angelegt:** Die KI erkannte auf einem kurzen, frisch per OCR
+  gelesenen Beleg den Absender richtig; weil kein bestehender passte, hätte er angelegt werden
+  müssen. Stattdessen blieb der bisherige stehen — die Faustregel `bad_ocr()` (Länge, Wortanteil)
+  hielt den 576-Zeichen-Text für unsicher, auch mit ausdrücklichem Hinweis. Jetzt entscheidet das
+  Urteil der KI: Der bisherige bleibt nur, wenn sie den Text selbst als unlesbar meldet und kein
+  Hinweis vorliegt (`korrespondent_behalten`). Test mit echtem Lauf, Mutation auf die alte Regel rot.
+- **KI-Knopf: kein Doppelstart.** Ein Dokument, das schon wartet oder läuft, nimmt das Panel nicht
+  noch einmal an (`laeuft_schon`), geprüft und belegt unter derselben Sperre — auch über mehrere Tabs
+  oder Nutzer. In Paperless ist der Knopf während des Laufs gesperrt und zeigt einen Spinner.
+- **Fortschritt:** Unten rechts eine Karte mit Spinner, aktuellem Schritt („Text per OCR lesen",
+  „KI analysiert das Dokument" …) und Balken; `/knopf/status` liefert dafür je Dokument Status,
+  Schritt und einen geschätzten Prozentwert aus den Schritten, die `classify.py` meldet. Wird die
+  Seite während eines Laufs neu geladen, erkennt sie ihn und zeigt ihn weiter an. Ein Wächter-Test
+  wird rot, sobald `classify.py` einen Schritt meldet, den die Anzeige nicht kennt.
+
 ### Hinzugefügt — Export-Knopf in Paperless (ein PDF oder einzeln, mit Inhaltsverzeichnis)
 
 - Neuer Eintrag **„Export"** im Menü „Actions" der Mehrfachauswahl, neben „KI". Der Dialog bietet
