@@ -45,6 +45,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   entstehen dafür in `classify.py` aus Stücken (`baue_system_teile`, `pass1_system_teile`,
   `pass1_nachricht_teile`, `pass0_nachricht`); der Lauf fügt sie zusammen, ein Test vergleicht
   Zeichen für Zeichen mit der bisherigen Nachricht (Mutation rot).
+- Pass 1: Die Kandidatenliste ist ein Angebot, keine Pflicht. Bisher hieß es „wähle GENAU einen
+  dieser Namen; nur wenn wirklich keiner passt einen neuen" — das drängte die KI zur Liste, und ein
+  ähnlicher, aber falscher Name wurde exakt übernommen und direkt zugeordnet (Pass 2 prüft nur
+  Namen, die nicht exakt passen). Jetzt: passt einer, seinen Namen exakt übernehmen; sonst den
+  tatsächlichen Absender nennen.
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
   Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.

@@ -770,8 +770,11 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
     return teile
 
 
-KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; "
-             "nur wenn wirklich keiner passt einen neuen):")
+# Bis 2026-09-27: „wähle GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen“ —
+# das drängte die KI zur Liste. Ein ähnlicher, aber falscher Name wurde dann exakt übernommen und
+# direkt zugeordnet (Pass 2 prüft nur Namen, die NICHT exakt passen). Jetzt: Angebot, keine Pflicht.
+KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, "
+             "übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):")
 
 
 def pass0_nachricht(mail_ktx, title, content):

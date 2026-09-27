@@ -177,7 +177,7 @@ def _alte_nachricht(hinweis, cname, chint, kand_lines, mail_ktx, added, created,
     _NL = "\n"
     hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
     corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
-    kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand_lines else "")
+    kand_block = (("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):" + _NL + kand_lines + _NL + _NL) if kand_lines else "")
     mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
     meta = (f"METADATEN:\n- Hinzugefügt am: {added}\n- Aktuelles Dokumentdatum (evtl. falsch): {created}\n"
             f"- Originaldateiname: {fname}\n")
@@ -189,6 +189,8 @@ for _args in [("Bitte Typ Mahnung", "Firma A", "zahlt immer spät", "- Firma A\n
               ("", None, "", "", "", "2026-01-02", "", "—", "", "", "Inhalt")]:
     r.check("Pass-1-Nachricht aus Stücken = bisherige Nachricht" + (" (mit allen Blöcken)" if _args[0] else " (ohne Zusatzblöcke)"),
             "".join(t for t, _, _ in classify.pass1_nachricht_teile(*_args)) == _alte_nachricht(*_args))
+r.check("Kandidatenliste ist ein Angebot, keine Pflicht (kein „GENAU einen dieser Namen“)",
+        "GENAU einen" not in classify.KAND_KOPF and "tatsächlichen Absender" in classify.KAND_KOPF)
 r.check("Verdrahtung: der Lauf schickt die aus Stücken gebaute Nachricht",
         _b["chat"][0].startswith("METADATEN:") and "VERFÜGBARE FELDER" in _b["chat"][0] and "\nINHALT:\n" in _b["chat"][0])
 
