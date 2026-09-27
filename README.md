@@ -211,6 +211,21 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   links; unset: the address of the Paperless page that called, same origin only). Times follow
   `PAPERLESS_TIME_ZONE`, otherwise `TZ`. The panel must run as a single process (jobs live in memory).
 
+### Mails as documents with header and large images (optional)
+
+`deploy/mail-pdf/mailbilder.py` is a pre-consume script (`PAPERLESS_PRE_CONSUME_SCRIPT`, stdlib only)
+for mail rules that consume the **whole mail** (`.eml`, PDF layout "HTML only"). Before Paperless
+renders the mail it adds a small header (from, to, date, subject) and one full-size page per image
+in the mail — photos and scans, not logos, banners or social icons (judged by size, aspect ratio and
+name; measured against a real mailbox: 2 of 37 inline images kept, all logos dropped). Images in
+the mail body are shown as a preview; every part gets a Content-ID so Paperless can resolve `cid:`
+links. Other files are left untouched, and the script always exits 0 — it never blocks an import.
+
+A setup that never loses an attachment and never files a logo on its own: rule 1 consumes real
+attachments (all types), rule 2 inline PDFs (`attachment type: everything`, include `*.pdf`), rule 3
+the whole mail for everything the first two did not take. Paperless skips a mail in later rules once
+an earlier rule consumed it in the same run.
+
 ## Configuration (`classify-config.json`)
 
 | Key | Default | Meaning |

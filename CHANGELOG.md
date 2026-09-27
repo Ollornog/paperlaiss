@@ -6,6 +6,20 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Mails als Dokument mit Kopf und großen Bildern (Pre-Consume)
+
+- **`deploy/mail-pdf/mailbilder.py`:** Pre-Consume-Skript für Mail-Regeln, die die ganze Mail nehmen.
+  Kopf (Von/An/Datum/Betreff) oben im HTML — mit Layout „nur HTML“ keine doppelte Textseite —, je
+  Foto/Scan der Mail eine eigene Seite in voller Größe, Bilder im Mailtext als Vorschau (sonst legte
+  Chromium ein Handyfoto über drei Seiten). Logos, Banner und Symbole fallen (Größe, Seitenverhältnis
+  über 2,5 : 1, kürzeste Seite unter 400 px, Name) — gemessen an 37 Inline-Bildern eines echten
+  Postfachs: 2 bleiben, 35 fallen; der alte Mini-Bild-Filter liess 14 durch. Jeder Teil bekommt eine
+  Content-ID (ein Teil ohne ID macht in Paperless aus dem cid-Ersetzen ein globales Ersetzen, und kein
+  Bild erscheint). Reine Textmail mit Foto bekommt einen HTML-Teil (sonst ignoriert Paperless das
+  Layout). Nur Standardbibliothek, Bildmaße aus den Dateiköpfen; endet immer mit 0.
+  Tests `tests/test_mailbilder.py` (22), Mutation an Content-ID, Seitenverhältnis, Kopf und
+  Textmail je rot; im Testbett mit echten Mails durch Paperless und Gotenberg gerendert.
+
 ### Behoben — unlesbarer Store brach jeden Import ab; Schreiben als root sperrte den Worker aus
 
 - **Absturz statt Warnung:** Konnte `classify.py` beim Start eine Store-Datei nicht lesen, wollte es

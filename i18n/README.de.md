@@ -209,6 +209,22 @@ Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog b
   folgen `PAPERLESS_TIME_ZONE`, sonst `TZ`. Das Panel muss als ein Prozess laufen (Aufträge liegen im
   Speicher).
 
+### Mails als Dokument mit Kopf und großen Bildern (optional)
+
+`deploy/mail-pdf/mailbilder.py` ist ein Pre-Consume-Skript (`PAPERLESS_PRE_CONSUME_SCRIPT`, nur
+Standardbibliothek) für Mail-Regeln, die die **ganze Mail** übernehmen (`.eml`, PDF-Layout „nur HTML“).
+Bevor Paperless die Mail rendert, setzt es einen kleinen Kopf (Von, An, Datum, Betreff) und je Bild der
+Mail eine eigene Seite in voller Größe — Fotos und Scans, keine Logos, Banner oder Social-Symbole
+(geurteilt nach Größe, Seitenverhältnis und Name; gemessen an einem echten Postfach: 2 von 37
+Inline-Bildern bleiben, alle Logos fallen). Bilder im Mailtext erscheinen als Vorschau; jeder Teil
+bekommt eine Content-ID, damit Paperless `cid:`-Verweise auflöst. Andere Dateien bleiben unberührt,
+und das Skript endet immer mit 0 — es hält nie einen Import auf.
+
+Eine Einrichtung, die keinen Anhang verliert und kein Logo einzeln ablegt: Regel 1 übernimmt echte
+Anhänge (alle Typen), Regel 2 eingebettete PDFs (Anhangsverarbeitung „alle Dateien“, nur `*.pdf`),
+Regel 3 die ganze Mail für alles, was die ersten beiden nicht nahmen. Paperless überspringt eine Mail in
+späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
+
 ## Konfiguration (`classify-config.json`)
 
 | Key | Default | Bedeutung |
