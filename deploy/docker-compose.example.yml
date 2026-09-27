@@ -40,5 +40,12 @@ services:
       INGEST_TOKENS: ${INGEST_TOKENS:-{}}
       # Nur wenn Paperless und Panel auf verschiedenen Adressen/Ports laufen (CORS für die Knöpfe):
       # PAPERLAISS_KNOPF_ORIGIN: https://paperless.example.com
+      # Export-Knopf (alles optional, hier die Vorgaben): Links im Inhaltsverzeichnis nach Paperless,
+      # Grenzen je Export, Aufbewahrung des Ergebnisses. Uhrzeit wie Paperless (PAPERLESS_TIME_ZONE).
+      # PAPERLESS_PUBLIC_URL: https://paperless.example.com
+      # EXPORT_MAX_DOKUMENTE: "1000"
+      # EXPORT_MAX_MB: "2000"
+      # EXPORT_AUFBEWAHRUNG_MIN: "1440"
+      # EXPORT_SPEICHER_MB: "10000"
     depends_on:
       - paperless

@@ -181,6 +181,34 @@ Tags, kein Workflow:
   Nach dem Lauf lädt die Seite neu, damit Paperless nicht seinen alten Stand über das Ergebnis
   speichert. Baut Paperless seine Seite um, fehlen die Knöpfe — Paperless selbst läuft weiter.
 
+Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog bietet zwei Varianten:
+
+- **Ein PDF** — alle gewählten Dokumente zusammengefügt, ein Lesezeichen je Dokument (die eigenen
+  Lesezeichen der Quelle darunter), optional **Seitenzahlen** („Seite i von n") und ein
+  **Inhaltsverzeichnis** vorn: Titel und Seitenzahl springen zum Dokument, *In Paperless öffnen*
+  öffnet es in Paperless.
+- **Einzeln** — jedes Dokument als eigene PDF-Datei, byte-gleich mit dem, was Paperless liefert. Der
+  Dateiname kommt aus einer **Vorlage** mit `{titel}`, `{korrespondent}`, `{typ}`, `{datum}`,
+  `{jahr}`, `{monat}`, `{hinzugefuegt}`, `{id}`, `{asn}`, `{seiten}`, `{original}` und
+  `{feld:<benutzerdefiniertes Feld>}`; optional **durchnummeriert** (`001_`), optional als **ZIP** und
+  mit einem **Inhaltsverzeichnis-PDF**, dessen Einträge auf die Nachbardateien verlinken (sie greifen,
+  sobald das ZIP entpackt ist) und nach Paperless. Der Titel ist ein relativer URI (dem folgt der
+  PDF-Betrachter von Chrome, einem Remote-Go-To nicht); *Datei: …* ist dieselbe Datei als
+  Remote-Go-To für Betrachter, die Dateien selbst öffnen.
+- Beide lassen sich nach jeder Variable oder jedem Feld **sortieren**, auf- oder absteigend. Quelle
+  ist das Archiv-PDF, sonst das Original, wenn es ein PDF ist; alles andere wird übersprungen und
+  genannt (im Dialog und im Verzeichnis unter *Nicht enthalten*).
+- Rechte wie beim KI-Knopf, nur genügt **Leserecht**: das Panel prüft mit der Paperless-Sitzung des
+  Nutzers, und ein nicht lesbares Dokument lehnt den ganzen Export ab (403), statt es still
+  wegzulassen. Status und Download prüfen bei jedem Abruf erneut. Auch die Namen (Korrespondent, Typ,
+  Felder) kommen über die Sitzung des Nutzers; die PDFs lädt das Panel mit seinem Token.
+- Einstellungen am Panel: `EXPORT_MAX_DOKUMENTE` (Vorgabe 1000), `EXPORT_MAX_MB` (2000, Summe der
+  PDFs), `EXPORT_PARALLEL` (1), `EXPORT_SPEICHER_MB` (10000 — alle fertigen Exporte zusammen; die ältesten fallen zuerst), `EXPORT_AUFBEWAHRUNG_MIN` (1440 = 24 h — danach sind Ergebnis und Dateien
+  gelöscht), `EXPORT_TMP` (Ordner für Zwischendateien), `PAPERLESS_PUBLIC_URL` (Adresse von Paperless
+  für die Links; leer: die Adresse der aufrufenden Paperless-Seite, nur vom selben Ursprung). Uhrzeiten
+  folgen `PAPERLESS_TIME_ZONE`, sonst `TZ`. Das Panel muss als ein Prozess laufen (Aufträge liegen im
+  Speicher).
+
 ## Konfiguration (`classify-config.json`)
 
 | Key | Default | Bedeutung |

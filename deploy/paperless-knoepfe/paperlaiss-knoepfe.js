@@ -3,7 +3,9 @@
  * Dokument per Mistral-OCR neu und klassifiziert es neu.
  *
  * Dokumentansicht: Knopf „KI" anstelle von Paperless' eigenem „Suggest" (ausgeblendet).
- * Dokumentliste:   Eintrag „KI" im Menü „Actions" der Mehrfachauswahl.
+ * Dokumentliste:   Einträge „KI" und „Export" im Menü „Actions" der Mehrfachauswahl. Export:
+ *                  ein PDF (optional Seitenzahlen, Inhaltsverzeichnis) oder einzeln (Dateiname aus
+ *                  Vorlage, Nummer, Sortierung, optional ZIP und Verzeichnis-PDF).
  * Korrespondent:   Abschnitt „paperlaiss" im Bearbeiten-Dialog — Kontext, Aliase, Domains usw.,
  *                  die der Klassifizierer beim Zuordnen nutzt; gespeichert mit „Save".
  *
@@ -13,7 +15,7 @@
  * damit bei Paperless nach, welche Dokumente dieser Nutzer ändern darf, und verarbeitet nur die.
  *
  * Ändert Paperless den Aufbau der Seite, fehlen die Knöpfe — Paperless selbst bleibt heil.
- * Icon: Bootstrap Icons „magic" (MIT, The Bootstrap Authors).
+ * Icons: Bootstrap Icons „magic" und „download" (MIT, The Bootstrap Authors).
  */
 (function () {
   "use strict";
@@ -23,6 +25,7 @@
   const MARKE = "paperlaiss-knoepfe";
   const ICON = {
     ki: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.5 2.672a.5.5 0 1 0 1 0V.843a.5.5 0 0 0-1 0zm4.5.035A.5.5 0 0 0 13.293 2L12 3.293a.5.5 0 1 0 .707.707zM7.293 4A.5.5 0 1 0 8 3.293L6.707 2A.5.5 0 0 0 6 2.707zm-.621 2.5a.5.5 0 1 0 0-1H4.843a.5.5 0 1 0 0 1zm8.485 0a.5.5 0 1 0 0-1h-1.829a.5.5 0 0 0 0 1zM13.293 10A.5.5 0 1 0 14 9.293L12.707 8a.5.5 0 1 0-.707.707zM9.5 11.157a.5.5 0 0 0 1 0V9.328a.5.5 0 0 0-1 0zm1.854-5.097a.5.5 0 0 0 0-.706l-.708-.708a.5.5 0 0 0-.707 0L8.646 5.94a.5.5 0 0 0 0 .707l.708.708a.5.5 0 0 0 .707 0l1.293-1.293Zm-3 3a.5.5 0 0 0 0-.706l-.708-.708a.5.5 0 0 0-.707 0L.646 13.94a.5.5 0 0 0 0 .707l.708.708a.5.5 0 0 0 .707 0z"/></svg>',
+    export: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg>',
   };
 
   function dokId() {
@@ -183,14 +186,179 @@
     menu.appendChild(trenner);
     menu.appendChild(menuEintrag(ICON.ki, "KI", () =>
       mehrfach((ids) => dialogKi(ids.length, (h) => ausloesen(ids, h)))));
+    menu.appendChild(menuEintrag(ICON.export, "Export", () => mehrfach(dialogExport)));
+  }
+
+  // ---------- Export: ein PDF oder einzeln (optional ZIP), mit Inhaltsverzeichnis ----------
+  // Der Dialog fragt das Panel nach Variablen und Feldern, startet den Export als Auftrag, zeigt den
+  // Stand und lädt das Ergebnis herunter — per fetch mit dem eigenen Kopf, nicht per Link, damit
+  // auch der Download dieselbe Prüfung durchläuft wie jeder Knopf-Aufruf.
+  const esc = (v) => String(v == null ? "" : v).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+
+  function groesse(b) {
+    return b >= 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(b / 1024)) + " KB";
+  }
+
+  // Wo Paperless liegt (für die Links im Inhaltsverzeichnis): <base href> berücksichtigt einen
+  // Unterpfad. Das Panel nimmt den Wert nur vom selben Ursprung wie die Anfrage an.
+  function paperlessBasis() {
+    const b = document.querySelector("base");
+    return new URL((b && b.getAttribute("href")) || "/", location.href).href;
+  }
+
+  async function herunterladen(job, nr, name) {
+    const r = await fetch(PANEL + "/knopf/export/" + encodeURIComponent(job) + "/datei/" + nr,
+      { credentials: "include", headers: { "X-Paperlaiss": "1" } });
+    if (!r.ok) {
+      let t = await r.text();
+      try { t = JSON.parse(t).detail || t; } catch (e) { /* Text lassen */ }
+      throw new Error(r.status + " " + String(t).slice(0, 200));
+    }
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  async function dialogExport(ids) {
+    let opt;
+    try { opt = await panel("/knopf/export/optionen"); } catch (e) { meldung("paperlaiss: " + e.message, "danger"); return; }
+    if (ids.length > opt.grenzen.dokumente) {
+      meldung(`paperlaiss: höchstens ${opt.grenzen.dokumente} Dokumente je Export — markiert sind ${ids.length}.`, "warning");
+      return;
+    }
+    const chip = (v, titel) => '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 me-1 mb-1" data-var="' +
+      esc(v) + '" title="' + esc(titel) + '">' + esc(v) + "</button>";
+    const variablen = opt.variablen.map(([n, t]) => chip("{" + n + "}", t)).join("") +
+      opt.felder.map((f) => chip("{feld:" + f + "}", "Benutzerdefiniertes Feld")).join("");
+    const sortierbar = opt.variablen.filter(([n]) => !["jahr", "monat", "original"].includes(n));
+    const sortierung = '<option value="">wie ausgewählt</option>' +
+      sortierbar.map(([n, t]) => '<option value="' + esc(n) + '">' + esc(t) + "</option>").join("") +
+      opt.felder.map((f) => '<option value="feld:' + esc(f) + '">Feld: ' + esc(f) + "</option>").join("");
+    const haken = (name, text, an) => '<div class="form-check"><input class="form-check-input" type="checkbox" name="' + name +
+      '" id="pl-' + name + '"' + (an ? " checked" : "") + '><label class="form-check-label" for="pl-' + name + '">' + text + "</label></div>";
+    const dlg = document.createElement("dialog");
+    dlg.className = "p-0 border-0 rounded shadow";
+    dlg.innerHTML =
+      '<form method="dialog" class="card" style="width:min(620px,94vw)">' +
+      // Ohne diesen ersten, gesperrten Knopf schlösse „Enter" im Dateinamen den Dialog.
+      '<button type="submit" disabled hidden aria-hidden="true"></button>' +
+      '<div class="card-header">Export (' + ids.length + " Dokument" + (ids.length > 1 ? "e" : "") + ")</div>" +
+      '<div class="card-body">' +
+      '<div class="btn-group w-100 mb-3" role="group" aria-label="Exportart">' +
+      '<input type="radio" class="btn-check" name="art" id="pl-art-ein" value="ein" checked>' +
+      '<label class="btn btn-sm btn-outline-primary" for="pl-art-ein">Ein PDF</label>' +
+      '<input type="radio" class="btn-check" name="art" id="pl-art-einzeln" value="einzeln">' +
+      '<label class="btn btn-sm btn-outline-primary" for="pl-art-einzeln">Einzeln</label></div>' +
+      '<div data-teil="ein"><div class="form-text mt-0 mb-2">Alle Dokumente zu einem PDF zusammengefügt, mit einem Lesezeichen je Dokument.</div>' +
+      haken("seitenzahlen", "Seitenzahlen", true) +
+      haken("inhalt", "Inhaltsverzeichnis vorne — Sprung zur Seite und Link nach Paperless", true) + "</div>" +
+      '<div data-teil="einzeln" hidden><div class="form-text mt-0 mb-2">Jedes Dokument als eigene PDF-Datei, unverändert aus Paperless.</div>' +
+      '<label class="form-label small mb-0" for="pl-vorlage">Dateiname</label>' +
+      '<div class="input-group input-group-sm"><input class="form-control" name="vorlage" id="pl-vorlage" value="' + esc(opt.vorlage) +
+      '" maxlength="300"><span class="input-group-text">.pdf</span></div>' +
+      '<div class="mt-1 small" style="max-height:6.5em;overflow:auto">' + variablen + "</div>" +
+      haken("nummerieren", "Durchnummerieren (001_, 002_, …)", false) +
+      haken("zip", "Als ZIP herunterladen", true) +
+      haken("verzeichnis", "Inhaltsverzeichnis-PDF dazu — Links auf die Dateien und nach Paperless", true) + "</div>" +
+      '<label class="form-label small mb-0 mt-3" for="pl-sortierung">Sortierung</label>' +
+      '<div class="input-group input-group-sm"><select class="form-select" name="sortierung" id="pl-sortierung">' + sortierung + "</select>" +
+      '<select class="form-select" name="richtung" style="max-width:11em" aria-label="Richtung"><option value="auf">aufsteigend</option>' +
+      '<option value="ab">absteigend</option></select></div>' +
+      '<div class="form-text">Archiv-PDF aus Paperless, sonst das Original, wenn es ein PDF ist — andere werden übersprungen und gemeldet. ' +
+      "Höchstens " + opt.grenzen.dokumente + " Dokumente und " + opt.grenzen.mb + " MB je Export.</div>" +
+      '<div data-teil="stand" class="mt-3" hidden><div class="progress" style="height:6px"><div class="progress-bar" style="width:0%"></div></div>' +
+      '<div class="small mt-2" data-text></div><div class="small mt-2" data-ergebnis></div></div>' +
+      "</div>" +
+      '<div class="card-footer d-flex gap-2 justify-content-end">' +
+      '<button value="nein" class="btn btn-sm btn-outline-secondary">Schließen</button>' +
+      '<button type="button" class="btn btn-sm btn-primary" data-los>Exportieren</button></div></form>';
+    document.body.appendChild(dlg);
+    const f = dlg.querySelector("form");
+    const feld = (n) => f.querySelector('[name="' + n + '"]');
+    const teil = (n) => dlg.querySelector('[data-teil="' + n + '"]');
+    const art = () => f.querySelector('[name="art"]:checked').value;
+    f.querySelectorAll('[name="art"]').forEach((r) => r.addEventListener("change", () => {
+      teil("ein").hidden = art() !== "ein";
+      teil("einzeln").hidden = art() !== "einzeln";
+    }));
+    dlg.querySelectorAll("[data-var]").forEach((b) => b.addEventListener("click", () => {
+      const v = feld("vorlage"), a = v.selectionStart == null ? v.value.length : v.selectionStart;
+      v.value = v.value.slice(0, a) + b.dataset.var + v.value.slice(v.selectionEnd == null ? a : v.selectionEnd);
+      v.focus();
+      v.selectionStart = v.selectionEnd = a + b.dataset.var.length;
+    }));
+    dlg.addEventListener("close", () => dlg.remove());
+    const los = dlg.querySelector("[data-los]");
+    const text = (t, fehler) => {
+      const el = dlg.querySelector("[data-text]");
+      el.className = "small mt-2" + (fehler ? " text-danger" : "");
+      el.textContent = t;
+    };
+    los.addEventListener("click", async () => {
+      const daten = {
+        docs: ids, art: art(), seitenzahlen: feld("seitenzahlen").checked,
+        inhalt: art() === "ein" ? feld("inhalt").checked : feld("verzeichnis").checked,
+        zip: feld("zip").checked, vorlage: feld("vorlage").value, nummerieren: feld("nummerieren").checked,
+        sortierung: feld("sortierung").value, absteigend: feld("richtung").value === "ab", basis: paperlessBasis(),
+      };
+      los.disabled = true;
+      teil("stand").hidden = false;
+      dlg.querySelector("[data-ergebnis]").innerHTML = "";
+      text("Export wird gestartet …");
+      let job;
+      try { job = (await panel("/knopf/export", daten)).job; }
+      catch (e) { text("paperlaiss: " + e.message, true); los.disabled = false; return; }
+      const balken = dlg.querySelector(".progress-bar");
+      let st = null;
+      for (let i = 0; i < 1200 && dlg.isConnected; i++) {
+        await new Promise((ok) => setTimeout(ok, 1500));
+        try { st = await panel("/knopf/export/" + encodeURIComponent(job)); }
+        catch (e) {
+          text("paperlaiss: " + e.message, true);
+          if (/^40[134] /.test(e.message)) break;          // abgelaufen, keine Sitzung, kein Recht
+          continue;
+        }
+        balken.style.width = Math.round(100 * (st.status === "fertig" ? 1 : st.fertig / Math.max(1, st.gesamt))) + "%";
+        text(st.status === "fehler" ? st.meldung : st.status === "fertig" ? "Fertig." : st.schritt + " …", st.status === "fehler");
+        if (st.status === "fertig" || st.status === "fehler") break;
+      }
+      if (!st || !["fertig", "fehler"].includes(st.status)) { los.disabled = false; return; }
+      const erg = dlg.querySelector("[data-ergebnis]");
+      let h = "";
+      if (st.dateien.length) {
+        h += '<div class="mb-1">Heruntergeladen (' + st.aufbewahrung_min + " Minuten lang erneut abrufbar):</div>" +
+          st.dateien.map((d, nr) => '<div><button type="button" class="btn btn-link btn-sm p-0" data-nr="' + nr + '">' +
+            esc(d.name) + "</button> · " + groesse(d.groesse) + "</div>").join("");
+      }
+      if (st.uebersprungen.length) {
+        h += '<div class="mt-2 text-warning-emphasis">Nicht enthalten (' + st.uebersprungen.length + "):</div>" +
+          st.uebersprungen.map((u) => "<div>#" + esc(u.id) + " " + esc(u.titel) + " — " + esc(u.grund) + "</div>").join("");
+      }
+      erg.innerHTML = h;
+      erg.querySelectorAll("[data-nr]").forEach((b) => b.addEventListener("click", () => {
+        const d = st.dateien[+b.dataset.nr];
+        herunterladen(job, +b.dataset.nr, d.name).catch((e) => text("paperlaiss: " + e.message, true));
+      }));
+      los.disabled = false;
+      // Sofort herunterladen, eine Datei nach der anderen (bei mehreren fragt der Browser einmal nach).
+      for (let nr = 0; nr < st.dateien.length; nr++) {
+        try { await herunterladen(job, nr, st.dateien[nr].name); }
+        catch (e) { text("paperlaiss: " + e.message, true); break; }
+        await new Promise((ok) => setTimeout(ok, 400));
+      }
+    });
+    dlg.showModal();
   }
 
   // ---------- Korrespondenten-Dialog: Abschnitt „paperlaiss" ----------
   // Paperless kann Korrespondenten keine eigenen Felder geben. paperlaiss führt dafür ein kleines
   // Adressbuch (Kontext für die KI, Aliase, Mail-Domains …) und blendet es hier ein. Die ID steht
   // im Dialogkopf („ID: 13"); ein neuer Korrespondent hat noch keine.
-  const esc = (v) => String(v == null ? "" : v).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
-
   async function einfuegenKorr() {
     const dlg = document.querySelector("pngx-correspondent-edit-dialog");
     const body = dlg && dlg.querySelector(".modal-body");

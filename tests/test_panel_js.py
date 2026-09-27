@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Syntax des JavaScripts jeder Panel-Seite — mit `node --check`.
+"""Syntax des JavaScripts jeder Panel-Seite und des Knopf-Skripts für Paperless — mit `node --check`.
 
 Die Seiten stehen als Python-Strings in `panel/seiten.py`; ein Fehler im JavaScript fällt
 sonst erst im Browser auf, und dann nur als leere Seite. Genau das war die Falle beim ersten
@@ -35,4 +35,9 @@ if node:
         Path(f.name).unlink()
         r.check(f"Seite {name}: {len(skripte)} Skript(e), Syntax gültig",
                 bool(skripte) and lauf.returncode == 0, lauf.stderr.strip()[:300])
+    # Das Knopf-Skript in Paperless (KI, Export, Korrespondenten-Abschnitt): reines JS ohne Bau,
+    # ein Syntaxfehler nähme Paperless alle Knöpfe — Paperless selbst liefe weiter, still ohne sie.
+    knoepfe = ROOT / "deploy" / "paperless-knoepfe" / "paperlaiss-knoepfe.js"
+    lauf = subprocess.run([node, "--check", str(knoepfe)], capture_output=True, text=True)
+    r.check("Knopf-Skript für Paperless: Syntax gültig", lauf.returncode == 0, lauf.stderr.strip()[:300])
 sys.exit(r.done())

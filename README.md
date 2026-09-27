@@ -179,6 +179,32 @@ entry in the **Actions** menu of the multi-select. No fork, no tags, no workflow
   page reloads, so Paperless does not save its stale state back over the result. If Paperless
   changes its page, the buttons are missing — Paperless itself keeps working.
 
+A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog offers two variants:
+
+- **One PDF** — all selected documents merged, one bookmark per document (the source's own
+  bookmarks nested below), optional **page numbers** ("Seite i von n") and an optional **table of
+  contents** in front: title and page number jump to the document, *In Paperless öffnen* opens it in
+  Paperless.
+- **Separately** — every document as its own PDF, byte-identical to what Paperless delivers. The file
+  name comes from a **template** with `{titel}`, `{korrespondent}`, `{typ}`, `{datum}`, `{jahr}`,
+  `{monat}`, `{hinzugefuegt}`, `{id}`, `{asn}`, `{seiten}`, `{original}` and `{feld:<custom field>}`;
+  optionally **numbered** (`001_`), optionally as a **ZIP** and with a **table-of-contents PDF** whose
+  entries link to the neighbouring files (they work once the ZIP is unpacked) and to Paperless. The
+  title is a relative URI (Chrome's PDF viewer follows it, but not a remote go-to); *Datei: …* is the
+  same file as a remote go-to for viewers that open files themselves.
+- Both can be **sorted** by any variable or custom field, ascending or descending. Source is the
+  archive PDF, otherwise the original if it is a PDF; anything else is skipped and listed (in the
+  dialog and under *Nicht enthalten* in the table of contents).
+- Rights as for the KI button, but **read** permission is enough: the panel checks with the user's
+  Paperless session, and one unreadable document rejects the whole export (403) instead of silently
+  leaving it out. Status and download check again on every call. Names (correspondent, type, fields)
+  are fetched with the user's session as well; the PDFs are downloaded with the panel's token.
+- Panel settings: `EXPORT_MAX_DOKUMENTE` (default 1000), `EXPORT_MAX_MB` (2000, sum of the PDFs),
+  `EXPORT_PARALLEL` (1), `EXPORT_SPEICHER_MB` (10000 — all finished exports together; the oldest go first), `EXPORT_AUFBEWAHRUNG_MIN` (1440 = 24 h — afterwards the result and its files are
+  deleted), `EXPORT_TMP` (temporary directory), `PAPERLESS_PUBLIC_URL` (Paperless address for the
+  links; unset: the address of the Paperless page that called, same origin only). Times follow
+  `PAPERLESS_TIME_ZONE`, otherwise `TZ`. The panel must run as a single process (jobs live in memory).
+
 ## Configuration (`classify-config.json`)
 
 | Key | Default | Meaning |

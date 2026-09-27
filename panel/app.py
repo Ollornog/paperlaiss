@@ -18,14 +18,19 @@ ENV:
                   (PocketID/OIDC über PANEL_OIDC_*, Passwort nur mit PANEL_PASSWORD_LOGIN=1;
                   alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
+  EXPORT_*        Export-Knopf: EXPORT_MAX_DOKUMENTE (1000), EXPORT_MAX_MB (2000), EXPORT_AUFBEWAHRUNG_MIN
+                  (1440 = 24 h), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
 """
-import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, threading, urllib.request, urllib.error
-from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
+import os, sys, json, re, glob, html, hmac, secrets, shutil, subprocess, datetime, tempfile, threading, time, traceback
+import urllib.request, urllib.error, zoneinfo
+from fastapi import BackgroundTasks, Body, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from kern import (KORR_FELDER, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
+import exportlogik
+import exportpdf
 import huelle
 import seiten
 
@@ -324,6 +329,13 @@ def knopf_nutzer_rechte(request: Request, ids, art="documents"):
 
     `art` ist der Paperless-Endpunkt (documents, correspondents) — beide liefern `user_can_change`.
     """
+    antwort = als_nutzer(request, f"/{art}/?id__in={','.join(str(i) for i in ids)}"
+                                  f"&fields=id,user_can_change&page_size={len(ids)}")
+    return knopf_rechte(antwort, ids)
+
+
+def _knopf_sitzung(request: Request) -> str:
+    """Die Paperless-Sitzung eines Knopf-Aufrufs (Cookie) — nach der Prüfung des eigenen Kopfs."""
     # Der eigene Kopf erzwingt beim Aufruf von einer fremden Seite eine CORS-Vorabfrage — die
     # nur freigegebene Paperless-Adressen bestehen. Ein blosses Formular kann ihn nicht setzen.
     if request.headers.get("x-paperlaiss") != "1":
@@ -331,15 +343,22 @@ def knopf_nutzer_rechte(request: Request, ids, art="documents"):
     cookie = request.headers.get("cookie", "")
     if not cookie:
         raise HTTPException(401, "Keine Paperless-Sitzung — in Paperless anmelden")
-    url = (f"{BASE}/{art}/?id__in={','.join(str(i) for i in ids)}"
-           f"&fields=id,user_can_change&page_size={len(ids)}")
+    return cookie
+
+
+def als_nutzer(request: Request, pfad, tolerant=False):
+    """GET gegen Paperless MIT der Sitzung des Nutzers: Paperless antwortet nur mit dem, was er sehen
+    darf. `tolerant`: fehlendes Recht auf eine Liste (403, etwa keine Korrespondenten sehen) ergibt
+    eine leere Antwort statt eines Abbruchs — die Sitzung selbst ist dann schon geprüft."""
+    cookie = _knopf_sitzung(request)
     try:
-        antwort = json.load(urllib.request.urlopen(
-            urllib.request.Request(url, headers={"Cookie": cookie, "Accept": "application/json"}), timeout=20))
+        return json.load(urllib.request.urlopen(urllib.request.Request(
+            BASE + pfad, headers={"Cookie": cookie, "Accept": "application/json"}), timeout=20))
     except urllib.error.HTTPError as e:
+        if tolerant and e.code == 403:
+            return {"results": []}
         raise HTTPException(401 if e.code in (401, 403) else 502,
                             "Paperless kennt diese Sitzung nicht — in Paperless anmelden")
-    return knopf_rechte(antwort, ids)
 
 
 def _ids(werte):
@@ -407,6 +426,298 @@ def knopf_status(request: Request, docs: str = ""):
     erlaubt, _ = knopf_nutzer_rechte(request, ids)
     with _JOBS_LOCK:
         return {str(d): JOBS.get(d, {}).get("status", "unbekannt") for d in erlaubt}
+
+
+# ---------- Export-Knopf: ein PDF oder einzeln (optional ZIP), mit Inhaltsverzeichnis ----------
+# Rechte wie beim KI-Knopf, nur genügt hier LESEN: das Panel fragt mit der Paperless-Sitzung des
+# Nutzers nach, und ein Dokument, das er nicht sehen darf, lehnt den ganzen Export ab — nicht still
+# weglassen. Auch die Namen (Korrespondent, Typ, Felder) kommen über seine Sitzung; heruntergeladen
+# werden die PDFs mit dem Token des Panels. Die Entscheidungen stehen getestet in exportlogik.py.
+def _env_zahl(name, vorgabe):
+    wert = (os.environ.get(name) or "").strip()
+    return int(wert) if wert.isdigit() and int(wert) > 0 else vorgabe
+
+
+EXPORT_MAX_DOKUMENTE = _env_zahl("EXPORT_MAX_DOKUMENTE", 1000)
+EXPORT_MAX_MB = _env_zahl("EXPORT_MAX_MB", 2000)
+EXPORT_AUFBEWAHRUNG = _env_zahl("EXPORT_AUFBEWAHRUNG_MIN", 1440) * 60
+EXPORT_SPEICHER_MB = _env_zahl("EXPORT_SPEICHER_MB", 10000)   # alle fertigen Exporte zusammen
+EXPORT_TMP = os.environ.get("EXPORT_TMP") or tempfile.gettempdir()
+EXPORT_PRAEFIX = "paperlaiss-export-"
+EXPORT_WARTESCHLANGE = 5            # offene Exporte (wartend + laufend), danach 429
+PAPERLESS_PUBLIC_URL = os.environ.get("PAPERLESS_PUBLIC_URL", "")
+EXPORT_PARALLEL = threading.BoundedSemaphore(_env_zahl("EXPORT_PARALLEL", 1))
+EXPORT_FELDER = ("id,title,correspondent,document_type,created,added,archive_serial_number,custom_fields,"
+                 "archived_file_name,original_file_name,mime_type,page_count")
+EXPORTE = {}       # job → {"status": wartet|laeuft|fertig|fehler, "docs", "ordner", "dateien", …}
+_EXPORT_LOCK = threading.Lock()
+
+
+def _jetzt():
+    """Uhrzeit für Dateiname und Verzeichnis — in der Zeitzone von Paperless (PAPERLESS_TIME_ZONE),
+    sonst TZ; der Container selbst läuft oft in UTC."""
+    zone = (os.environ.get("PAPERLESS_TIME_ZONE") or os.environ.get("TZ") or "").strip()
+    try:
+        return datetime.datetime.now(zoneinfo.ZoneInfo(zone)) if zone else datetime.datetime.now().astimezone()
+    except Exception:
+        return datetime.datetime.now().astimezone()
+
+
+class ExportAbbruch(Exception):
+    """Ein Grund, den ganzen Export abzubrechen — mit einer Meldung für den Nutzer."""
+
+
+def _export(job, **felder):
+    with _EXPORT_LOCK:
+        if job in EXPORTE:
+            EXPORTE[job].update(felder)
+
+
+def _export_entfernen(job):
+    with _EXPORT_LOCK:
+        j = EXPORTE.pop(job, None)
+    if j and j.get("ordner"):
+        shutil.rmtree(j["ordner"], ignore_errors=True)
+
+
+def _export_aufraeumen():
+    """Abgelaufene Exporte samt Dateien löschen (zusätzlich zum Zeitgeber je Export)."""
+    frist = time.time() - EXPORT_AUFBEWAHRUNG
+    with _EXPORT_LOCK:
+        alt = [k for k, j in EXPORTE.items() if j["status"] in ("fertig", "fehler") and j.get("ende", j["seit"]) < frist]
+    for k in alt:
+        _export_entfernen(k)
+
+
+def _export_speicher_begrenzen():
+    """Liegen mehr fertige Exporte auf der Platte als EXPORT_SPEICHER_MB, die ältesten löschen."""
+    with _EXPORT_LOCK:
+        fertige = [(k, j.get("ende", j["seit"]), sum(g for _, _, g in j.get("dateien") or []))
+                   for k, j in EXPORTE.items() if j["status"] == "fertig"]
+    for k in exportlogik.speicher_ueberlauf(fertige, EXPORT_SPEICHER_MB * 1024 * 1024):
+        _export_entfernen(k)
+
+
+def _export_waisen_entfernen():
+    """Beim Start: Exportordner eines früheren Prozesses gehören niemandem mehr."""
+    for p in glob.glob(os.path.join(EXPORT_TMP, EXPORT_PRAEFIX + "*")):
+        shutil.rmtree(p, ignore_errors=True)
+
+
+_export_waisen_entfernen()
+
+
+def export_lesbar(request: Request, ids, felder="id"):
+    """Die Dokumente, die der Nutzer lesen darf (mit den gewünschten Feldern), und die übrigen."""
+    antwort = als_nutzer(request, f"/documents/?id__in={','.join(str(i) for i in ids)}"
+                                  f"&fields={felder}&page_size={len(ids)}")
+    lesbar, verweigert = exportlogik.lese_rechte(antwort, ids)
+    nach_id = {int(d["id"]): d for d in antwort.get("results", [])}
+    return [nach_id[i] for i in lesbar], verweigert
+
+
+def _verweigert_meldung(verweigert):
+    return (f"Kein Leserecht in Paperless für {len(verweigert)} Dokument(e) "
+            f"({', '.join(str(i) for i in verweigert[:20])}) — Export abgelehnt")
+
+
+def export_namen(request: Request, doks):
+    """Korrespondenten, Typen und benutzerdefinierte Felder — mit der Sitzung des Nutzers, damit
+    kein Name im Export landet, den er in Paperless nicht sehen darf."""
+    def liste(art, ids=None):
+        if ids is not None and not ids:
+            return []
+        filter_ = f"id__in={','.join(str(i) for i in sorted(ids))}&" if ids else ""
+        return als_nutzer(request, f"/{art}/?{filter_}page_size=100000", tolerant=True).get("results", [])
+    korr = {d["correspondent"] for d in doks if d.get("correspondent")}
+    typen = {d["document_type"] for d in doks if d.get("document_type")}
+    return {"korrespondenten": {k["id"]: k.get("name", "") for k in liste("correspondents", korr)},
+            "typen": {t["id"]: t.get("name", "") for t in liste("document_types", typen)},
+            "felder": {f["id"]: f for f in liste("custom_fields")}}
+
+
+@app.get("/knopf/export/optionen")
+def export_optionen(request: Request):
+    """Was der Export-Dialog anbietet: Variablen, benutzerdefinierte Felder, Grenzen."""
+    als_nutzer(request, "/ui_settings/")                     # prüft die Sitzung
+    felder = als_nutzer(request, "/custom_fields/?page_size=100000", tolerant=True).get("results", [])
+    return {"variablen": [list(v) for v in exportlogik.VARIABLEN],
+            "felder": sorted({f.get("name", "") for f in felder if f.get("name")}, key=str.casefold),
+            "vorlage": exportlogik.VORLAGE_STANDARD,
+            "grenzen": {"dokumente": EXPORT_MAX_DOKUMENTE, "mb": EXPORT_MAX_MB,
+                        "aufbewahrung_min": EXPORT_AUFBEWAHRUNG // 60}}
+
+
+@app.post("/knopf/export", status_code=202)
+def export_starten(request: Request, hintergrund: BackgroundTasks, body: dict = Body(...)):
+    """Export starten; läuft als Auftrag, Stand über GET /knopf/export/<job>."""
+    _knopf_sitzung(request)                     # Kopf und Sitzung zuerst, vor jeder Prüfung des Auftrags
+    auftrag, fehler = exportlogik.export_auftrag(body, max_dokumente=EXPORT_MAX_DOKUMENTE)
+    if fehler:
+        raise HTTPException(400, "; ".join(fehler))
+    doks, verweigert = export_lesbar(request, auftrag["docs"], EXPORT_FELDER)
+    if verweigert:
+        raise HTTPException(403, _verweigert_meldung(verweigert))
+    namen = export_namen(request, doks)
+    feldnamen = [f.get("name", "") for f in namen["felder"].values()]
+    if auftrag["art"] == "einzeln":
+        fehler += exportlogik.vorlage_fehler(auftrag["vorlage"], feldnamen)
+    s = auftrag["sortierung"]
+    if s.lower().startswith(exportlogik.FELD) and exportlogik._feld_finden(s[len(exportlogik.FELD):].strip(), feldnamen) is None:
+        fehler.append(f"Sortierung: benutzerdefiniertes Feld {s[len(exportlogik.FELD):].strip()!r} gibt es nicht")
+    if fehler:
+        raise HTTPException(400, "; ".join(fehler))
+    basis = exportlogik.paperless_basis(PAPERLESS_PUBLIC_URL, request.headers.get("origin", ""), auftrag["basis"])
+    _export_aufraeumen()
+    with _EXPORT_LOCK:
+        if sum(1 for j in EXPORTE.values() if j["status"] in ("wartet", "laeuft")) >= EXPORT_WARTESCHLANGE:
+            raise HTTPException(429, "Zu viele Exporte gleichzeitig — bitte gleich noch einmal versuchen")
+        job = secrets.token_urlsafe(18)
+        EXPORTE[job] = {"status": "wartet", "docs": auftrag["docs"], "gesamt": len(doks), "fertig": 0,
+                        "schritt": "wartet auf einen freien Platz", "meldung": "", "seit": time.time(),
+                        "dateien": [], "uebersprungen": [], "ordner": None}
+    hintergrund.add_task(export_lauf, job, auftrag, doks, namen, basis)
+    return {"job": job, "anzahl": len(doks)}
+
+
+def _pdf_laden(doc_id, original, pfad, summe, grenze):
+    """Ein PDF mit dem Token des Panels herunterladen, in Blöcken, mit laufender Größengrenze.
+    Rückgabe: neue Gesamtgröße. Kein PDF oder ein HTTP-Fehler: ValueError (Dokument überspringen)."""
+    url = f"{BASE}/documents/{int(doc_id)}/download/" + ("?original=true" if original else "")
+    kopf = b""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": f"Token {TOK}"}),
+                                    timeout=120) as r, open(pfad, "wb") as f:
+            while True:
+                block = r.read(1 << 20)
+                if not block:
+                    break
+                if len(kopf) < 1024:
+                    kopf += block[:1024]
+                summe += len(block)
+                zu_gross = exportlogik.groesse_fehler(summe, grenze)
+                if zu_gross:
+                    raise ExportAbbruch(zu_gross)
+                f.write(block)
+    except urllib.error.HTTPError as e:
+        raise ValueError(f"Paperless lieferte die Datei nicht (HTTP {e.code})")
+    if b"%PDF-" not in kopf[:1024]:
+        raise ValueError("Paperless lieferte kein PDF")
+    return summe
+
+
+def export_lauf(job, auftrag, doks, namen, basis):
+    ordner = tempfile.mkdtemp(prefix=EXPORT_PRAEFIX, dir=EXPORT_TMP)
+    _export(job, ordner=ordner)
+    fehlen = []
+
+    def uebersprungen():
+        return [{"id": e["werte"]["id"], "titel": e["werte"]["titel"], "grund": e["grund"]} for e in fehlen]
+    try:
+        with EXPORT_PARALLEL:
+            _export(job, status="laeuft", schritt="Dokumente laden")
+            eintraege = []
+            for d in doks:
+                e = exportlogik.dokument_variablen(d, namen)
+                e["dok"] = d
+                eintraege.append(e)
+            eintraege = exportlogik.sortieren(eintraege, auftrag["sortierung"], auftrag["absteigend"])
+            enthalten, summe = [], 0
+            for i, e in enumerate(eintraege):
+                _export(job, fertig=i, schritt=f"Dokument {i + 1} von {len(eintraege)} laden")
+                quelle, grund = exportlogik.pdf_quelle(e["dok"])
+                if not quelle:
+                    e["grund"] = grund
+                    fehlen.append(e)
+                    continue
+                pfad = os.path.join(ordner, f"quelle-{int(e['werte']['id'])}.pdf")
+                try:
+                    summe = _pdf_laden(e["werte"]["id"], quelle == "original", pfad, summe, EXPORT_MAX_MB * 1024 * 1024)
+                    e["seitenzahl"], e["outline_ok"] = exportpdf.pdf_pruefen(pfad)
+                except ValueError as ex:
+                    e["grund"] = str(ex)
+                    fehlen.append(e)
+                    continue
+                e["pfad"] = pfad
+                enthalten.append(e)
+            _export(job, fertig=len(eintraege), uebersprungen=uebersprungen(), schritt="PDF zusammenstellen")
+            if not enthalten:
+                raise ExportAbbruch("Keines der gewählten Dokumente hat ein PDF")
+            jetzt = _jetzt()
+            seiten_gesamt = sum(e["seitenzahl"] for e in enthalten)
+            unterzeile = (f"{len(enthalten)} Dokument{'e' if len(enthalten) != 1 else ''} · {seiten_gesamt} Seiten"
+                          + (f" · {len(fehlen)} nicht enthalten" if fehlen else "")
+                          + f" · erstellt {jetzt:%Y-%m-%d %H:%M} mit paperlaiss")
+            stempel = jetzt.strftime("%Y-%m-%d %H%M")
+            if auftrag["art"] == "ein":
+                ziel = os.path.join(ordner, "export.pdf")
+                exportpdf.ein_pdf(enthalten, fehlen, basis, ziel, inhalt=auftrag["inhalt"],
+                                  mit_seitenzahlen=auftrag["seitenzahlen"], kopf="Inhaltsverzeichnis",
+                                  unterzeile=unterzeile)
+                dateien = [(exportlogik.export_dateiname("pdf", len(enthalten), stempel), ziel)]
+            else:
+                inhalt_name = (exportlogik.inhalt_dateiname(auftrag["nummerieren"], len(enthalten))
+                               if auftrag["inhalt"] else None)
+                namen_liste = exportlogik.dateinamen(enthalten, auftrag["vorlage"], auftrag["nummerieren"], inhalt_name)
+                dateien = exportpdf.einzeln(
+                    enthalten, fehlen, namen_liste, basis, ordner, inhalt=auftrag["inhalt"], inhalt_name=inhalt_name,
+                    zip_name=(exportlogik.export_dateiname("zip", len(enthalten), stempel) if auftrag["zip"] else None),
+                    kopf="Inhaltsverzeichnis", unterzeile=unterzeile)
+            for e in enthalten:                         # Quellen, die nicht selbst Ergebnis sind
+                if os.path.exists(e["pfad"]):
+                    os.unlink(e["pfad"])
+            _export(job, status="fertig", schritt="fertig", ende=time.time(),
+                    dateien=[(n, p, os.path.getsize(p)) for n, p in dateien])
+            _export_speicher_begrenzen()
+    except ExportAbbruch as ex:
+        _export(job, status="fehler", meldung=str(ex), uebersprungen=uebersprungen(), ende=time.time())
+        shutil.rmtree(ordner, ignore_errors=True)
+    except Exception as ex:
+        traceback.print_exc()
+        _export(job, status="fehler", meldung=f"Export fehlgeschlagen ({ex.__class__.__name__}) — Protokoll des Panels",
+                uebersprungen=uebersprungen(), ende=time.time())
+        shutil.rmtree(ordner, ignore_errors=True)
+    # Aufräumen auch ohne weitere Anfrage: nach der Aufbewahrungszeit sind Auftrag und Dateien weg.
+    t = threading.Timer(EXPORT_AUFBEWAHRUNG, _export_entfernen, [job])
+    t.daemon = True
+    t.start()
+
+
+def _export_job(job: str, request: Request):
+    """Den Auftrag holen — nur für eine Sitzung, die alle seine Dokumente (noch) lesen darf."""
+    _knopf_sitzung(request)             # zuerst: ohne Sitzung verrät auch 404/200 nichts über Aufträge
+    with _EXPORT_LOCK:
+        j = dict(EXPORTE.get(job) or {}) if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", job) else {}
+    if not j:
+        raise HTTPException(404, "Export unbekannt oder abgelaufen")
+    _, verweigert = export_lesbar(request, j["docs"])
+    if verweigert:
+        raise HTTPException(403, _verweigert_meldung(verweigert))
+    return j
+
+
+@app.get("/knopf/export/{job}")
+def export_status(job: str, request: Request):
+    _export_aufraeumen()
+    j = _export_job(job, request)
+    return {"status": j["status"], "gesamt": j["gesamt"], "fertig": j["fertig"], "schritt": j["schritt"],
+            "meldung": j["meldung"], "uebersprungen": j["uebersprungen"],
+            "dateien": [{"name": n, "groesse": g} for n, _, g in j["dateien"]],
+            "aufbewahrung_min": EXPORT_AUFBEWAHRUNG // 60}
+
+
+@app.get("/knopf/export/{job}/datei/{nr}")
+def export_datei(job: str, nr: int, request: Request):
+    j = _export_job(job, request)
+    if j["status"] != "fertig":
+        raise HTTPException(409, "Export ist noch nicht fertig")
+    if not 0 <= nr < len(j["dateien"]):
+        raise HTTPException(404, "Keine solche Datei")
+    name, pfad, _ = j["dateien"][nr]
+    if not os.path.isfile(pfad):
+        raise HTTPException(410, "Export abgelaufen — bitte neu exportieren")
+    return FileResponse(pfad, filename=name,
+                        media_type="application/zip" if name.endswith(".zip") else "application/pdf")
 
 
 def _log_zeilen(max_zeilen=20000):

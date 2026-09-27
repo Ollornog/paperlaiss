@@ -20,6 +20,9 @@ panel = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.20",
+    # Export-Knopf: Zusammenfügen/Links/Lesezeichen und die Seiten des Inhaltsverzeichnisses.
+    "pypdf>=6.19",
+    "reportlab>=5.0",
 ]
 
 [project.urls]
