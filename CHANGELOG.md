@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Dokumenttyp: Auswahlliste zwang ein falsches Wort
+
+- **Typ zuletzt im Schema.** Seit der Antwort als JSON-Schema (Typ als Auswahlliste) wählte Pass 1
+  bei Dokumenten, für die das Modell ein eigenes Wort wollte, still einen falschen Typ: ein
+  Bußgeldbescheid wurde „Bewerbung" oder „Mahnung", eine Meldebestätigung einmal „Mahnung". Das
+  Modell schreibt die Schlüssel in Schema-Reihenfolge; stand der Typ vorn, liess die Liste nach
+  dem ersten Buchstaben nur noch Einträge mit demselben Anfang zu. Jetzt kommt der Typ nach
+  Korrespondent, Feldern und Zusammenfassung. Gemessen am Bußgeldbescheid: vorher 0 von 3 Läufen
+  richtig, jetzt 3 von 3 („Bescheid"); fünf weitere Dokumente unverändert richtig. Reine
+  Prompt-Hinweise zur Typ-Abgrenzung halfen dagegen nicht (0 von 1).
+
 ### Behoben — Panel-Anmeldung sah hinter dem Proxy nur eine IP
 
 - **`PANEL_TRUSTED_PROXIES`:** Das Panel gab TinySesam keine Liste vertrauenswürdiger Proxys mit.

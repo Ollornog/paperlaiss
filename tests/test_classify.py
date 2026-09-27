@@ -459,6 +459,15 @@ r.check("Schema Pass 1: Dokumenttyp nur aus der Liste oder null, Felder und Abse
         and "absender" in _s1["required"] and "summary" in _s1["properties"] and "tags" not in _s1["properties"])
 r.check("Schema Pass 1: offen für Zusatzschlüssel eigener Prompts (summary_long …)",
         _s1["additionalProperties"] is True)
+# Reihenfolge = Schreibreihenfolge des Modells. Der Typ vorn zwang ein eigenes Wort („Bußgeldbescheid“)
+# über die Auswahlliste auf den ersten Eintrag mit gleichem Anfang (Bewerbung, Mahnung).
+_ord = [list(classify.pass1_schema({"Bescheid": 1, "Bewerbung": 2}, ["Betrag"], t, a, m)["properties"])
+        for t in (False, True) for a in (False, True) for m in (False, True)]
+r.check("Schema Pass 1: der Dokumenttyp steht in jeder Variante zuletzt",
+        all(o[-1] == "document_type" for o in _ord) and len(_ord) == 8, str(_ord[-1]))
+r.check("Schema Pass 1: Zusammenfassung, Felder und Korrespondent stehen vor dem Typ",
+        all(o.index(k) < o.index("document_type") for o in _ord for k in ("correspondent", "fields") )
+        and _ord[-1].index("summary") < _ord[-1].index("document_type"))
 r.check("Schema Pass 2: nur Kandidaten oder null", classify.pass2_schema(["A", "B"])["properties"]["match"]["enum"] == ["A", "B", None])
 
 # Was tatsächlich an Mistral geht: response_format json_schema (strict) und prompt_cache_key.
