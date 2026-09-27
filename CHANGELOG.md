@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — TinySesam 0.21.0
+
+- Panel auf TinySesam **0.21.0** (Unterpfad-Montage T-15: Weiterleitungen, `next=` und Logout tragen
+  `PANEL_PFAD`; belegt auf dem Testbett hinter einem abschneidenden Caddy). Beim Update beachten:
+  `cryptography` kommt als Abhängigkeit mit; TinySesam legt `<PANEL_AUTH_DB>.key` neben der
+  Benutzerdatenbank an — **mitsichern, getrennt von der Datenbank**; Sitzungen ohne „Angemeldet
+  bleiben" enden nach 8 Stunden Leerlauf; neue Passwörter brauchen 15 Zeichen.
+
 ### Hinzugefügt — Panel unter einem Unterpfad (`PANEL_PFAD`)
 
 - Das Panel läuft auch unter einem Pfad derselben Domain wie Paperless (etwa `/paperlaiss`), hinter
