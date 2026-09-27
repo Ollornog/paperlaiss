@@ -586,10 +586,15 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary):
     """JSON-Schema der Pass-1-Antwort. Dokumenttyp als Auswahlliste (plus null), Felder als
     bekannte Schlüssel. `additionalProperties` bleibt offen: eigene Prompts verlangen teils
     weitere Schlüssel (summary_long, korrespondent_kontext), die sonst wegfielen. Ein gültiges
-    Schema heisst nicht, dass die Werte stimmen — es garantiert den Aufbau."""
+    Schema heisst nicht, dass die Werte stimmen — es garantiert den Aufbau.
+
+    Der Dokumenttyp steht ZULETZT. Das Modell schreibt die Schlüssel in Schema-Reihenfolge; stand
+    der Typ vorn, wollte es oft ein eigenes Wort („Bußgeldbescheid", „Meldebestätigung") — die
+    Auswahlliste liess dann nur den ersten Eintrag mit passendem Anfang zu: Bewerbung, Mahnung.
+    Gemessen 2026-09-27 an einem Bußgeldbescheid: Typ vorn 0 von 3 richtig, Typ hinten 3 von 3
+    („Bescheid"), weil Zusammenfassung und Felder dann schon geschrieben sind."""
     wert = {"type": ["string", "number", "boolean", "null"]}
     props = {
-        "document_type": {"type": ["string", "null"], "enum": sorted(typen) + [None]},
         "correspondent": _NULLBAR("string"),
         "fields": {"type": "object", "properties": {f: wert for f in feldnamen}, "additionalProperties": True},
         "document_date": _NULLBAR("string"),
@@ -605,6 +610,8 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary):
         props["absender"] = {"type": "object", "additionalProperties": False, "properties": {
             k: _NULLBAR("string") for k in ("ustid", "iban", "email", "telefon", "adresse", "kundennummer")}}
         pflicht.append("absender")
+    props["document_type"] = {"type": ["string", "null"], "enum": sorted(typen) + [None]}
+    pflicht.insert(0, "document_type")
     return {"type": "object", "properties": props, "required": pflicht, "additionalProperties": True}
 
 
