@@ -51,7 +51,7 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, CHEVK=%CHEVK%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
+const CHEV=%CHEV%, CHEVK=%CHEVK%, SYMA=%SYMA%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
 const ART={paperless:['Paperless','info','inbox'],code:['paperlaiss','outline','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Eingesetzte Werte und Platzhalter farbig hinterlegt — so sieht man, was fest im Prompt steht
 // und was je Dokument eingesetzt wird (Muster aus Prompt-Editoren wie Langfuse).
@@ -96,17 +96,39 @@ function tabelle(obj,kopf){
 function klapp(titel,inhalt,offen){
   const m=/^(Eingabe|Ausgabe)(?: — )?(.*)$/.exec(titel), art=m?m[1]:'', rest=m?m[2]:titel;
   const etikett=art?'<span class="badge" data-variant="'+(art==='Eingabe'?'info':'success')+'">'+art+'</span>':'';
-  return '<details class="min-w-0 rounded-lg border bg-background/70"'+(offen?' open':'')+'>'+
-    '<summary class="flex cursor-pointer list-none items-center gap-3 px-4 py-3 font-medium select-none">'+etikett+
-    '<span>'+txt(rest)+'</span><span class="ms-auto">'+CHEVK+'</span></summary>'+
-    '<div class="grid min-w-0 gap-3 border-t p-4">'+inhalt+'</div></details>';
+  // Die ersten drei Zeilen stehen immer da; ist mehr Text da, blendet er nach unten aus
+  // (Maske statt Farbverlauf: kommt ohne Farbwert aus) und „… mehr anzeigen" klappt ihn auf.
+  // Sonderweg: C22 hat weder line-clamp noch eine Ausblende-Klasse (C22-Backlog T-9).
+  const klemme=offen?'':' data-klemme style="'+KLEMME+'"';
+  return '<div class="min-w-0 rounded-lg border bg-background/70">'+
+    '<div class="flex items-center gap-3 px-4 py-3 font-medium">'+etikett+'<span>'+txt(rest)+'</span></div>'+
+    '<div class="grid min-w-0 gap-2 border-t p-4">'+
+    // Klemme als Block, der Inhalt als Grid darin: Wäre die Klemme selbst ein Grid, schrumpfte ein
+    // innerer Scrollbereich auf ihre Höhe — dann gäbe es nie einen Überhang zu messen.
+    '<div class="min-w-0 overflow-hidden leading-relaxed"'+klemme+'><div class="grid min-w-0 gap-3">'+inhalt+'</div></div>'+
+    '<button type="button" class="btn w-fit" data-variant="ghost" data-size="sm" hidden onclick="aufklemmen(this)">… mehr anzeigen</button></div></div>';
+}
+const KLEMME='max-height:5.6em;mask-image:linear-gradient(to bottom,black 60%,transparent)';
+// Nach dem Zeichnen messen: Wo alles in drei Zeilen passt, fällt die Klemme weg (kein Ausblenden,
+// kein Knopf); sonst erscheint der Knopf. Messen geht erst, wenn die Kästen im Dokument stehen.
+function klemmen(wurzel){
+  for(const k of wurzel.querySelectorAll('[data-klemme]')){
+    const knopf=k.nextElementSibling;
+    if(k.scrollHeight>k.clientHeight+2){ knopf.hidden=false; }
+    else { k.removeAttribute('style'); k.removeAttribute('data-klemme'); }
+  }
+}
+function aufklemmen(knopf){
+  const k=knopf.previousElementSibling, zu=k.hasAttribute('data-klemme');
+  if(zu){ k.removeAttribute('style'); k.removeAttribute('data-klemme'); knopf.textContent='weniger anzeigen'; }
+  else { k.setAttribute('style',KLEMME); k.setAttribute('data-klemme',''); knopf.textContent='… mehr anzeigen'; }
 }
 function schritt(o){
   // Auslöser oben (jeder mit Symbol) und Ende unten (Haken oder Kreuz), mit Luft zum Rand.
-  const pille=(sym,t)=>'<div class="flex items-center gap-2 rounded-full border bg-muted px-4 py-2 text-sm font-medium">'+sym+txt(t)+'</div>';
+  const pille=(sym,t)=>'<div class="flex items-center gap-3 rounded-full border bg-muted px-6 py-3 text-base font-semibold shadow-md">'+sym+txt(t)+'</div>';
   if(o.art==='grenze'&&o.ende) return '<div class="flex justify-center mb-6">'+pille(SYME[o.fehler?'x':'check'],o.titel)+'</div>';
-  if(o.art==='grenze') return '<div class="flex flex-col items-center gap-3 pt-6"><span class="text-muted-foreground text-sm">Auslöser</span>'+
-    '<div class="flex flex-wrap justify-center gap-3">'+o.ausloeser.map(a=>pille(SYMG[a[0]]||'',a[1])).join('')+'</div></div>';
+  if(o.art==='grenze') return '<div class="flex flex-col items-center gap-3 pt-6"><span class="text-muted-foreground text-base">Auslöser</span>'+
+    '<div class="flex flex-wrap justify-center gap-3">'+o.ausloeser.map(a=>pille(SYMA[a[0]]||'',a[1])).join('')+'</div></div>';
   const a=ART[o.art]||['',''];
   // Symbol GETRENNT vom Chip und größer — im Chip war es zu klein, um etwas zu sagen.
   const badge=(SYMG[a[2]]||'')+'<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
@@ -284,15 +306,15 @@ async function lauf(doc){
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
-  if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',ergebnis:kart+(kname!=='—'?': '+kname:''),
-    variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
+  if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
+    text:'Ergebnis: <b>'+txt(kart)+'</b>'+(kname!=='—'?' — '+txt(kname):''),
     klappen:k.pass2?[['Eingabe — Pass 2'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Ausgabe — Pass 2',tabelle(k.pass2.response||{})]]:[]});
   const felder=Object.entries(w.fields_ki||{});
   if(t.writeback||t.error) L.push({phase:'Schreiben',art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
-    klappen:[['Ausgabe — geschrieben',tabelle(w)]]});
+    klappen:[['Ausgabe — geschrieben',tabelle(w),true]]});
   L.push({art:'grenze',ende:true,fehler:!!t.error,titel:t.error?'Abgebrochen':'Ende'});
-  ziel.innerHTML=kette(L);
+  ziel.innerHTML=kette(L); klemmen(ziel);
 }
 setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterval(()=>{ if(!document.getElementById('lauf').open) laden(); },30000);
 """
@@ -410,7 +432,7 @@ function zeichnen(){
       was:'Optional: Ein eigenes Skript bekommt das Ergebnis, etwa für eine Verknüpfung in ein anderes System.',
       text:CFG.nachbearbeitung?'Eingerichtet: <b>'+txt(CFG.nachbearbeitung)+'</b>':'Nicht eingerichtet.'},
     {art:'grenze',ende:true,titel:'Ende'}];
-  document.getElementById('schritte').innerHTML=kette(L);
+  const sch=document.getElementById('schritte'); sch.innerHTML=kette(L); klemmen(sch);
 }
 async function laden(){
   try{ CFG=await holen('/api/config'); }catch(e){}
@@ -435,7 +457,9 @@ function promptEditor(){
     '<div id="p-vorschau">'+teileHtml(V.system_teile,V.platzhalter)+'</div>';
 }
 function promptAuf(){
-  const t=document.getElementById('prompt-vorlage'); t.value=V.vorlage||'';
+  const t=document.getElementById('prompt-vorlage'), k=t.closest('[data-klemme]');
+  if(k) aufklemmen(k.nextElementSibling);
+  t.value=V.vorlage||'';
   document.getElementById('p-editor').hidden=false; document.getElementById('p-titel').hidden=false;
   document.getElementById('p-auf').hidden=true; t.focus();
 }
@@ -667,8 +691,10 @@ _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down
                        .replace("%SYMG%", _json({n: symbol(n, "size-6 shrink-0 text-muted-foreground")
                                                  for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
                                                            "file-plus", "message-square", "layout-dashboard", "list")}))
-                       .replace("%SYME%", _json({"check": symbol("circle-check", "size-6 shrink-0 text-success"),
-                                                 "x": symbol("x", "size-6 shrink-0 text-destructive")}))
+                       .replace("%SYMA%", _json({n: symbol(n, "size-7 shrink-0 text-muted-foreground")
+                                                 for n in ("bot", "file-plus", "message-square", "layout-dashboard", "list")}))
+                       .replace("%SYME%", _json({"check": symbol("circle-check", "size-7 shrink-0 text-success"),
+                                                 "x": symbol("x", "size-7 shrink-0 text-destructive")}))
                        .replace("%SYMK%", _json({n: symbol(n, "size-5 shrink-0 text-muted-foreground") for n in
                                                  ("circle-check", "file-text", "refresh-ccw", "circle-alert", "clock", "eye", "info")}))
                        .replace("%SYM%", _json({n: symbol(n) for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",

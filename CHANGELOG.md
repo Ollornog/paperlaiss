@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Panel auf Python 3.14, Ablauf mit Textvorschau
+
+- Panel-Abbild auf `python:3.14-slim` (vorher 3.12; der Dependabot-PR dazu hatte sich selbst
+  geschlossen). Auf dem Testbett gebaut und gestartet, alle Seiten laden.
+- Ablauf und Lauf-Popup: Eingabe und Ausgabe zeigen immer die ersten drei Zeilen; ist mehr Text
+  da, blendet er nach unten aus, und „… mehr anzeigen" klappt ihn auf. Passt alles, gibt es weder
+  Ausblenden noch Knopf. Sonderweg per Inline-Maske, weil C22 kein line-clamp hat (C22 T-9).
+- Auslöser und Ende größer (Chip, Symbol, Schrift).
+- Lauf-Popup: die Ausgabe von „Nach Paperless geschrieben" ist aufgeklappt; die
+  Korrespondenten-Zuordnung steht als Text im Kasten statt als Chip.
+- Backlog T-4 („Erneut verarbeiten" gegen „KI") verworfen: bleibt so (PO-Entscheidung).
+
 ### Geändert — Korrespondent zuordnen (Pass 2) in derselben KI-Unterhaltung wie Pass 1
 
 - Pass 2 ist kein eigener Aufruf mit nur dem Namen mehr, sondern eine weitere Nachricht in der
