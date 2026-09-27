@@ -404,26 +404,83 @@ def mail_bestaetigt(mail_from, corr_id, mail_corr, text, absender):
     return addr in klein or dom in klein or (ki and ki.split("@")[1] == dom)
 
 
-def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle):
-    """Leere Stammdaten eines Korrespondenten aus dem Dokument füllen.
+# Listenfelder, an die die Erfassung einen weiteren Wert anhängen darf (PO 2026-09-27: „man kann doch
+# hinzufügen?“). Nicht die USt-ID — eine Firma hat eine; eine zweite spricht für eine Fehlzuordnung.
+ANHAENGBAR = {"iban", "email", "domains", "telefon", "kundennummer"}
+MAX_WERTE = 10
+
+
+def gleicher_wert(feld, a, b):
+    """Derselbe Wert in einem Stammdatenfeld, unabhängig von der Schreibweise."""
+    if feld == "iban":
+        return bool(norm_iban(a)) and norm_iban(a) == norm_iban(b)
+    if feld == "ustid":
+        return bool(norm_ustid(a)) and norm_ustid(a) == norm_ustid(b)
+    if feld == "email":
+        return bool(norm_mail(a)) and norm_mail(a) == norm_mail(b)
+    if feld == "telefon":
+        return telefon_gleich(a, b)
+    k = lambda v: re.sub(r"^(www\.|@)|[\s.\-/]", "", str(v or "")).upper()
+    return bool(k(a)) and k(a) == k(b)
+
+
+def stammdaten_fremd(corrs, meta, eigener_id):
+    """fremd(feld, wert) → Name des ANDEREN Korrespondenten, der den Wert schon hat, sonst None."""
+    def fremd(feld, w):
+        for c in corrs:
+            if c["id"] != eigener_id and any(gleicher_wert(feld, w, x) for x in werte(meta(c["id"]), feld)):
+                return c["name"]
+        return None
+    return fremd
+
+
+def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None):
+    """Stammdaten eines Korrespondenten aus dem Dokument nachtragen.
 
     Rein: bekommt den alten Eintrag, gibt (neuer Eintrag, geschrieben, verworfen) zurück.
-    Überschreibt nie, übernimmt keine eigene Kennung und kein kaputtes Format, und merkt sich
-    in `erfasst`, woher ein Wert stammt."""
+    Überschreibt nie. Ein leeres Feld wird gefüllt; an ein Listenfeld aus ANHAENGBAR wird ein
+    neuer Wert angehängt, wenn `anhaengen` (die Zuordnung ist sicher: Pass 1 nannte den
+    Korrespondenten exakt). Nie übernommen: eigene Kennungen, kaputte Formate und ein Wert, der
+    schon einem anderen Korrespondenten gehört (`fremd`) — sonst zöge eine Fehlzuordnung jedes
+    spätere Dokument mit derselben IBAN zum falschen. `erfasst` merkt sich die Herkunft, bei
+    Listenfeldern je Wert ({wert: quelle}). Bis 2026-09-27 füllte die Erfassung nur leere Felder."""
     alt = dict(alt or {})
     neu, erfasst = dict(alt), dict(alt.get("erfasst") or {})
     geschrieben, verworfen = {}, {}
     ab = absender if isinstance(absender, dict) else {}
     wert = lambda k: "" if is_null(ab.get(k)) else str(ab.get(k)).strip()
 
-    def leer(feld):
-        return not werte(alt, feld)
-
     def setze(feld, w):
-        if w and leer(feld) and feld not in geschrieben:
+        if not w or feld in geschrieben:
+            return
+        bisher = werte(alt, feld)
+        if any(gleicher_wert(feld, w, x) for x in bisher):
+            return                                              # schon da
+        anderer = fremd(feld, w) if fremd else None
+        if anderer:
+            verworfen[feld] = f"gehört schon zu {anderer}"
+            return
+        if not bisher:
             geschrieben[feld] = w
             neu[feld] = [w] if feld in LISTENFELDER else w       # Listenfelder als Liste speichern
-            erfasst[feld] = quelle
+            erfasst[feld] = {w: quelle} if feld in LISTENFELDER else quelle
+            return
+        if feld not in ANHAENGBAR:
+            if feld == "ustid":
+                verworfen[feld] = "andere USt-ID schon gespeichert — Zuordnung prüfen"
+            return
+        if not anhaengen:
+            verworfen[feld] = "nicht angehängt — Zuordnung nur über einen ähnlichen Namen"
+            return
+        if len(bisher) >= MAX_WERTE:
+            verworfen[feld] = f"schon {MAX_WERTE} Werte"
+            return
+        geschrieben[feld] = w
+        neu[feld] = list(bisher) + [w]
+        e = erfasst.get(feld)
+        if isinstance(e, str):                                  # alter Vermerk galt den bisherigen Werten
+            e = {x: e for x in bisher}
+        erfasst[feld] = {**(e if isinstance(e, dict) else {}), w: quelle}
 
     roh = wert("ustid")
     if roh:
@@ -1198,33 +1255,64 @@ def _personenname(roh):
     return alle == kern and 2 <= len(kern) <= 3 and all(w.isalpha() and len(w) >= 2 for w in kern)
 
 
-def pass2_plausibel(vorschlag, name, alias=""):
-    """Darf Pass 2 den Vorschlag diesem bestehenden Korrespondenten zuordnen? (ja/nein, Grund)
+def _gleich(a, b):
+    """Dasselbe Wort, Tippfehler nur bei langen Wörtern: ab 6 Zeichen reicht Ähnlichkeit 0,9
+    („Neuhauserr“ = „Neuhauser“), kürzere müssen gleich sein — sonst wäre „Uber“ = „Huber“ und
+    „Bundesnetzagentur“ = „Bundesagentur“ (gemessen 2026-09-27 an zwei echten Namenslisten)."""
+    if a == b:
+        return True
+    return min(len(a), len(b)) >= 6 and difflib.SequenceMatcher(None, a, b).ratio() >= 0.9
 
-    Eine Sperre im Code hinter der KI-Antwort: Pass 2 ordnete 2026-09-27 „Anna Berger“ dem
-    Korrespondenten „Anna Zeller“ zu (gleicher Vorname) und „Klein + Verbrauchsmaterial“ dem
-    Korrespondenten „Klein Werkzeughandel“ (ein gleiches Allerweltswort) — und die Stammdaten-Erfassung
-    trug dann IBAN, Mail und Adresse des einen beim anderen ein. Die Regeln, der Reihe nach:
-      1. Steckt der Vorschlag im Kandidaten (jedes Wort, Tippfehler erlaubt): ja.
-      2. Sind beide Personennamen: nur wenn der Nachname passt.
-      3. Sonst: ein gemeinsames Wort mit mindestens 6 Zeichen („telekom“ ja, „klein“ nein).
-    Lieber einmal ein neuer Korrespondent zu viel als fremde Stammdaten beim falschen."""
-    a = set(ctoks(vorschlag))
+
+def _vorname_passt(a, b):
+    """Gleicher Vorname, oder einer kürzt den anderen ab (Max/Maximilian, Alex/Alexander) — eine
+    Abkürzung spart mindestens drei Buchstaben; „Engel“/„Engels“ ist keine."""
+    k, l = sorted((a, b), key=len)
+    return _gleich(a, b) or (len(k) >= 2 and l.startswith(k) and len(l) - len(k) >= 3)
+
+
+def pass2_plausibel(vorschlag, name, alias="", haeufigkeit=None):
+    """Ist der Vorschlag eine Namensvariante dieses bestehenden Korrespondenten? (ja/nein, Grund)
+
+    Seit 2026-09-27 (spät) entscheidet die Regel, OB Pass 2 überhaupt gefragt wird: nur Korrespondenten,
+    die sie besteht, kommen in die Auswahl; besteht keiner, wird ohne zweiten KI-Aufruf neu angelegt.
+    Allein zuordnen darf sie nicht — gemessen an zwei echten Namenslisten hätte sie 23 von 210 bzw. 37
+    von 200 Namen einem anderen Korrespondenten zugeschlagen. Die Regeln, der Reihe nach:
+      1. Steckt der Vorschlag im Kandidaten (jedes Wort; Tippfehler nur bei langen Wörtern): ja.
+      2. Sind beide Personennamen: Nachname gleich UND Vorname gleich oder abgekürzt.
+      3. Sonst: ein gemeinsames Wort ab 6 Zeichen, das selten ist — höchstens ein Korrespondent trägt
+         es (`haeufigkeit`: Wort → Anzahl Korrespondenten). „Telekom“ ja, „Hamburg“, „Autohaus“ nein.
+    Anlass: Pass 2 ordnete „Anna Berger“ „Anna Zeller“ zu und „Klein + Verbrauchsmaterial“ „Klein
+    Werkzeughandel“; die Stammdaten-Erfassung trug dann IBAN, Mail und Adresse beim falschen ein."""
+    a = ctoks(vorschlag)
     b = set(ctoks(name)) | {w for teil in str(alias or "").split(",") for w in ctoks(teil)}
     if not a or not b:
         return True, "nichts zu vergleichen"
-    if all(any(_aehnlich(x, y) for y in b) for x in a):
+    if all(any(_gleich(x, y) for y in b) for x in a):
         return True, "Vorschlag steckt im Namen"
-    gemeinsam = [x for x in a if any(_aehnlich(x, y) for y in b)]
+    if _personenname(vorschlag) and _personenname(name):
+        pa, pb = ctoks(vorschlag), ctoks(name)
+        if not _gleich(pa[-1], pb[-1]):
+            return False, "anderer Nachname"
+        if not _vorname_passt(pa[0], pb[0]):
+            return False, "anderer Vorname (nur der Nachname gleich)"
+        return True, "gleicher Name"
+    gemeinsam = sorted({y for x in a for y in b if _gleich(x, y)})
     if not gemeinsam:
         return False, "kein gemeinsames Wort"
-    if _personenname(vorschlag) and _personenname(name):
-        if _aehnlich(ctoks(vorschlag)[-1], ctoks(name)[-1]):
-            return True, "gleicher Nachname"
-        return False, "anderer Nachname (nur der Vorname gleich)"
-    if any(len(x) >= 6 for x in gemeinsam):
-        return True, f"gemeinsam: {', '.join(sorted(gemeinsam))}"
-    return False, f"nur kurzes gemeinsames Wort ({', '.join(sorted(gemeinsam))})"
+    selten = [y for y in gemeinsam if len(y) >= 6 and (haeufigkeit is None or haeufigkeit.get(y, 0) <= 1)]
+    if selten:
+        return True, f"gemeinsam: {', '.join(selten)}"
+    return False, f"nur kurzes oder häufiges gemeinsames Wort ({', '.join(gemeinsam)})"
+
+
+def namens_haeufigkeit(corrs, alias):
+    """Wort → in wie vielen Korrespondenten (Name oder Alias) es vorkommt — für Regel 3 oben."""
+    z = {}
+    for c in corrs:
+        for w in set(ctoks(c["name"])) | {w for teil in str(alias(c) or "").split(",") for w in ctoks(teil)}:
+            z[w] = z.get(w, 0) + 1
+    return z
 
 
 def pass2_frage(name, kandidaten, beispiele=""):
@@ -1639,7 +1727,18 @@ def main():
         if exact:
             corr_id = exact["id"]; corr_info = f"exakt='{exact['name']}'"
         else:
-            cands = [c for s, c in scored[:20] if s >= 0.28]
+            # Nur ähnliche Namen, die die Namensregel bestehen — sonst ohne zweiten KI-Aufruf neu anlegen
+            # (bis 2026-09-27 fragte Pass 2 bei jeder Ähnlichkeit ab 0,28: 9 von 33 Läufen, davon 4 ohne
+            # Treffer und 2 falsche Zuordnungen, die erst die Sperre danach abfing).
+            _hf = namens_haeufigkeit(corrs, calias)
+            aehnlich = [c for s, c in scored[:20] if s >= 0.28]
+            cands, abgelehnt = [], []
+            for c in aehnlich:
+                ok, grund = pass2_plausibel(corr_name, c["name"], calias(c), _hf)
+                (cands if ok else abgelehnt).append(c if ok else (c["name"], grund))
+            if not cands and aehnlich:
+                pass2 = {"uebersprungen": "kein ähnlicher Korrespondent besteht die Namensregel",
+                         "abgelehnt": [f"{n} ({g})" for n, g in abgelehnt[:8]]}
             if cands:
                 # Pass 2 als weitere Nachricht in DERSELBEN Unterhaltung wie Pass 1: die KI sieht
                 # dabei das ganze Dokument und ihre eigene Analyse, nicht nur einen Namen. (Bis
@@ -1651,16 +1750,12 @@ def main():
                 messages.append({"role": "user", "content": p2_usr})
                 pick, assistant_raw = mistral_chat(messages, 200, pass2_schema(list(dict.fromkeys(c["name"] for c in cands))), "pass2")
                 pass2 = {"user": p2_usr, "response": pick, "im_gespraech": True}
+                pass2["abgelehnt"] = [f"{n} ({g})" for n, g in abgelehnt[:8]]
                 m = pick.get("match")
                 if m:
                     for c in cands:
                         if norm(c["name"]) == norm(m):
-                            ok, grund = pass2_plausibel(corr_name, c["name"], calias(c))
-                            pass2["sperre"] = {"kandidat": c["name"], "zugelassen": ok, "grund": grund}
-                            if ok:
-                                corr_id = c["id"]; corr_info = f"gewählt='{c['name']}'"
-                            else:
-                                log(f"PASS2-SPERRE {doc.get('id')} | '{corr_name}' ≠ '{c['name']}' ({grund})")
+                            corr_id = c["id"]; corr_info = f"gewählt='{c['name']}'"
                             break
             if corr_id is None:
                 # Kein erfundener Absender aus Zeichensalat: den bisherigen Korrespondenten nur
@@ -1699,7 +1794,9 @@ def main():
     if CFG.get("stammdaten_erfassen", True) and not corr_info.startswith("bestehenden behalten"):
         quelle = f"KI · {datetime.date.today():%Y-%m-%d} · Dokument {did}"
         _mail = mail_from if mail_bestaetigt(mail_from, corr_id, mail_corr, _text, prop.get("absender")) else ""
-        aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle)
+        _anh = corr_info.startswith("exakt")
+        _fremd = stammdaten_fremd(corrs, cmeta, corr_id)
+        aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle, _anh, _fremd)
         try:
             if corr_id and not DRY:
                 g, v = stammdaten_schreiben(corr_id, aenderung)

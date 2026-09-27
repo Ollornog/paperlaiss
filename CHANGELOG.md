@@ -6,6 +6,30 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Stammdaten: Listenfelder bekommen weitere Werte, Pass 2 nur noch mit echtem Kandidaten
+
+- **Anhängen statt nur leere Felder** (PO: „man kann doch hinzufügen?“): IBAN, Mail, Domain, Telefon
+  und Kundennummer werden als weiterer Wert angehängt, wenn Pass 1 den Korrespondenten exakt nannte
+  (höchstens 10 je Feld). Nie überschrieben; USt-ID und Adresse bleiben einzeln, eine zweite USt-ID
+  steht als Warnung im Lauf. Neu für alle Felder: ein Wert, der schon einem anderen Korrespondenten
+  gehört, wird verworfen („gehört schon zu …“) — sonst zöge eine Fehlzuordnung jedes spätere Dokument
+  mit derselben IBAN zum falschen. Nach einer Zuordnung über Pass 2 wird nichts angehängt. Die
+  Herkunft steht bei Listenfeldern je Wert (`erfasst[feld] = {wert: quelle}`) und im Dialog neben dem
+  Wert; wer einen Wert von Hand löscht, nimmt nur dessen Vermerk mit.
+- **Pass 2 nur noch mit Kandidaten, die die Namensregel bestehen** (PO: „warum 2 KI-Aufrufe?“). Bis
+  jetzt fragte Pass 2 bei jeder Namensähnlichkeit ab 0,28 — 9 von 33 Läufen, davon 4 ohne Treffer und
+  2 falsche Wahlen, die erst die Sperre danach abfing. Jetzt entscheidet die Regel vorher; besteht
+  kein ähnlicher Name, wird ohne zweiten Aufruf neu angelegt. Ganz ersetzen kann sie Pass 2 nicht:
+  gemessen an zwei echten Namenslisten hätte sie allein 23 von 210 bzw. 37 von 200 Namen einem anderen
+  Korrespondenten zugeschlagen; auch eine Vorsuche über Namensteile vor Pass 1 fand nur 4–10 % mehr
+  und brachte in rund 80 % der Dokumente falsche Kandidaten mit.
+- **Namensregel geschärft**, an denselben Listen: Personen brauchen gleichen Nach- UND Vornamen (oder
+  eine echte Abkürzung, Max/Maximilian); Tippfehler-Toleranz nur für Wörter ab 6 Zeichen und ab
+  Ähnlichkeit 0,9 („Uber“ ≠ „Huber“, „Bundesnetzagentur“ ≠ „Bundesagentur“); ein gemeinsames Wort
+  zählt nur, wenn höchstens ein Korrespondent es trägt („Hamburg“, „Autohaus“ nein).
+- Belege: Trockenlauf alt/neu an 19 Dokumenten des Testbetts — 19-mal dieselbe Zuordnung; Tests je
+  Regel und im Lauf; neun Mutationen, alle rot.
+
 ### Behoben — Verlauf zeigte bei frischer Installation nur einen Tag
 
 - Der Verlauf in der Aktivität begann mit der ersten Logzeile: eine Installation, die erst seit

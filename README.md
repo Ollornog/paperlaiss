@@ -157,9 +157,20 @@ classifier uses it in three ways:
   own name.
 - **Filling in master data.** `stammdaten_erfassen` (on by default): after assignment, the
   counterpart's VAT ID, IBAN, e-mail/domain, phone, address and customer number from the document
-  are written into **empty** fields only, never overwriting, with their origin (`erfasst`) shown in
+  fill empty fields; IBAN, e-mail, domain, phone and customer number are **appended** as a further
+  value when the analysis named the correspondent exactly (at most 10 per field). Nothing is ever
+  overwritten; VAT ID and address stay single (a second VAT ID is reported, not stored); a value that
+  already belongs to another correspondent is dropped, so one wrong assignment cannot pull later
+  documents to the wrong correspondent. The origin (`erfasst`, per value for list fields) is shown in
   the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
+- **Matching the name.** If the name from the analysis matches no correspondent exactly, a second
+  message in the same conversation ("Pass 2") asks which similar correspondent is meant — only for
+  similar names that pass a fixed name rule (the name is contained in the other, typos only in long
+  words; persons: same last *and* first name; otherwise a rare shared word of 6+ letters). If none
+  passes, a new correspondent is created without a second call. The rule alone never assigns:
+  measured against two real name lists it would have merged 10–18 % of the names into a different
+  correspondent.
 
 ## Deployment (Docker)
 

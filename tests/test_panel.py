@@ -281,6 +281,15 @@ r.check("Listenfelder: ein zweiter Wert zu einem KI-Wert ist eine Handänderung 
 r.check("Listenfelder: unveränderte Liste behält den KI-Vermerk (auch in anderer Schreibweise)",
         kern.korr_eintrag({"telefon": ["+4366212345"], "erfasst": {"telefon": "KI"}},
                           {"telefon": ["0043 (0) 662 123 45"]}).get("erfasst") == {"telefon": "KI"})
+# Herkunft je Wert (seit 2026-09-27): wer einen Wert von Hand löscht, nimmt nur dessen Vermerk mit.
+_hj = kern.korr_eintrag({"telefon": ["+4366212345", "066299999"],
+                         "erfasst": {"telefon": {"+4366212345": "KI · Dok 1", "066299999": "KI · Dok 2"}}},
+                        {"telefon": ["+43 662 12345", "0664 5555555"]})
+r.check("Listenfelder: Herkunft je Wert bleibt für die übrigen Werte, gelöschte und neue haben keine",
+        _hj.get("erfasst") == {"telefon": {"+4366212345": "KI · Dok 1"}}, str(_hj))
+r.check("Listenfelder: alle KI-Werte gelöscht → kein Vermerk",
+        "erfasst" not in kern.korr_eintrag({"telefon": ["+4366212345"], "erfasst": {"telefon": {"+4366212345": "KI"}}},
+                                           {"telefon": ["0664 5555555"]}))
 # Beide Seiten vereinheitlichen gleich: Dialog (kern) und Suche/Erfassung (classify)
 import importlib.util as _ilu
 os.environ.setdefault("CLASSIFY_CONFIG", "/nicht/da.json")

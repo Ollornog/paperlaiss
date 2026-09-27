@@ -310,7 +310,36 @@ r.check("Nachtragen: leere Felder gefüllt, IBAN in Vierergruppen",
         _g.get("ustid") == "ATU99988777" and _g.get("iban") == "AT48 3200 0000 1234 5864"
         and _g.get("email") == "buchhaltung@software.example" and _g.get("domains") == "software.example", str(_g))
 r.check("Nachtragen: gefülltes Feld wird nie überschrieben", _n["telefon"] == "+43 1 234" and "telefon" not in _g)
-r.check("Nachtragen: Herkunft je Feld vermerkt", _n["erfasst"].get("ustid") == _q and "telefon" not in _n["erfasst"])
+r.check("Nachtragen: Herkunft vermerkt — bei Listenfeldern je Wert", _n["erfasst"].get("ustid") == {"ATU99988777": _q}
+        and _n["erfasst"].get("adresse") == _q and "telefon" not in _n["erfasst"], str(_n["erfasst"]))
+r.check("Nachtragen: ohne sichere Zuordnung wird nichts angehängt (nur leere Felder)",
+        _v.get("telefon", "").startswith("nicht angehängt"), str(_v))
+
+# ---- Anhängen an Listenfelder (PO 2026-09-27: „man kann doch hinzufügen?“)
+_alt_e = {"telefon": "+43 1 234567", "iban": ["AT61 1904 3002 3457 3201"], "ustid": ["ATU11122233"], "adresse": "Alt 1",
+          "kundennummer": ["K-1"], "erfasst": {"telefon": "KI · alt"}}
+_fr = lambda feld, w: "Andere Firma" if feld == "iban" and classify.norm_iban(w) == "DE89370400440532013000" else None
+_n2, _g2, _v2 = classify.stammdaten_nachtragen(
+    _alt_e, {"telefon": "0662 99 88 77", "iban": "AT48 3200 0000 1234 5864", "ustid": "ATU99988777",
+             "adresse": "Neu 2", "kundennummer": "K 1"}, "", _eig, _q, anhaengen=True, fremd=_fr)
+r.check("Anhängen: neue Telefonnummer und IBAN kommen dazu, die alten bleiben",
+        _n2["telefon"] == ["+43 1 234567", "0662998877"] and _n2["iban"] == ["AT61 1904 3002 3457 3201", "AT48 3200 0000 1234 5864"], str(_n2))
+r.check("Anhängen: Herkunft je Wert, der alte Vermerk (Text) gilt weiter für den alten Wert",
+        _n2["erfasst"]["telefon"] == {"+43 1 234567": "KI · alt", "0662998877": _q} and _n2["erfasst"]["iban"] == {"AT48 3200 0000 1234 5864": _q},
+        str(_n2["erfasst"]))
+r.check("Anhängen: gleicher Wert in anderer Schreibweise („K 1“ = „K-1“) kommt nicht doppelt", _n2["kundennummer"] == ["K-1"], str(_n2))
+r.check("Anhängen: USt-ID und Adresse nie — eine zweite USt-ID wird als Warnung verworfen",
+        _n2["ustid"] == ["ATU11122233"] and _n2["adresse"] == "Alt 1" and "USt-ID" in _v2.get("ustid", ""), str(_v2))
+_n3, _g3b, _v3b = classify.stammdaten_nachtragen({}, {"iban": "DE89 3704 0044 0532 0130 00"}, "", _eig, _q, anhaengen=True, fremd=_fr)
+r.check("Nie: ein Wert, der schon einem anderen Korrespondenten gehört — auch nicht in ein leeres Feld",
+        "iban" not in _n3 and _v3b.get("iban") == "gehört schon zu Andere Firma", str(_v3b))
+_voll = {"telefon": [f"+43 1 {i:06d}" for i in range(classify.MAX_WERTE)]}
+r.check("Anhängen: höchstens MAX_WERTE Werte je Feld",
+        "telefon" not in classify.stammdaten_nachtragen(_voll, {"telefon": "+43 699 111222"}, "", _eig, _q, anhaengen=True)[1])
+r.check("fremd: findet den anderen Korrespondenten über jede Schreibweise, nie sich selbst",
+        classify.stammdaten_fremd([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}],
+                                  lambda i: {"telefon": ["+43 662 123456"]} if i == 2 else {}, 1)("telefon", "0662 12 34 56") == "B"
+        and classify.stammdaten_fremd([{"id": 2, "name": "B"}], lambda i: {"telefon": ["+43 662 123456"]}, 2)("telefon", "0662123456") is None)
 _n2, _g2, _v2 = classify.stammdaten_nachtragen(
     {"uid": "ATU11111111"}, {"ustid": "ATU11112222", "iban": "AT61 1904 3002 3457 3201"}, "", _eig, _q)
 r.check("Nachtragen: eigene IBAN verworfen, Alt-Schlüssel uid zählt als gefüllt",
@@ -397,6 +426,23 @@ r.check("Verdrahtung: Trockenlauf zeigt die Stammdaten, schreibt sie nicht",
         and classify.TRACE["stammdaten"].get("trocken") is True, str(classify.TRACE.get("stammdaten")))
 _o = _lauf([_ok], text=_gut + " Absender: Nord Autoteile, Musterstadt",
            korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Nord Autoteile GmbH"}])
+classify.CORR_META.clear(); classify.CORR_META.update({"7": {"iban": ["AT61 1904 3002 3457 3201"]},
+                                                       "8": {"iban": ["DE89 3704 0044 0532 0130 00"]}})
+_a1 = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "AT48 3200 0000 1234 5864"}}],
+            korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+_a1sd = classify.TRACE.get("stammdaten") or {}
+_a2 = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00"}}],
+            korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+_a2sd = classify.TRACE.get("stammdaten") or {}
+_a3 = _lauf([{**_ok, "correspondent": "Beispiel Softwar", "absender": {"iban": "AT48 3200 0000 1234 5864"}},
+             {"match": "Beispiel Software"}], korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
+_a3sd = classify.TRACE.get("stammdaten") or {}
+classify.CORR_META.clear()
+r.check("Im Lauf: exakte Zuordnung hängt die neue IBAN an", _a1sd.get("geschrieben", {}).get("iban") == "AT48 3200 0000 1234 5864", str(_a1sd))
+r.check("Im Lauf: IBAN eines anderen Korrespondenten wird verworfen", "Andere Firma" in _a2sd.get("verworfen", {}).get("iban", ""), str(_a2sd))
+r.check("Im Lauf: Zuordnung über Pass 2 (ähnlicher Name) hängt nicht an",
+        "iban" not in _a3sd.get("geschrieben", {}) and _a3sd.get("verworfen", {}).get("iban", "").startswith("nicht angehängt"),
+        f"chat={len(_a3['chat'])} {_a3sd}")
 r.check("Verdrahtung: ohne Kennung findet der Name im Text den Kandidaten (Rechtsform egal)",
         "- Nord Autoteile GmbH" in _o["chat"][0] and "Name „Nord Autoteile GmbH“ im Briefkopf" in _o["chat"][0]
         and "Beispiel Software" not in _o["chat"][0].split("METADATEN")[0])
@@ -946,13 +992,38 @@ r.check("Pass-2-Sperre: gleicher Vorname oder kurzes Allerweltswort reicht nicht
         not _p2f, str(_p2f))
 r.check("Pass-2-Sperre: ein Alias zählt als Name (Zuordnung über den gepflegten Alias bleibt möglich)",
         classify.pass2_plausibel("Telefonica", "O2", "Telefónica Germany, O2")[0])
-# Echter Lauf: Pass 1 erkennt „Anna Berger“, Pass 2 wählt „Anna Zeller“ → nicht zuordnen, neu anlegen.
+# Echter Lauf: Pass 1 erkennt „Anna Berger“; „Anna Zeller“ besteht die Namensregel nicht → Pass 2 wird gar
+# nicht gefragt, kein zweiter KI-Aufruf, neuer Korrespondent (seit 2026-09-27 spät).
 _sp = _lauf([{**_ok, "correspondent": "Anna Berger"}, {"match": "Anna Zeller"}], dry=False,
             korrespondenten=[{"id": 192, "name": "Anna Zeller"}])
 _sp_korr = [p.get("correspondent") for p in _sp.get("patch", [])]
-r.check("Pass-2-Sperre im Lauf: die KI-Wahl „Anna Zeller“ wird verworfen, der Beleg geht nicht an 192",
-        192 not in _sp_korr and (classify.TRACE.get("correspondent") or {}).get("pass2", {}).get("sperre", {}).get("zugelassen") is False,
-        f"{_sp_korr} {(classify.TRACE.get('correspondent') or {}).get('pass2', {}).get('sperre')}")
+_sp_p2 = (classify.TRACE.get("correspondent") or {}).get("pass2") or {}
+r.check("Pass 2 nur mit Kandidat, der die Namensregel besteht: „Anna Zeller“ fällt vorher raus — ein KI-Aufruf, neu angelegt",
+        192 not in _sp_korr and len(_sp["chat"]) == 1 and "uebersprungen" in _sp_p2
+        and any("Anna Zeller" in x for x in _sp_p2.get("abgelehnt", [])), f"{_sp_korr} chat={len(_sp['chat'])} {_sp_p2}")
+# Eine echte Namensvariante: Pass 2 wird gefragt und darf zuordnen.
+_sv = _lauf([{**_ok, "correspondent": "Mavros"}, {"match": "Georg Mavros Automobil GmbH"}], dry=False,
+            korrespondenten=[{"id": 55, "name": "Georg Mavros Automobil GmbH"}, {"id": 56, "name": "Anna Zeller"}])
+r.check("Pass 2 bei echter Namensvariante: gefragt (zweiter Aufruf) und zugeordnet",
+        len(_sv["chat"]) == 2 and [p.get("correspondent") for p in _sv.get("patch", [])][:1] == [55],
+        f"chat={len(_sv['chat'])} {_sv.get('patch')}")
+
+# Die Regel an den Fällen, die sie am 2026-09-27 an zwei echten Namenslisten falsch durchgelassen hätte
+# (Namen verfremdet): gleicher Nachname/anderer Vorname, kurzes Wort per Tippfehler, häufiges Wort.
+_hf = {"hamburg": 3, "autohaus": 5, "osterreichische": 2, "telekom": 1, "beispielmann": 2, "mavros": 1}
+_p3 = [("Florian Musterer", "Judith Anna Musterer", False), ("Uber", "Gregor Huber", False),
+       ("Bundesnetzagentur", "Bundesagentur für Arbeit", False), ("Amtsgericht Hamburg-Nord", "Jugendhilfe Hamburg gGmbH", False),
+       ("Autohaus Beispiel e.U.", "Autohaus Muster GmbH", False), ("Mag. Karl Beispielmann", "Lena Maria Beispielmann", False),
+       ("Mavros", "Georg Mavros Automobil GmbH", True), ("Georg Mavros Automobil GmbH", "Mavros Automobile GmbH", True),
+       ("BLEU CIEL", "SARL BLEU CIEL Gesellschaft mit beschränkter Haftung", True),
+       ("Kleinreparatur.example", "Firma kleinrepartur.example", True),
+       ("Engel", "Engels Reisen", False), ("Engel Bau", "Engels Bau", False), ("Alex Muster", "Alexander Muster", True)]
+_p3f = [(v, n, classify.pass2_plausibel(v, n, "", _hf)) for v, n, soll in _p3 if classify.pass2_plausibel(v, n, "", _hf)[0] != soll]
+r.check("Namensregel: anderer Vorname, kurzes Wort per Tippfehler, häufiges Wort reichen nicht; echte Varianten gehen durch",
+        not _p3f, str(_p3f))
+r.check("Namensregel: Häufigkeit zählt Name und Aliase je Korrespondent einmal",
+        classify.namens_haeufigkeit([{"id": 1, "name": "Autohaus A"}, {"id": 2, "name": "Autohaus B"}, {"id": 3, "name": "X"}],
+                                    lambda c: "Autohaus Alt" if c["id"] == 3 else "").get("autohaus") == 3)
 
 # ---- Telefon: einheitlich speichern und in allen Schreibweisen finden (2026-09-27)
 # Ohne Annahme über das Land (PO: Deutschland und Österreich kommen beide vor — „0“ → „+49“ wäre falsch).
