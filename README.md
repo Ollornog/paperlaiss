@@ -78,9 +78,11 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
 - **Activity** (`/`) — five counters and a 30-day chart that **filter** the list (the filter lives in
   the address, so *Back* undoes it), 100 entries per page. A row opens the **run**: decision tree,
   prompt, AI output, and the OCR text rendered as Markdown.
-- **Flow & prompt** (`/ablauf`) — the path of a document as a decision tree; clicking a node edits
-  the settings behind it (like a node in n8n), including the Pass-1 prompt, shown exactly as it is
-  sent (`CLASSIFY_PROMPT_VORSCHAU=1`).
+- **Flow & prompt** (`/ablauf`) — every step a document goes through, each with its input and output
+  to expand; for the AI calls the prompt and the answer format. The Pass-1 prompt is editable in
+  place and also shown exactly as it is sent (`CLASSIFY_PROMPT_VORSCHAU=1`). A run in the activity
+  list is shown with the same steps and its real prompts and answers.
+- **Info** (`/info`) — what paperlaiss is, links to the repository and the building blocks.
 - **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
   saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
@@ -129,10 +131,9 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 
 ### Buttons in Paperless (optional)
 
-**KI** (magic wand: optional hint, then re-classify — always with Mistral OCR) and **OCR** (only
-re-read the text; metadata stays) — in the document view instead of Paperless' own *Suggest*
-(hidden), and as two entries in the **Actions** menu of the multi-select. No fork, no tags, no
-workflow:
+One **KI** button (magic wand: optional hint, then paperlaiss re-reads the document with Mistral OCR
+and re-classifies it) — in the document view instead of Paperless' own *Suggest* (hidden), and as an
+entry in the **Actions** menu of the multi-select. No fork, no tags, no workflow:
 
 - Paperless runs scripts from `/custom-cont-init.d` on every container start (*Custom Container
   Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` copies

@@ -1,11 +1,9 @@
 /*
- * paperlaiss — KI- und OCR-Knopf in Paperless-ngx.
+ * paperlaiss — KI-Knopf in Paperless-ngx: optionaler Hinweis, dann liest paperlaiss das
+ * Dokument per Mistral-OCR neu und klassifiziert es neu.
  *
- *   KI  (Zauberstab)  optionaler Hinweis, dann neu klassifizieren (immer mit Mistral-OCR)
- *   OCR (Textblatt)   nur den Text per Mistral-OCR neu lesen, Metadaten bleiben
- *
- * Dokumentansicht: zwei Knöpfe anstelle von Paperless' eigenem „Suggest" (ausgeblendet).
- * Dokumentliste:   zwei Einträge im Menü „Actions" der Mehrfachauswahl.
+ * Dokumentansicht: Knopf „KI" anstelle von Paperless' eigenem „Suggest" (ausgeblendet).
+ * Dokumentliste:   Eintrag „KI" im Menü „Actions" der Mehrfachauswahl.
  *
  * Kein Fork: Paperless lädt diese Datei, weil ein Init-Skript sie beim Start einhängt
  * (10-paperlaiss-knoepfe.sh). Die Knöpfe rufen paperlaiss DIREKT (POST /knopf) — ohne Tag,
@@ -13,7 +11,7 @@
  * damit bei Paperless nach, welche Dokumente dieser Nutzer ändern darf, und verarbeitet nur die.
  *
  * Ändert Paperless den Aufbau der Seite, fehlen die Knöpfe — Paperless selbst bleibt heil.
- * Icons: Bootstrap Icons „magic" und „file-earmark-text" (MIT, The Bootstrap Authors).
+ * Icon: Bootstrap Icons „magic" (MIT, The Bootstrap Authors).
  */
 (function () {
   "use strict";
@@ -23,7 +21,6 @@
   const MARKE = "paperlaiss-knoepfe";
   const ICON = {
     ki: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.5 2.672a.5.5 0 1 0 1 0V.843a.5.5 0 0 0-1 0zm4.5.035A.5.5 0 0 0 13.293 2L12 3.293a.5.5 0 1 0 .707.707zM7.293 4A.5.5 0 1 0 8 3.293L6.707 2A.5.5 0 0 0 6 2.707zm-.621 2.5a.5.5 0 1 0 0-1H4.843a.5.5 0 1 0 0 1zm8.485 0a.5.5 0 1 0 0-1h-1.829a.5.5 0 0 0 0 1zM13.293 10A.5.5 0 1 0 14 9.293L12.707 8a.5.5 0 1 0-.707.707zM9.5 11.157a.5.5 0 0 0 1 0V9.328a.5.5 0 0 0-1 0zm1.854-5.097a.5.5 0 0 0 0-.706l-.708-.708a.5.5 0 0 0-.707 0L8.646 5.94a.5.5 0 0 0 0 .707l.708.708a.5.5 0 0 0 .707 0l1.293-1.293Zm-3 3a.5.5 0 0 0 0-.706l-.708-.708a.5.5 0 0 0-.707 0L.646 13.94a.5.5 0 0 0 0 .707l.708.708a.5.5 0 0 0 .707 0z"/></svg>',
-    ocr: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/></svg>',
   };
 
   function dokId() {
@@ -84,10 +81,10 @@
     meldung("paperlaiss antwortet nicht (Zeitüberschreitung). Panel und Protokoll prüfen.", "warning");
   }
 
-  async function ausloesen(ids, modus, hinweis) {
-    const text = modus === "ocr" ? "paperlaiss liest den Text neu" : "paperlaiss klassifiziert neu (mit OCR)";
+  async function ausloesen(ids, hinweis) {
+    const text = "paperlaiss klassifiziert neu (mit OCR)";
     try {
-      const d = await panel("/knopf", { docs: ids, modus: modus, hinweis: hinweis || "" });
+      const d = await panel("/knopf", { docs: ids, hinweis: hinweis || "" });
       if (d.verweigert.length) meldung(`paperlaiss: ${d.verweigert.length} Dokument(e) darfst du nicht ändern — übersprungen.`, "warning");
       if (!d.gestartet.length) return;
       meldung(text + " …");
@@ -137,10 +134,7 @@
     const g = document.createElement("div");
     g.className = "btn-group " + MARKE;
     g.appendChild(knopf(ICON.ki, "KI", "paperlaiss: neu klassifizieren (optional mit Hinweis)",
-      () => dialogKi(1, (h) => ausloesen([dokId()], "ki", h))));
-    g.appendChild(knopf(ICON.ocr, "OCR", "paperlaiss: Text per OCR neu lesen", () => {
-      if (confirm("Text dieses Dokuments per Mistral-OCR neu lesen? Die Metadaten bleiben.")) ausloesen([dokId()], "ocr");
-    }));
+      () => dialogKi(1, (h) => ausloesen([dokId()], h))));
     gruppe.after(g);
     gruppe.style.display = "none";   // Paperless' eigenes „Suggest" — paperlaiss ersetzt es
   }
@@ -185,12 +179,8 @@
     const trenner = document.createElement("div");
     trenner.className = "dropdown-divider " + MARKE;
     menu.appendChild(trenner);
-    menu.appendChild(menuEintrag(ICON.ki, "KI: neu klassifizieren", () =>
-      mehrfach((ids) => dialogKi(ids.length, (h) => ausloesen(ids, "ki", h)))));
-    menu.appendChild(menuEintrag(ICON.ocr, "OCR: Text neu lesen", () =>
-      mehrfach((ids) => {
-        if (confirm(`Text von ${ids.length} Dokument(en) per Mistral-OCR neu lesen? Die Metadaten bleiben.`)) ausloesen(ids, "ocr");
-      })));
+    menu.appendChild(menuEintrag(ICON.ki, "KI", () =>
+      mehrfach((ids) => dialogKi(ids.length, (h) => ausloesen(ids, h)))));
   }
 
   function alles() { einfuegenDetail(); einfuegenListe(); }

@@ -17,6 +17,8 @@ import html
 
 # Lucide-Pfade, wörtlich aus den C22-Komponenten (gleiche Strichstärke, gleicher Rahmen).
 _ICONS = {
+    'external-link': '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+    'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     'arrow-down': '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
     'bot': '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
     'chart-column': '<path d="M3 3v18h18"/><rect width="3" height="6" x="7" y="12"/><rect width="3" height="10" x="12" y="8"/><rect width="3" height="14" x="17" y="4"/>',
@@ -46,6 +48,7 @@ NAVIGATION: list[tuple[str, str, str]] = [
     ("Aktivität", "/", "chart-column"),
     ("Ablauf & Prompt", "/ablauf", "git-branch"),
     ("Einstellungen", "/einstellungen", "settings"),
+    ("Info", "/info", "info"),
 ]
 
 
@@ -79,7 +82,8 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
     """Vollständige Seite: Titelleiste mit Navigation, darunter der Inhalt.
 
     Die Navigation steht in der Titelleiste (C22 `navigation/app-shell.html`, Nav-Punkte als
-    `.btn` ghost/sm), keine Seitenleiste — drei Seiten brauchen keine. Die aktive Seite ist
+    `.btn` ghost/sm), keine Seitenleiste — vier Seiten brauchen keine. Titelleiste und Inhalt
+    stehen in derselben Spur (`max-w-5xl`), damit sie auf breiten Schirmen bündig bleiben. Die aktive Seite ist
     hinterlegt (`bg-accent`) und semantisch markiert (`aria-current`).
     """
     def punkt(name: str, pfad: str, sym: str) -> str:
@@ -92,14 +96,16 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
     raus = (f'<a class="btn" data-variant="outline" data-size="sm" href="/auth/logout">'
             f'{symbol("log-out")}Abmelden</a>' if abmelden else "")
     koerper = f"""<div class="flex h-screen w-full flex-col bg-background text-foreground">
-  <header class="flex shrink-0 items-center gap-3 border-b bg-card px-4 py-2">
-    <a href="/" class="flex items-center gap-2 text-base font-bold">
-      <img src="/logo.png" alt="" width="28" height="28"> paperlaiss
-    </a>
-    <nav class="ms-2 flex items-center gap-1" aria-label="Hauptbereiche">{punkte}</nav>
-    <div class="ms-auto flex items-center gap-3">{raus}</div>
+  <header class="shrink-0 border-b bg-card">
+    <div class="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-2">
+      <a href="/" class="flex items-center gap-2 text-base font-bold">
+        <img src="/logo.png" alt="" width="28" height="28"> paperlaiss
+      </a>
+      <nav class="ms-2 flex items-center gap-1" aria-label="Hauptbereiche">{punkte}</nav>
+      <div class="ms-auto flex items-center gap-3">{raus}</div>
+    </div>
   </header>
-  <main class="flex-1 overflow-y-auto p-6">{inhalt}</main>
+  <main class="flex-1 overflow-y-auto"><div class="mx-auto w-full max-w-5xl p-6">{inhalt}</div></main>
 </div>"""
     return rahmen(titel, koerper)
 

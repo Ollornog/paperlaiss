@@ -77,9 +77,11 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
 - **Aktivität** (`/`) — fünf Kennzahlen und ein 30-Tage-Verlauf **filtern** die Liste (der Filter
   steht in der Adresse, *Zurück* hebt ihn auf), 100 Einträge je Seite. Eine Zeile öffnet den
   **Lauf**: Entscheidungsbaum, Prompt, Ausgabe der KI und den OCR-Text als Markdown.
-- **Ablauf & Prompt** (`/ablauf`) — der Weg eines Dokuments als Entscheidungsbaum; ein Klick auf einen
-  Knoten bearbeitet die Einstellungen dahinter (wie ein Knoten in n8n), auch den Prompt von Pass 1,
-  gezeigt genau so, wie er gesendet wird (`CLASSIFY_PROMPT_VORSCHAU=1`).
+- **Ablauf & Prompt** (`/ablauf`) — jeder Schritt, den ein Dokument durchläuft, aufklappbar mit Eingabe
+  und Ausgabe; bei den KI-Aufrufen Prompt und Antwortformat. Der Prompt von Pass 1 ist dort
+  bearbeitbar und wird auch so gezeigt, wie er gesendet wird (`CLASSIFY_PROMPT_VORSCHAU=1`). Ein Lauf
+  in der Aktivität erscheint mit denselben Schritten und seinen echten Prompts und Antworten.
+- **Info** (`/info`) — was paperlaiss ist, Links zum Repository und zu den Bausteinen.
 - **Einstellungen** (`/einstellungen`) — jeder Wert der wirksamen Konfiguration (Datei plus
   Vorgaben; gespeichert werden nur geänderte Schlüssel).
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
@@ -129,10 +131,10 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 
 ### Knöpfe in Paperless (optional)
 
-**KI** (Zauberstab: optional ein Hinweis, dann neu klassifizieren — immer mit Mistral-OCR) und
-**OCR** (nur den Text neu lesen; Metadaten bleiben) — in der Dokumentansicht anstelle von Paperless'
-eigenem *Suggest* (ausgeblendet) und als zwei Einträge im Menü **Actions** der Mehrfachauswahl.
-Kein Fork, keine Tags, kein Workflow:
+Ein Knopf **KI** (Zauberstab: optional ein Hinweis, dann liest paperlaiss das Dokument per
+Mistral-OCR neu und klassifiziert es neu) — in der Dokumentansicht anstelle von Paperless' eigenem
+*Suggest* (ausgeblendet) und als Eintrag im Menü **Actions** der Mehrfachauswahl. Kein Fork, keine
+Tags, kein Workflow:
 
 - Paperless führt bei jedem Containerstart Skripte aus `/custom-cont-init.d` aus (*Custom Container
   Initialization*). `deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh` kopiert

@@ -26,7 +26,6 @@ Env-Schalter:
   CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
-  CLASSIFY_NUR_OCR=1           nur den Text per Mistral-OCR neu lesen, NICHT klassifizieren
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
   CLASSIFY_SOURCE=knopf|manual|bulk  nur fürs Trace/Log (knopf = KI/OCR-Knopf in Paperless)
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
@@ -47,7 +46,6 @@ DRY = os.environ.get("CLASSIFY_DRY") == "1"
 FORCE = os.environ.get("CLASSIFY_FORCE") == "1"
 FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
-NUR_OCR = os.environ.get("CLASSIFY_NUR_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
 # --- Config (vom Panel schreibbar, mit Defaults) ---
@@ -665,35 +663,6 @@ def baue_system(tpl, types, taglines):
     return system
 
 
-def nur_ocr(did, doc):
-    """Nur den Text neu lesen (OCR-Knopf in Paperless) — Metadaten bleiben, wie sie sind.
-
-    """
-    content = doc.get("content") or ""
-    mark_running(did, "OCR")
-    TRACE["trigger"] = "OCR-Knopf in Paperless (nur Text)"
-    patch = {}
-    try:
-        new = mistral_ocr(did)
-    except Exception as e:
-        new = ""
-        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "error": repr(e)}
-        log(f"OCR-neu-fail {did}: {e!r}")
-    if len(new) > 40:
-        patch["content"] = new
-        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "chars": len(new),
-                        "vorher": len(content), "excerpt": new[:8000]}
-        log(f"OCR-neu {did}: {len(content)} → {len(new)} Zeichen")
-    elif "ocr" not in TRACE:
-        TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen",
-                        "verworfen": f"OCR lieferte nur {len(new)} Zeichen"}
-        log(f"OCR-neu-fail {did}: OCR lieferte nur {len(new)} Zeichen, Text bleibt")
-    if patch and not DRY:
-        send(f"/documents/{did}/", patch, "PATCH")
-    TRACE["_stage"] = "fertig"
-    save_trace(did)
-
-
 def typ_setzen(dt_id, bisher, ausdruecklich):
     """Welchen Dokumenttyp schreiben — oder keinen (None).
 
@@ -707,6 +676,14 @@ def typ_setzen(dt_id, bisher, ausdruecklich):
     if bisher and not ausdruecklich:
         return None
     return dt_id
+
+
+# Die kleinen Prompts von Pass 0 und Pass 2 als Konstanten: der Lauf benutzt sie, und die
+# Panel-Seite „Ablauf & Prompt" zeigt genau diese Texte.
+PASS0_SYSTEM = ('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). '
+                'Antworte NUR JSON {"correspondent": <Name|null>}.')
+PASS2_SYSTEM = ('Du ordnest einen Absender bestehenden Korrespondenten zu. '
+                'Antworte NUR JSON {"match": <exakter Name aus der Liste> ODER null}.')
 
 
 def reservierte_tags(cfg):
@@ -774,6 +751,8 @@ def prompt_vorschau():
             "tagging_enabled", "marker_tag", "unsicher_tag", "summary_field",
             "manual_fields", "nachbearbeitung")},
         "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
+        "pass0_system": PASS0_SYSTEM,
+        "pass2_system": PASS2_SYSTEM,
     }
 
 
@@ -800,9 +779,6 @@ def main():
     content = doc.get("content") or ""
     title = doc.get("title") or ""
     tag_ids_on = list(doc.get("tags", []))
-
-    if NUR_OCR:
-        return nur_ocr(did, doc)
 
     tags_all = get("/tags/?page_size=1000")["results"]
     tagname_by_id = {t["id"]: t["name"] for t in tags_all}
@@ -881,20 +857,22 @@ def main():
     # --- Pass 0: Absender extrahieren → fokussierte Korrespondent-Kandidaten ---
     set_stage(did, "Absender")
     p0_name = ""
+    p0_trace = {"quelle": "keine"}
     if mail_from:   # Absender-Domain → Korrespondent (aus dem Metadaten-Store: email/domains)
         _dom = mail_from.split("@")[-1].strip().lower().strip(">")
         for c in corrs:
             _m = cmeta(c["id"]); _doms = str(_m.get("domains") or _m.get("email") or "").lower()
             if _doms and _dom and (_dom in _doms or mail_from.lower() in _doms):
-                p0_name = c["name"]; break
+                p0_name = c["name"]; p0_trace = {"quelle": f"Absender-Mail ({_dom})"}; break
     if not p0_name:
+        _p0_user = mail_block + 'TITEL: ' + title + _NL + _NL + 'INHALT:' + _NL + content[:2500]
         try:
-            _p0 = mistral('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). Antworte NUR JSON {"correspondent": <Name|null>}.',
-                          mail_block + 'TITEL: ' + title + _NL + _NL + 'INHALT:' + _NL + content[:2500], 150)
+            _p0 = mistral(PASS0_SYSTEM, _p0_user, 150)
         except Exception as e:
             log(f"pass0-fail {did}: {e!r}")   # ohne Absender weiter, aber sichtbar
-            _p0 = {}
+            _p0 = {"fehler": repr(e)}
         p0_name = (_p0.get("correspondent") or "").strip()
+        p0_trace = {"quelle": "KI", "system": PASS0_SYSTEM, "user": _p0_user[:4000], "response": _p0}
     kand = []
     if p0_name:
         _at = ctoks(p0_name); _ak = " ".join(_at)
@@ -914,7 +892,7 @@ def main():
         return (" (auch: " + a + ")") if a else ""
     kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") for c in kand)
     kand_block = (("MÖGLICHE KORRESPONDENTEN (wähle im Feld correspondent GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen):" + _NL + kand_lines + _NL + _NL) if kand else "")
-    TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand]}
+    TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand], **p0_trace}
     TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
                         else "manuell (Panel)" if (FORCE or FORCE_OCR) else "automatisch (Post-Consume)")
@@ -998,7 +976,7 @@ def main():
         else:
             cands = [c for s, c in scored[:20] if s >= 0.28]
             if cands:
-                p2_sys = "Du ordnest einen Absender bestehenden Korrespondenten zu. Antworte NUR JSON {\"match\": <exakter Name aus der Liste> ODER null}."
+                p2_sys = PASS2_SYSTEM
                 bsp_txt = beispiel_text(CFG["korrespondent_beispiele"])
                 p2_usr = (f"Vorgeschlagener Absender: '{corr_name}'.\nBestehende Kandidaten: {[c['name'] for c in cands]}.\n"
                           "Welcher bezeichnet DIESELBE Firma/Behörde/Person? Rechtsform/Zusätze (GmbH/AG/OG) egal; "

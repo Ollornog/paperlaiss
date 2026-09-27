@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — ein Knopf „KI", Ablauf als Schrittliste mit Eingabe und Ausgabe
+
+- Der OCR-Knopf und der Nur-OCR-Modus (`CLASSIFY_NUR_OCR`) entfallen — der KI-Knopf liest ohnehin
+  immer per Mistral-OCR neu. Der Knopf heißt nur noch „KI", auch im Menü „Actions".
+- **Ablauf & Prompt** und der **Lauf** in der Aktivität nutzen dieselbe Schrittdarstellung: Nummer,
+  Art, Regeln „wenn … → …", aufklappbar Eingabe und Ausgabe — bei KI-Aufrufen Prompt und Antwort.
+  Keine Rauten mehr. Der Prompt von Pass 1 ist im Ablauf direkt bearbeitbar.
+- Pass 0 legt Prompt und Antwort jetzt im Trace ab; die kleinen Prompts von Pass 0/2 sind
+  Konstanten (`PASS0_SYSTEM`, `PASS2_SYSTEM`) und erscheinen in der Vorschau.
+- Panel: Titelleiste und Inhalt in einer begrenzten Spur; neue Seite **Info** mit GitHub-Link.
+
 ### Geändert — Knöpfe rufen paperlaiss direkt; Tag-Auslöser entfernt
 
 - KI-/OCR-Knopf rufen das Panel direkt (`POST /knopf`, Status `GET /knopf/status`). Berechtigt

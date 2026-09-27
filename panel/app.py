@@ -198,7 +198,7 @@ def running_jobs():
 
 
 # ---------- classify.py Re-Trigger ----------
-def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis="", nur_ocr=False):
+def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis=""):
     env = dict(os.environ)
     env.update({"CLASSIFY_DOC": str(doc), "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK,
                 "MISTRAL_KEY": MISTRAL_KEY, "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG,
@@ -209,8 +209,6 @@ def run_classify(doc, force=True, force_ocr=False, source="manual", hinweis="", 
         env["CLASSIFY_FORCE_OCR"] = "1"
     if hinweis:
         env["CLASSIFY_HINWEIS"] = hinweis
-    if nur_ocr:
-        env["CLASSIFY_NUR_OCR"] = "1"
     try:
         r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=300)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
@@ -305,7 +303,7 @@ if KNOPF_ORIGINS:
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(CORSMiddleware, allow_origins=KNOPF_ORIGINS, allow_credentials=True,
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Paperlaiss"])
-JOBS = {}          # doc_id → {"status": wartet|laeuft|fertig|fehler, "modus", "seit"}
+JOBS = {}          # doc_id → {"status": wartet|laeuft|fertig|fehler, "seit"}
 _JOBS_LOCK = threading.Lock()
 
 
@@ -314,11 +312,10 @@ def _job(doc, **felder):
         JOBS.setdefault(doc, {}).update(felder)
 
 
-def knopf_lauf(doc, modus, hinweis):
+def knopf_lauf(doc, hinweis):
     with PARALLEL:
         _job(doc, status="laeuft")
-        rc, _ = run_classify(doc, force=True, force_ocr=True, source="knopf",
-                             hinweis=hinweis, nur_ocr=(modus == "ocr"))
+        rc, _ = run_classify(doc, force=True, force_ocr=True, source="knopf", hinweis=hinweis)
     _job(doc, status="fertig" if rc == 0 else "fehler")
 
 
@@ -351,17 +348,14 @@ def _ids(werte):
 
 @app.post("/knopf", status_code=202)
 async def knopf(request: Request, hintergrund: BackgroundTasks):
-    """KI (neu klassifizieren, immer mit OCR, optional mit Hinweis) oder OCR (nur Text)."""
+    """KI-Knopf: neu klassifizieren, immer mit Mistral-OCR, optional mit Hinweis."""
     body = await request.json()
-    modus = body.get("modus")
-    if modus not in ("ki", "ocr"):
-        raise HTTPException(400, "modus muss ki oder ocr sein")
     ids = _ids(body.get("docs") or [])
-    hinweis = str(body.get("hinweis") or "").strip()[:2000] if modus == "ki" else ""
+    hinweis = str(body.get("hinweis") or "").strip()[:2000]
     erlaubt, verweigert = knopf_nutzer_rechte(request, ids)
     for doc in erlaubt:
-        _job(doc, status="wartet", modus=modus, seit=datetime.datetime.now().isoformat(timespec="seconds"))
-        hintergrund.add_task(knopf_lauf, doc, modus, hinweis)
+        _job(doc, status="wartet", seit=datetime.datetime.now().isoformat(timespec="seconds"))
+        hintergrund.add_task(knopf_lauf, doc, hinweis)
     return {"gestartet": erlaubt, "verweigert": verweigert}
 
 
@@ -402,6 +396,12 @@ def config_schema(request: Request):
     cfg = _cfg_oeffentlich()
     return {"felder": [{"name": k, "typ": feld_typ(v), "wert": v} for k, v in sorted(cfg.items())],
             "geheim": list(GEHEIM_FELDER)}
+
+
+@app.get("/info", response_class=HTMLResponse)
+def info_seite(request: Request):
+    guard(request)
+    return seite("Info", "/info", seiten.info())
 
 
 @app.get("/einstellungen", response_class=HTMLResponse)
