@@ -92,14 +92,27 @@ def schreibe_json(pfad, daten):
     ist der alte Inhalt weg und der neue nie angekommen. Fuer den Korrespondent-Store
     heisst das: der gepflegte Kundenstamm ist futsch. os.replace ist auf POSIX atomar,
     es gibt also keinen Moment, in dem die Datei halb geschrieben dasteht.
+
+    Rechte und Besitzer bleiben wie in classify.schreibe_json (2026-09-27): alte Datei als
+    Vorbild, sonst der Ordner — ein Lauf als root sperrt den Worker nicht mehr aus.
     """
     ordner = os.path.dirname(os.path.abspath(pfad)) or "."
+    try:
+        vorbild, bestand = os.stat(pfad), True
+    except FileNotFoundError:
+        vorbild, bestand = os.stat(ordner), False
     fd, tmp = tempfile.mkstemp(dir=ordner, prefix=".tmp-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(daten, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
+        if bestand:
+            os.chmod(tmp, vorbild.st_mode & 0o777)
+        try:
+            os.chown(tmp, vorbild.st_uid, vorbild.st_gid)   # nur als root wirksam
+        except PermissionError:
+            pass
         os.replace(tmp, pfad)
     except BaseException:
         try:
