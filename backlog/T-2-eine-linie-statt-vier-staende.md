@@ -2,7 +2,7 @@
 id: T-2
 type: Task
 title: Alle Installationen auf den Repo-Stand bringen
-status: offen
+status: erledigt
 milestone: M-1
 tags: [betrieb, wartbarkeit]
 created: 2026-09-21
@@ -28,3 +28,9 @@ braucht — also wurde er kopiert und erweitert. Die Naht `nachbearbeitung` (→
 
 **Fertig, wenn** jede Installation denselben `classify.py` fährt und sich ausschließlich über
 Konfiguration und Nachbearbeitung unterscheidet.
+
+**Erledigt 2026-09-27.** Alle vier Installationen (zwei produktive, zwei Testbetten) fahren
+denselben `classify.py` und dasselbe Panel; sie unterscheiden sich nur noch in der Konfiguration
+(Prompt, `eigene_kennungen`, `eigene_regel`, Felder, Tags). Die Zusatzlogik einer Installation
+(Verknüpfung in ein Fremdsystem) wurde bewusst **nicht** übernommen — Entscheid des Betreibers;
+käme sie wieder, gehört sie in die Naht `nachbearbeitung`.
