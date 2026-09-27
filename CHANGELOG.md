@@ -45,9 +45,9 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   ohne Abwägung zur MIT-Lizenz. Schrift: DejaVu Sans (`fonts-dejavu-core` im Abbild), sonst
   Helvetica. Nichts wird vom Browser nachgeladen.
 - Tests: `tests/test_export.py` (Logik, stdlib-only, dazu per AST: jeder Export-Endpunkt fragt die
-  Sitzung, Status und Download prüfen erneut, Start lehnt Unlesbares ab, der Download misst die
-  Größe); `tests/abbild_export.py` prüft den PDF-Bau im gebauten Abbild (neuer Schritt im CI-Job
-  `image`); `tests/test_panel_js.py` prüft jetzt auch das Knopf-Skript mit `node --check`. 23
+  Sitzung — vor jeder Suche nach dem Auftrag —, Status und Download prüfen erneut, Start lehnt
+  Unlesbares ab, der Download misst die Größe); `tests/abbild_export.py` prüft den PDF-Bau im gebauten Abbild (neuer Schritt im CI-Job
+  `image`); `tests/test_panel_js.py` prüft jetzt auch das Knopf-Skript mit `node --check`. 24
   Mutationen — je Schutz einer abgeschaltet — alle rot. Auf dem Testbett im Browser belegt: beide
   Varianten samt Downloads (mit pypdf geprüft: Sprünge, Lesezeichen, Seitenzahlen, ZIP-Namen,
   Link-Ziele, byte-gleich mit dem API-Download), Dokumente danach unverändert; Rechte, Grenzen und

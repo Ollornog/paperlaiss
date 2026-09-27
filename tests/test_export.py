@@ -251,6 +251,10 @@ _erste = next((k for k in (_start.body if _start else []) if not isinstance(k, a
 r.check("Statisch: Start prüft Kopf und Sitzung als Erstes (vor dem Auftrag)",
         _erste is not None and isinstance(_erste, ast.Expr) and isinstance(_erste.value, ast.Call)
         and getattr(_erste.value.func, "id", "") == "_knopf_sitzung")
+_erste_job = next((k for k in (_job.body if _job else []) if not isinstance(k, ast.Expr) or not isinstance(k.value, ast.Constant)), None)
+r.check("Statisch: Status und Download prüfen Kopf und Sitzung vor der Suche nach dem Auftrag",
+        _erste_job is not None and isinstance(_erste_job, ast.Expr) and isinstance(_erste_job.value, ast.Call)
+        and getattr(_erste_job.value.func, "id", "") == "_knopf_sitzung")
 r.check("Statisch: Start lehnt ab, wenn ein Dokument nicht lesbar ist (nicht still weglassen)",
         "if verweigert:\n        raise HTTPException(403" in _src_start)
 _laden = _funks.get("_pdf_laden")

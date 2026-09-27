@@ -674,6 +674,7 @@ def export_lauf(job, auftrag, doks, namen, basis):
 
 def _export_job(job: str, request: Request):
     """Den Auftrag holen — nur für eine Sitzung, die alle seine Dokumente (noch) lesen darf."""
+    _knopf_sitzung(request)             # zuerst: ohne Sitzung verrät auch 404/200 nichts über Aufträge
     with _EXPORT_LOCK:
         j = dict(EXPORTE.get(job) or {}) if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", job) else {}
     if not j:
