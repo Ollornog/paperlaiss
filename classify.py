@@ -27,9 +27,11 @@ Env-Schalter:
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
-  CLASSIFY_SOURCE=knopf|manual|bulk  Herkunft des Laufs (Trace/Log) — entscheidet auch, ob ein schon
-                               gesetzter Dokumenttyp ersetzt werden darf: knopf/manual ja, leer (Import) nur
-                               ohne CLASSIFY_FORCE, bulk und Handaufrufe mit CLASSIFY_FORCE nein
+  CLASSIFY_SOURCE=knopf|manual|mail|bulk  Herkunft des Laufs (Trace/Log) — entscheidet auch, ob ein
+                               schon gesetzter Dokumenttyp ersetzt werden darf: knopf/manual/mail ja, leer
+                               (Import) nur ohne CLASSIFY_FORCE, bulk und Handaufrufe mit CLASSIFY_FORCE nein.
+                               `mail` = Nachlauf eines Mail-Imports, der den Mail-Kontext erst nach dem
+                               Import setzen kann und deshalb mit CLASSIFY_FORCE nachklassifiziert
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
   CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
@@ -90,6 +92,11 @@ CFG = {
     # block, Lastschrift) und dürfen nie einem Absender zugeschlagen werden; eine Mail von einer
     # eigenen Domain ist eine Weiterleitung und ordnet nichts zu.
     "eigene_kennungen": {"ustid": [], "iban": [], "domains": [], "email": [], "namen": []},
+    # Wie Pass 1 das Gegenüber bestimmt, wenn eigene Namen gesetzt sind — der Satz nach
+    # „… das sind WIR.“. Leer = die eingebaute Regel, geschrieben für eine Firma (Kunden,
+    # Ausgangsrechnung, Lohnabrechnung). Ein Haushalt braucht andere Beispiele (eigener Brief,
+    # Lebenslauf, Vollmacht zwischen Mitgliedern) — deshalb einstellbar statt fest.
+    "eigene_regel": "",
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
@@ -1004,11 +1011,13 @@ def typ_ueberschreibbar(source, force):
 
     Ja beim KI-Knopf (`knopf`) und im Panel (`manual`), und beim echten Import: keine Quelle
     UND kein CLASSIFY_FORCE — nur dort kann der Typ ausschliesslich von der Paperless-Automatik
-    stammen. Nein bei allem anderen: dem Bestands-Durchlauf (`bulk`) und jedem Handaufruf mit
+    stammen. Ebenso beim Nachlauf eines Mail-Imports (`mail`): das Dokument ist gerade erst
+    angekommen, der Mail-Kontext steht aber erst nach dem Import fest — der Nachlauf braucht
+    CLASSIFY_FORCE, ist inhaltlich aber noch der Import. Nein bei allem anderen: dem Bestands-Durchlauf (`bulk`) und jedem Handaufruf mit
     CLASSIFY_FORCE über vorhandene Dokumente, deren Typ ein Mensch gesetzt haben kann. Die sichere
     Seite ist „stehen lassen": eine unbekannte Aufrufart überschreibt nie (Prüfrunde 2026-09-27 —
     „alles ausser bulk" hätte den dokumentierten Handaufruf in einer Schleife überschreiben lassen)."""
-    return source in ("knopf", "manual") or (source == "" and not force)
+    return source in ("knopf", "manual", "mail") or (source == "" and not force)
 
 
 def typ_setzen(dt_id, bisher, darf_ueberschreiben):
@@ -1066,27 +1075,37 @@ ABSENDER_ANWEISUNG = (
     "kundennummer (die Kundennummer, unter der das Gegenüber UNS führt).")
 
 
+# Die eingebaute Regel zum Gegenüber — für eine Firma. {ERSTER} = der erste eigene Name.
+# Aufgeweicht 2026-09-27 (PO, nach der Stichprobe): „nie die eigene Firma" liess die KI bei internen
+# Dokumenten (Lohnabrechnung, Überweisungsliste) auf die Bank ausweichen, deren Bankverbindung
+# darauf steht. Jetzt: das Gegenüber, wenn es eines gibt — sonst wir selbst; eine Bank nur als
+# Ausstellerin. Eine Installation ohne Firma (Haushalt) ersetzt sie über `eigene_regel`.
+EIGENE_REGEL = (
+    "correspondent ist das GEGENÜBER: bei eingehenden Dokumenten der Absender, bei unseren Dokumenten an Kunden "
+    "(Ausgangsrechnung, Angebot, Kaufvertrag) der Empfänger. NUR bei internen Dokumenten ohne externes Gegenüber "
+    "(Lohnabrechnung, Überweisungsliste, interne Aufstellung) ist die eigene Firma der correspondent — dann unter "
+    "dem Namen {ERSTER}. Eine Bank ist nur correspondent, wenn sie das Dokument selbst ausgestellt hat "
+    "(Kontoauszug, Schreiben der Bank), nicht weil ihre Bankverbindung darauf steht.")
+
+
 def eigene_firma_anweisung(cfg):
-    """Wer „wir" sind — damit die KI das Gegenüber sucht und nicht die eigene Firma, deren Name,
-    UID und IBAN auf fast jedem Dokument stehen (PO 2026-09-27). Leer ohne eigene Firmennamen."""
+    """Wer „wir" sind — damit die KI das Gegenüber sucht und nicht uns selbst, deren Name, UID und
+    IBAN auf fast jedem Dokument stehen (PO 2026-09-27). Leer ohne eigene Namen.
+
+    Kopf (wer wir sind) und Schluss (absender nie mit unseren Daten) sind fest; die Regel dazwischen
+    kommt aus `eigene_regel`, sonst EIGENE_REGEL. Der Schluss bleibt auch bei eigener Regel stehen:
+    ohne ihn trüge die Stammdaten-Erfassung unsere eigene IBAN beim Absender ein."""
     e = cfg.get("eigene_kennungen") or {}
     namen = [str(n).strip() for n in (e.get("namen") or []) if str(n).strip()]
     if not namen:
         return ""
     kenn = [f"USt-ID {u}" for u in (e.get("ustid") or [])] + [f"IBAN {i}" for i in (e.get("iban") or [])]
     kenn += [f"Mail {m}" for m in (e.get("email") or [])] + [f"Domain {d}" for d in (e.get("domains") or [])]
-    # Aufgeweicht 2026-09-27 (PO, nach der Stichprobe): „nie die eigene Firma" liess die KI bei internen
-    # Dokumenten (Lohnabrechnung, Überweisungsliste) auf die Bank ausweichen, deren Bankverbindung
-    # darauf steht. Jetzt: das Gegenüber, wenn es eines gibt — sonst wir selbst; eine Bank nur als
-    # Ausstellerin.
+    regel = str(cfg.get("eigene_regel") or "").strip() or EIGENE_REGEL
     return ("\nWICHTIG: Dieses Archiv gehört " + " / ".join(namen)
-            + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. correspondent ist das GEGENÜBER: "
-            "bei eingehenden Dokumenten der Absender, bei unseren Dokumenten an Kunden (Ausgangsrechnung, Angebot, "
-            "Kaufvertrag) der Empfänger. NUR bei internen Dokumenten ohne externes Gegenüber (Lohnabrechnung, "
-            "Überweisungsliste, interne Aufstellung) ist die eigene Firma der correspondent — dann unter dem Namen "
-            + namen[0] + ". Eine Bank ist nur correspondent, wenn sie das Dokument selbst ausgestellt hat "
-            "(Kontoauszug, Schreiben der Bank), nicht weil ihre Bankverbindung darauf steht. "
-            "absender enthält NIE unsere eigenen Stammdaten.")
+            + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. "
+            + regel.replace("{ERSTER}", namen[0])
+            + " absender enthält NIE unsere eigenen Stammdaten.")
 SUMMARY_ANWEISUNG = (
     "\nGib ausserdem summary = TLDR, Länge an das Dokument angepasst: Rechnung/Beleg/kurzer Bescheid → 1 knapper Satz; "
     "Vertrag/Brief → 2-3 Sätze; langer Bericht → 4-6 Sätze. Keine Floskeln, direkt zur Sache.")
@@ -1115,7 +1134,8 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
         teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
     if eigene_firma_anweisung(cfg):
-        teile.append((eigene_firma_anweisung(cfg), "Eigene Firma (automatisch angehängt, aus „Eigene Firmennamen“)"))
+        teile.append((eigene_firma_anweisung(cfg), "Wir und das Gegenüber (automatisch angehängt, aus „Eigene Namen“"
+                      + (" und „Regel zum Gegenüber“" if str(cfg.get("eigene_regel") or "").strip() else "") + ")"))
     if cfg.get("stammdaten_erfassen", True):
         teile.append((ABSENDER_ANWEISUNG, "Absender-Stammdaten (automatisch angehängt, weil „Stammdaten erfassen“ an ist)"))
     if mit_summary:
@@ -1339,6 +1359,7 @@ def main():
                          "kandidaten": {c["name"]: _gefunden[c["id"]] for c in kand} or None}
     TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
+                        else "Mail-Import (Nachlauf mit Mail-Kontext)" if SOURCE == "mail"
                         else "manuell (Panel)" if (FORCE or FORCE_OCR) else "automatisch (Post-Consume)")
     TRACE["hinweis"] = hinweis or None
 

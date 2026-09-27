@@ -6,6 +6,22 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Regel zum Gegenüber einstellbar (Haushalt statt Firma); Mail-Nachlauf ersetzt den Typ
+
+- **`eigene_regel`:** Die Regel, nach der Pass 1 bei gesetzten eigenen Namen das Gegenüber wählt, war
+  fest für eine Firma geschrieben (Kunden, Ausgangsrechnung, Lohnabrechnung). Ein Haushalt hat andere
+  Fälle — eigener Brief an eine Behörde, Lebenslauf, Vollmacht zwischen Mitgliedern. Die Regel ist
+  jetzt einstellbar (Panel: Einstellungen → Korrespondenten, und im Knoten „Pass 1"); leer bleibt die
+  eingebaute. Fest bleiben der Kopf (wer „wir" sind, mit Kennungen) und der Schluss „absender enthält
+  NIE unsere eigenen Stammdaten" — ohne ihn trüge die Stammdaten-Erfassung die eigene IBAN beim
+  Absender ein. `{ERSTER}` setzt den ersten eigenen Namen ein. Im Panel heisst das Feld jetzt
+  „Eigene Namen" statt „Eigene Firmennamen".
+- **Mail-Nachlauf (`CLASSIFY_SOURCE=mail`):** Ein Mail-Import, der den Mail-Kontext erst nach dem
+  Import setzen kann und deshalb mit `CLASSIFY_FORCE` nachklassifiziert, ersetzt jetzt den von der
+  Paperless-Automatik vorbelegten Dokumenttyp wie ein gewöhnlicher Import. Bisher blieb er stehen,
+  weil jeder Lauf mit `CLASSIFY_FORCE` und fremder Quelle als Handaufruf galt. Im Verlauf heisst der
+  Auslöser „Mail-Import".
+
 ### Behoben — neuer Absender auf kurzem Beleg; Hinzugefügt — KI-Knopf mit Fortschritt und Sperre
 
 - **Neuer Korrespondent wurde nicht angelegt:** Die KI erkannte auf einem kurzen, frisch per OCR
