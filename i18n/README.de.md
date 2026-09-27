@@ -156,7 +156,11 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
   die Analyse den Korrespondenten exakt genannt hat (höchstens 10 je Feld). Überschrieben wird nie;
   USt-ID und Adresse bleiben einzeln (eine zweite USt-ID wird gemeldet, nicht gespeichert); ein Wert,
   der schon einem anderen Korrespondenten gehört, wird verworfen — so zieht eine Fehlzuordnung keine
-  späteren Dokumente zum falschen. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
+  späteren Dokumente zum falschen. Ein Satz, was das Gegenüber ist („Kfz-Werkstatt in Salzburg“), füllt
+  einen leeren `kontext` — bei neuen Korrespondenten und bei bekannten ohne. Widerspricht das Dokument
+  dem Korrespondenten (IBAN/USt-ID/Mail/Domain/Telefon eines *anderen*, oder eine andere USt-ID), wird
+  der Lauf als **Prüfen** markiert: eine Zeile in der Aktivität und, falls eingestellt, der `unsicher_tag`
+  am Dokument. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
   Paperless-Dialog. Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem
   Korrespondenten gehört. Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
 - **Namensabgleich.** Passt der Name aus der Analyse zu keinem Korrespondenten exakt, fragt eine zweite

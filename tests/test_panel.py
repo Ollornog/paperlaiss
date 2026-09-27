@@ -239,7 +239,20 @@ r.check("Aktivität: Zeile ohne Zeitstempel fällt weg", kern.eintrag_lesen(_z[2
 _a = kern.aktivitaet(_z)
 r.check("Aktivität: neueste zuerst", _a["eintraege"][0]["doc"] == 8 and _a["gesamt"] == 5)
 r.check("Aktivität: Kennzahlen je Art", _a["kennzahlen"] ==
-        {"klassifiziert": 2, "ocr": 1, "repariert": 0, "fehler": 1, "uebersprungen": 1}, str(_a["kennzahlen"]))
+        {"klassifiziert": 2, "ocr": 1, "repariert": 0, "fehler": 1, "pruefen": 0, "uebersprungen": 1}, str(_a["kennzahlen"]))
+# „Prüfen“ (seit 2026-09-27): die Daten des Dokuments passen nicht zum Korrespondenten.
+_pz = ["2026-09-27 21:04:24 OK 911 | exakt='Beispiel GmbH' id=7 | typ=21",
+       "2026-09-27 21:04:24 PRÜFEN 911 | exakt='Beispiel GmbH' | iban gehört schon zu Andere GmbH",
+       "2026-09-27 21:10:00 OK 912 | exakt='X' id=8 | typ=21"]
+_pe = kern.eintrag_lesen(_pz[1])
+r.check("Prüfen: eigene Art mit Dokument und Korrespondent, zählt als Kennzahl",
+        _pe["art"] == "pruefen" and _pe["doc"] == 911 and _pe["korrespondent"] == "Beispiel GmbH"
+        and kern.aktivitaet(_pz)["kennzahlen"]["pruefen"] == 1, str(_pe))
+_pa = kern.auffaelligkeiten(_pz)
+r.check("Prüfen: steht in den Auffälligkeiten und gilt nicht als gelöst durch die OK-Zeile desselben Laufs",
+        len(_pa) == 1 and _pa[0]["art"] == "pruefen" and _pa[0]["doc"] == "911" and not _pa[0]["geloest"], str(_pa))
+r.check("Prüfen: ein späterer Lauf desselben Dokuments ohne Widerspruch löst es",
+        kern.auffaelligkeiten(_pz + ["2026-09-28 08:00:00 OK 911 | exakt='Richtig GmbH' id=9 | typ=21"])[0]["geloest"])
 _f = kern.aktivitaet(_z, art="klassifiziert")
 r.check("Aktivität: Filter nach Art", [e["doc"] for e in _f["eintraege"]] == [7, 913])
 r.check("Aktivität: Kennzahlen zählen ungefiltert (Einstieg in den Filter)", _f["kennzahlen"] == _a["kennzahlen"])

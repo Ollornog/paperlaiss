@@ -161,7 +161,11 @@ classifier uses it in three ways:
   value when the analysis named the correspondent exactly (at most 10 per field). Nothing is ever
   overwritten; VAT ID and address stay single (a second VAT ID is reported, not stored); a value that
   already belongs to another correspondent is dropped, so one wrong assignment cannot pull later
-  documents to the wrong correspondent. The origin (`erfasst`, per value for list fields) is shown in
+  documents to the wrong correspondent. A one-sentence description of the counterpart ("car repair
+  shop in Salzburg") fills an empty `kontext` — for new correspondents and known ones without one. If
+  the document contradicts the correspondent (an IBAN/VAT ID/e-mail/domain/phone of *another*
+  correspondent, or a different VAT ID), the run is marked **Prüfen**: a line in the activity, and
+  the `unsicher_tag` on the document if set. The origin (`erfasst`, per value for list fields) is shown in
   the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Matching the name.** If the name from the analysis matches no correspondent exactly, a second

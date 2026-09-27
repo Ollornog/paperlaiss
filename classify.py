@@ -424,9 +424,16 @@ def gleicher_wert(feld, a, b):
     return bool(k(a)) and k(a) == k(b)
 
 
+# Kennungen, die genau einem Gegenüber gehören. Kundennummer (vergibt jeder Lieferant selbst),
+# Adresse (Firmen im selben Haus) und Kontext können sich legitim wiederholen.
+EINDEUTIG = {"iban", "ustid", "email", "domains", "telefon"}
+
+
 def stammdaten_fremd(corrs, meta, eigener_id):
     """fremd(feld, wert) → Name des ANDEREN Korrespondenten, der den Wert schon hat, sonst None."""
     def fremd(feld, w):
+        if feld not in EINDEUTIG:
+            return None
         for c in corrs:
             if c["id"] != eigener_id and any(gleicher_wert(feld, w, x) for x in werte(meta(c["id"]), feld)):
                 return c["name"]
@@ -434,7 +441,7 @@ def stammdaten_fremd(corrs, meta, eigener_id):
     return fremd
 
 
-def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None):
+def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None, kontext=""):
     """Stammdaten eines Korrespondenten aus dem Dokument nachtragen.
 
     Rein: bekommt den alten Eintrag, gibt (neuer Eintrag, geschrieben, verworfen) zurück.
@@ -521,6 +528,9 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
             setze("telefon", t)
     setze("adresse", wert("adresse")[:300])
     setze("kundennummer", wert("kundennummer")[:60])
+    # Was das Gegenüber ist („Kfz-Werkstatt in Salzburg“) — nur in einen leeren Kontext. Bis 2026-09-27
+    # verlangten die Prompts diesen Satz schon, aber niemand speicherte ihn.
+    setze("kontext", "" if is_null(kontext) else str(kontext).strip()[:300])
     if geschrieben:
         neu["erfasst"] = erfasst
     return neu, geschrieben, verworfen
@@ -780,6 +790,8 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary, mit_tite
         props["absender"] = {"type": "object", "additionalProperties": False, "properties": {
             k: _NULLBAR("string") for k in ("ustid", "iban", "email", "telefon", "adresse", "kundennummer")}}
         pflicht.append("absender")
+        props["korrespondent_kontext"] = _NULLBAR("string")
+        pflicht.append("korrespondent_kontext")
     if mit_titel:
         props["titel_kennung"] = _NULLBAR("string")
         pflicht.append("titel_kennung")
@@ -912,7 +924,7 @@ DEFAULT_PROMPT = (
     "{TAGBLOCK}"
     "Korrespondent = ABSENDER/Aussteller (Firma/Behörde/Person), NICHT der Archiv-Inhaber selbst. Kurzer gängiger Markenname.\n"
     "JSON-KEYS: document_type (String|null), correspondent (String|null), "
-    "korrespondent_kontext (1 kurzer Satz: was ist dieser Absender / welche Dokumente kommen von ihm — nur bei NEUEM Korrespondent, sonst null), "
+    "korrespondent_kontext (1 kurzer Satz: was ist dieser Absender / welche Dokumente kommen von ihm — bei NEUEM Korrespondent und bei einem bekannten ohne [Kontext], sonst null), "
     "needs_ocr (true wenn Text unbrauchbar/Müll), "
     "fields (Objekt, siehe VERFÜGBARE FELDER). "
     "Ein Feld nur füllen, wenn das Dokument den Wert konkret hergibt — nichts hineinraten; im Zweifel null lassen. "
@@ -1316,9 +1328,11 @@ def namens_haeufigkeit(corrs, alias):
 
 
 def pass2_frage(name, kandidaten, beispiele=""):
-    """Die Zuordnungsfrage, die an die Pass-1-Unterhaltung angehängt wird."""
+    """Die Zuordnungsfrage, die an die Pass-1-Unterhaltung angehängt wird. `kandidaten`: je Kandidat
+    eine Zeile mit Name, Aliasen und gespeichertem Kontext (seit 2026-09-27 — vorher nur Namen)."""
+    liste = kandidaten if isinstance(kandidaten, str) else "\n".join("- " + k for k in kandidaten)
     return (f"{PASS2_SYSTEM}\nDein vorgeschlagener Absender: '{name}'.\n"
-            f"Bestehende Korrespondenten, die in Frage kommen: {kandidaten}.\n"
+            f"Bestehende Korrespondenten, die in Frage kommen (Name exakt übernehmen):\n{liste}\n"
             "Welcher bezeichnet DIESELBE Firma/Behörde/Person wie im Dokument oben? Rechtsform/Zusätze "
             f"(GmbH/AG/OG) egal; auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{beispiele}. "
             "Namensvariante heisst: derselbe Name anders geschrieben — NICHT ein anderer Name mit gleichem "
@@ -1347,7 +1361,9 @@ FELD_ANWEISUNG = (
 ABSENDER_ANWEISUNG = (
     "\nGib ausserdem absender = Objekt mit den Kontaktdaten des GEGENÜBERS (der Partei, die nicht wir sind), "
     "so wie sie im Dokument stehen, sonst null je Feld: ustid, iban, email, telefon, adresse (einzeilig), "
-    "kundennummer (die Kundennummer, unter der das Gegenüber UNS führt).")
+    "kundennummer (die Kundennummer, unter der das Gegenüber UNS führt). "
+    "Und korrespondent_kontext = 1 kurzer Satz, was das Gegenüber ist (Art, Branche, Ort — etwa „Kfz-Werkstatt "
+    "in Salzburg“), wenn es neu ist oder in den möglichen Korrespondenten kein [Kontext: …] trägt, sonst null.")
 
 
 # Die eingebaute Regel zum Gegenüber — für eine Firma. {ERSTER} = der erste eigene Name.
@@ -1745,7 +1761,8 @@ def main():
                 # 2026-09-27 ein eigener Aufruf mit nur dem Namen.) Die Schnittstelle hat kein
                 # Gedächtnis — „dieselbe Unterhaltung" heißt: der Verlauf wird mitgeschickt.
                 bsp_txt = beispiel_text(CFG["korrespondent_beispiele"])
-                p2_usr = pass2_frage(corr_name, [c["name"] for c in cands], bsp_txt)
+                p2_usr = pass2_frage(corr_name, [c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]")
+                                                                        if cfull_hint(c) else "") for c in cands], bsp_txt)
                 messages.append({"role": "assistant", "content": assistant_raw})
                 messages.append({"role": "user", "content": p2_usr})
                 pick, assistant_raw = mistral_chat(messages, 200, pass2_schema(list(dict.fromkeys(c["name"] for c in cands))), "pass2")
@@ -1791,12 +1808,14 @@ def main():
 
     # --- Stammdaten nachtragen: nur leere Felder, nur bei belastbarer Zuordnung ---
     stamm_info = ""
+    pruefen = {}
     if CFG.get("stammdaten_erfassen", True) and not corr_info.startswith("bestehenden behalten"):
         quelle = f"KI · {datetime.date.today():%Y-%m-%d} · Dokument {did}"
         _mail = mail_from if mail_bestaetigt(mail_from, corr_id, mail_corr, _text, prop.get("absender")) else ""
         _anh = corr_info.startswith("exakt")
         _fremd = stammdaten_fremd(corrs, cmeta, corr_id)
-        aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle, _anh, _fremd)
+        aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle, _anh, _fremd,
+                                                      prop.get("korrespondent_kontext"))
         try:
             if corr_id and not DRY:
                 g, v = stammdaten_schreiben(corr_id, aenderung)
@@ -1807,6 +1826,10 @@ def main():
             TRACE["stammdaten"] = {"geschrieben": g, "verworfen": v, "trocken": bool(DRY or not corr_id)}
             if g:
                 stamm_info = " | stammdaten+" + ",".join(g)
+            # Passen die Daten des Dokuments zum Korrespondenten? Eine Kennung, die einem ANDEREN gehört,
+            # oder eine abweichende USt-ID spricht für eine Fehlzuordnung → zum Prüfen markieren (PO 2026-09-27).
+            pruefen = {f: x for f, x in v.items() if x.startswith("gehört schon zu") or x.startswith("andere USt-ID")}
+            TRACE["pruefen"] = pruefen or None
         except Exception as e:
             log(f"stammdaten-fail {did}: {e!r}")   # Klassifizierung läuft weiter
             TRACE["stammdaten"] = {"fehler": repr(e)}
@@ -1832,11 +1855,12 @@ def main():
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
                "summary": summary, "fields": prop.get("fields"), "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
-        log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}")
+        log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}"
+            + (" | prüfen: " + "; ".join(f"{k} {x}" for k, x in pruefen.items()) if pruefen else ""))
         return
 
     # --- Zurückschreiben (KEIN owner/Rechte — macht post-consume.sh) ---
-    extra = ([marker_id] if marker_id else []) + ([unsicher_id] if ((new_tags) and unsicher_id) else [])
+    extra = ([marker_id] if marker_id else []) + ([unsicher_id] if ((new_tags or pruefen) and unsicher_id) else [])
     keep_tags = tag_ids_on + tag_ids + extra
     patch = {"tags": list(dict.fromkeys(keep_tags))}
     if corr_id:
@@ -1887,6 +1911,9 @@ def main():
         patch.pop("custom_fields", None); patch_doc(did, patch)
 
     log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}" + (f" | {repair_note}" if repair_note else ""))
+    if pruefen:
+        # Nach der OK-Zeile: die Aktivität zeigt es als „Prüfen“, bis ein späterer Lauf ohne Widerspruch folgt.
+        log(f"PRÜFEN {did} | {corr_info} | " + "; ".join(f"{k} {x}" for k, x in pruefen.items()))
     nachbearbeiten(did, patch, ok, TRACE.get("writeback") or {})
     TRACE["_stage"] = "fertig"
     save_trace(did)

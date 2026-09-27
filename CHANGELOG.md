@@ -6,6 +6,24 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Kontext des Korrespondenten wird gespeichert, Widersprüche werden markiert
+
+- **Kontext ging verloren:** Die Prompts verlangten bei neuen Korrespondenten `korrespondent_kontext`
+  („was ist dieser Absender“), aber kein Code las ihn. Jetzt Teil des Antwortschemas und der
+  Absender-Anweisung; der Satz füllt einen leeren `kontext` im Adressbuch (mit Herkunft) — bei neuen
+  und bei bekannten Korrespondenten ohne Kontext (der eingebaute Prompt sagt jetzt „bei NEUEM
+  Korrespondent und bei einem bekannten ohne [Kontext]“). Ein gepflegter Kontext bleibt.
+- **Prüfen** (PO: „beim Aktualisieren schauen, ob die Daten passen“): gehört eine IBAN, USt-ID,
+  Mail, Domain oder Telefonnummer des Dokuments schon einem ANDEREN Korrespondenten, oder weicht die
+  USt-ID von der gespeicherten ab, bekommt der Lauf eine Zeile `PRÜFEN <dok> | …` nach der OK-Zeile,
+  das Dokument den `unsicher_tag` (falls eingestellt) und der Trace `pruefen`. Die Aktivität zeigt
+  einen eigenen Kasten „Prüfen“; ein späterer Lauf ohne Widerspruch gilt als gelöst. Kundennummer,
+  Adresse und Kontext zählen nicht — die wiederholen sich legitim.
+- **Pass 2 sieht den Kontext:** die Kandidaten stehen mit Aliasen und gespeichertem Kontext in der
+  Frage, nicht mehr nur als Namen.
+- Tests je Regel und im Lauf; acht Mutationen, alle rot. Trockenlauf an fünf Dokumenten des
+  Testbetts: sinnvolle Kontextsätze, nur leere Kontexte gefüllt.
+
 ### Geändert — Stammdaten: Listenfelder bekommen weitere Werte, Pass 2 nur noch mit echtem Kandidaten
 
 - **Anhängen statt nur leere Felder** (PO: „man kann doch hinzufügen?“): IBAN, Mail, Domain, Telefon
