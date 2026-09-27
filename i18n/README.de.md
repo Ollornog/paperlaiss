@@ -66,6 +66,12 @@ CLASSIFY_FORCE=1 CLASSIFY_DOC=<id> python3 classify.py     # schon klassifiziert
 CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # Mistral-OCR erzwingen
 ```
 
+Einen schon gesetzten Dokumenttyp ersetzt paperlaiss nur beim echten Import (keine `CLASSIFY_SOURCE`,
+kein `CLASSIFY_FORCE`), beim Knopf in Paperless und aus dem Panel. Handaufrufe mit `CLASSIFY_FORCE`
+und Bestands-Durchläufe (`CLASSIFY_SOURCE=bulk`) lassen ihn stehen — ihn kann ein Mensch gesetzt
+haben. Einen Typ, den Paperless' eigene Zuordnung beim Import vorbelegt hat, bekommt die KI als
+Vorschlag.
+
 ## Panel
 
 Ein Admin-Panel für den Fall, dass etwas hängt oder eingestellt werden muss — paperlaiss ist
