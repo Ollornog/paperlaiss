@@ -382,3 +382,34 @@ def knopf_rechte(antwort, gewuenscht):
     darf = {int(d["id"]) for d in (antwort or {}).get("results", []) if d.get("user_can_change")}
     gewuenscht = sorted({int(x) for x in gewuenscht})
     return [d for d in gewuenscht if d in darf], [d for d in gewuenscht if d not in darf]
+
+
+# Die Felder des Adressbuchs (correspondents.json), die der Korrespondenten-Dialog in Paperless
+# zeigt — Name, Beschriftung, mehrzeilig. Mehrere Werte (Domains, Aliase) stehen kommagetrennt,
+# so liest sie classify.py (calias, Domain-Abgleich).
+KORR_FELDER = (
+    ("kontext", "Kontext für die KI", True),
+    ("aliase", "Andere Schreibweisen (kommagetrennt)", False),
+    ("email", "E-Mail", False),
+    ("domains", "Mail-Domains (kommagetrennt)", False),
+    ("kundennummer", "Unsere Kundennummer dort", False),
+    ("ustid", "USt-ID", False),
+    ("telefon", "Telefon", False),
+    ("adresse", "Adresse", True),
+)
+
+
+def korr_eintrag(alt, eingabe):
+    """Einen Adressbuch-Eintrag aus der Formulareingabe bilden.
+
+    Nur bekannte Felder, Werte als getrimmter Text, leere Felder fallen weg. Was der Dialog nicht
+    kennt (`quelle`, `extern_id` aus einem Import), bleibt erhalten — sonst löschte jedes
+    Speichern im Dialog die Herkunft eines importierten Eintrags.
+    """
+    neu = {k: v for k, v in (alt or {}).items() if k not in {f for f, _, _ in KORR_FELDER}}
+    for feld, _, _ in KORR_FELDER:
+        wert = str((eingabe or {}).get(feld) or "").strip()
+        if wert:
+            neu[feld] = wert[:4000]
+    return neu
+

@@ -215,4 +215,12 @@ _s = kern.aktivitaet(_z, je=2, seite=9)
 r.check("Aktivität: Seiten zu je N, zu große Seite wird auf die letzte gezogen",
         _s["seiten"] == 3 and _s["seite"] == 3 and len(_s["eintraege"]) == 1, str((_s["seiten"], _s["seite"])))
 
+# ---- korr_eintrag(): Adressbuch-Eintrag aus dem Paperless-Dialog.
+_alt = {"email": "a@example.com", "quelle": "import", "extern_id": "K-7", "kontext": "alt"}
+_neu = kern.korr_eintrag(_alt, {"kontext": "  Werkstattzulieferer ", "email": "", "unbekannt": "x"})
+r.check("Adressbuch: Werte getrimmt, leere Felder fallen weg", _neu.get("kontext") == "Werkstattzulieferer"
+        and "email" not in _neu, str(_neu))
+r.check("Adressbuch: Import-Herkunft bleibt erhalten", _neu.get("quelle") == "import" and _neu.get("extern_id") == "K-7")
+r.check("Adressbuch: unbekannte Eingaben werden nicht übernommen", "unbekannt" not in _neu)
+
 sys.exit(r.done())

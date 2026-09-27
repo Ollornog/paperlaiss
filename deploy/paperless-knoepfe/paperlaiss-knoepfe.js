@@ -4,6 +4,8 @@
  *
  * Dokumentansicht: Knopf „KI" anstelle von Paperless' eigenem „Suggest" (ausgeblendet).
  * Dokumentliste:   Eintrag „KI" im Menü „Actions" der Mehrfachauswahl.
+ * Korrespondent:   Abschnitt „paperlaiss" im Bearbeiten-Dialog — Kontext, Aliase, Domains usw.,
+ *                  die der Klassifizierer beim Zuordnen nutzt; gespeichert mit „Save".
  *
  * Kein Fork: Paperless lädt diese Datei, weil ein Init-Skript sie beim Start einhängt
  * (10-paperlaiss-knoepfe.sh). Die Knöpfe rufen paperlaiss DIREKT (POST /knopf) — ohne Tag,
@@ -183,7 +185,53 @@
       mehrfach((ids) => dialogKi(ids.length, (h) => ausloesen(ids, h)))));
   }
 
-  function alles() { einfuegenDetail(); einfuegenListe(); }
+  // ---------- Korrespondenten-Dialog: Abschnitt „paperlaiss" ----------
+  // Paperless kann Korrespondenten keine eigenen Felder geben. paperlaiss führt dafür ein kleines
+  // Adressbuch (Kontext für die KI, Aliase, Mail-Domains …) und blendet es hier ein. Die ID steht
+  // im Dialogkopf („ID: 13"); ein neuer Korrespondent hat noch keine.
+  const esc = (v) => String(v == null ? "" : v).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+
+  async function einfuegenKorr() {
+    const dlg = document.querySelector("pngx-correspondent-edit-dialog");
+    const body = dlg && dlg.querySelector(".modal-body");
+    if (!body || body.querySelector("." + MARKE)) return;
+    const box = document.createElement("div");
+    box.className = "mt-3 border-top pt-3 " + MARKE;
+    body.appendChild(box);
+    // Paperless setzt das Objekt (und damit die ID-Plakette) erst kurz nach dem Öffnen — ohne
+    // Warten hielte der Abschnitt jeden Korrespondenten für neu.
+    let m = null;
+    for (let i = 0; i < 15 && !m; i++) {
+      m = ((dlg.querySelector(".modal-header .badge") || {}).textContent || "").match(/(\d+)/);
+      if (!m) await new Promise((ok) => setTimeout(ok, 200));
+    }
+    if (!m) {
+      box.innerHTML = '<div class="small text-muted">paperlaiss: Stammdaten für die KI lassen sich eintragen, sobald der Korrespondent angelegt ist.</div>';
+      return;
+    }
+    const cid = parseInt(m[1], 10);
+    let d;
+    try { d = await panel("/knopf/korrespondent/" + cid); }
+    catch (e) { box.innerHTML = '<div class="small text-danger">paperlaiss: ' + esc(e.message) + "</div>"; return; }
+    const aus = d.darf_aendern ? "" : " disabled";
+    box.innerHTML = '<h6 class="mb-1">paperlaiss — Stammdaten für die KI</h6>' +
+      '<div class="small text-muted mb-2">Hilft beim Zuordnen: Kontext und Kennungen gehen in den Prompt, Aliase und Domains in den Abgleich. Gespeichert mit „Save".</div>' +
+      d.felder.map(([name, titel, mehr]) => '<div class="mb-2"><label class="form-label small mb-0">' + esc(titel) + "</label>" +
+        (mehr ? '<textarea class="form-control form-control-sm" rows="2" data-pl="' + name + '"' + aus + ">" + esc(d.werte[name]) + "</textarea>"
+              : '<input class="form-control form-control-sm" data-pl="' + name + '" value="' + esc(d.werte[name]) + '"' + aus + ">") + "</div>").join("");
+    if (!d.darf_aendern) return;
+    const form = dlg.querySelector("form");
+    // Fangphase: vor Paperless' eigenem Speichern, das den Dialog danach schliesst.
+    form.addEventListener("submit", () => {
+      const daten = {};
+      box.querySelectorAll("[data-pl]").forEach((el) => { daten[el.dataset.pl] = el.value; });
+      panel("/knopf/korrespondent/" + cid, daten)
+        .then(() => meldung("paperlaiss: Stammdaten gespeichert.", "success"))
+        .catch((e) => meldung("paperlaiss: Stammdaten NICHT gespeichert — " + e.message, "danger"));
+    }, true);
+  }
+
+  function alles() { einfuegenDetail(); einfuegenListe(); einfuegenKorr(); }
   new MutationObserver(alles).observe(document.documentElement, { childList: true, subtree: true });
   alles();
 })();

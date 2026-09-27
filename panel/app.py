@@ -24,7 +24,7 @@ from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, H
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from kern import (aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte,
+from kern import (KORR_FELDER, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
 import huelle
 import seiten
@@ -289,7 +289,7 @@ async def reclassify(request: Request):
 PARALLEL = threading.BoundedSemaphore(max(1, int(os.environ.get("PANEL_PARALLEL") or 2)))
 
 
-# ---------- KI- und OCR-Knopf in Paperless ----------
+# ---------- KI-Knopf und Korrespondenten-Abschnitt in Paperless ----------
 # Die Knöpfe (deploy/paperless-knoepfe/) rufen das Panel DIREKT, ohne Tag, Feld und Workflow.
 # Wer drückt, ist in Paperless angemeldet: sein Browser schickt die Paperless-Sitzung mit, und
 # das Panel fragt damit bei Paperless nach, welche Dokumente dieser Nutzer ändern darf. Nur die
@@ -319,8 +319,11 @@ def knopf_lauf(doc, hinweis):
     _job(doc, status="fertig" if rc == 0 else "fehler")
 
 
-def knopf_nutzer_rechte(request: Request, ids):
-    """(erlaubt, verweigert) für den Nutzer, dessen Paperless-Sitzung die Anfrage trägt."""
+def knopf_nutzer_rechte(request: Request, ids, art="documents"):
+    """(erlaubt, verweigert) für den Nutzer, dessen Paperless-Sitzung die Anfrage trägt.
+
+    `art` ist der Paperless-Endpunkt (documents, correspondents) — beide liefern `user_can_change`.
+    """
     # Der eigene Kopf erzwingt beim Aufruf von einer fremden Seite eine CORS-Vorabfrage — die
     # nur freigegebene Paperless-Adressen bestehen. Ein blosses Formular kann ihn nicht setzen.
     if request.headers.get("x-paperlaiss") != "1":
@@ -328,7 +331,7 @@ def knopf_nutzer_rechte(request: Request, ids):
     cookie = request.headers.get("cookie", "")
     if not cookie:
         raise HTTPException(401, "Keine Paperless-Sitzung — in Paperless anmelden")
-    url = (f"{BASE}/documents/?id__in={','.join(str(i) for i in ids)}"
+    url = (f"{BASE}/{art}/?id__in={','.join(str(i) for i in ids)}"
            f"&fields=id,user_can_change&page_size={len(ids)}")
     try:
         antwort = json.load(urllib.request.urlopen(
@@ -357,6 +360,42 @@ async def knopf(request: Request, hintergrund: BackgroundTasks):
         _job(doc, status="wartet", seit=datetime.datetime.now().isoformat(timespec="seconds"))
         hintergrund.add_task(knopf_lauf, doc, hinweis)
     return {"gestartet": erlaubt, "verweigert": verweigert}
+
+
+_KORR_LOCK = threading.Lock()
+
+
+def _korr_store():
+    try:
+        d = json.load(open(CORR_STORE, encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except FileNotFoundError:
+        return {}
+
+
+@app.get("/knopf/korrespondent/{cid}")
+def korr_lesen(cid: int, request: Request):
+    """Adressbuch-Eintrag für den paperlaiss-Abschnitt im Korrespondenten-Dialog von Paperless."""
+    erlaubt, _ = knopf_nutzer_rechte(request, [cid], art="correspondents")
+    return {"felder": [list(f) for f in KORR_FELDER], "werte": _korr_store().get(str(cid), {}),
+            "darf_aendern": bool(erlaubt)}
+
+
+@app.post("/knopf/korrespondent/{cid}")
+async def korr_schreiben(cid: int, request: Request):
+    erlaubt, _ = knopf_nutzer_rechte(request, [cid], art="correspondents")
+    if not erlaubt:
+        raise HTTPException(403, "Diesen Korrespondenten darfst du in Paperless nicht ändern")
+    eingabe = await request.json()
+    with _KORR_LOCK:
+        store = _korr_store()
+        eintrag = korr_eintrag(store.get(str(cid)), eingabe)
+        if eintrag:
+            store[str(cid)] = eintrag
+        else:
+            store.pop(str(cid), None)
+        schreibe_json(CORR_STORE, store)
+    return {"ok": True, "werte": eintrag}
 
 
 @app.get("/knopf/status")

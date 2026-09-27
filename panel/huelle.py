@@ -113,7 +113,11 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
 def kopf(titel: str, beschreibung: str = "", aktionen: str = "") -> str:
     """Seitenkopf: was man hier sieht, und was man hier tun kann."""
     text = f'<p class="text-muted-foreground text-sm">{e(beschreibung)}</p>' if beschreibung else ""
-    return (f'<div class="mb-6 flex flex-wrap items-end justify-between gap-3">'
+    # Klebt oben im Inhaltsbereich (sticky): Titel und Aktionen wie „Speichern" scrollen nicht mit.
+    # -mx-6/-mt-6 + px-6/pt-6 ziehen die Leiste bis an die Ränder der Spur, damit darunter
+    # scrollender Inhalt nicht seitlich durchscheint.
+    return (f'<div class="sticky top-0 z-10 -mx-6 -mt-6 mb-6 flex flex-wrap items-end justify-between gap-3 '
+            f'border-b bg-background px-6 pt-6 pb-4">'
             f'<div><h1 class="text-xl font-semibold tracking-tight">{e(titel)}</h1>{text}</div>'
             f'<div class="flex flex-wrap items-center gap-2">{aktionen}</div></div>')
 

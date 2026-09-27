@@ -430,7 +430,7 @@ GRUPPEN = ["Allgemein", "KI-Modell & Prompt", "OCR", "Tags", "Felder", "Korrespo
 EINSTELLUNGEN = {
     "enabled": ("Allgemein", "Klassifizierer aktiv",
                 "Hauptschalter. Aus: automatisch importierte Dokumente werden übersprungen. "
-                "Die KI-/OCR-Knöpfe in Paperless und das Panel funktionieren weiter."),
+                "Der KI-Knopf in Paperless und das Panel funktionieren weiter."),
     "marker_tag": ("Allgemein", "Marker-Tag",
                    "Setzt paperlaiss nach jeder Klassifizierung. Ein Dokument mit diesem Tag wird beim "
                    "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz)."),
@@ -442,7 +442,7 @@ EINSTELLUNGEN = {
     "system_prompt": ("KI-Modell & Prompt", "System-Prompt",
                       "Die Anweisung an die KI. Leer = eingebauter Prompt. Platzhalter: {TYPES} (Dokumenttypen), "
                       "{TAGBLOCK} oder {TAGS} (Tag-Liste). Fertig eingesetzt zu sehen unter „Ablauf & Prompt“."),
-    "ocr_enabled": ("OCR", "OCR erlaubt", "Aus: paperlaiss liest nie per Mistral-OCR, auch nicht beim OCR-Knopf."),
+    "ocr_enabled": ("OCR", "OCR erlaubt", "Aus: paperlaiss liest nie per Mistral-OCR, auch nicht beim KI-Knopf."),
     "ocr_always": ("OCR", "Immer OCR", "Jedes Dokument per Mistral-OCR neu lesen, auch wenn der Text gut ist. Kostet je Seite."),
     "ocr_model": ("OCR", "OCR-Modell", "Mistral-Modell für die Texterkennung."),
     "ocr_min_len": ("OCR", "Mindestlänge (Zeichen)", "Kürzerer Text gilt als unbrauchbar und wird per OCR neu gelesen."),

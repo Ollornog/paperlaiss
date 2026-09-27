@@ -118,8 +118,11 @@ Dokumenten). paperlaiss löst das mit einem **eigenen Store** (`correspondents.j
 gepflegt), gebunden **per Paperless-Korrespondent-ID**, sodass er eine Umbenennung übersteht. Pro
 Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `uid`, `kontext`, `aliase`.
 
-Befüllt wird die Datei von außen (eigenes Stammdatensystem, ein Skript); das Panel bearbeitet sie
-nicht mehr. Der Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
+Gepflegt **in Paperless selbst**: das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten
+einen Abschnitt *paperlaiss* ein (Kontext, Aliase, E-Mail, Mail-Domains, Kundennummer, USt-ID,
+Telefon, Adresse), gespeichert zusammen mit Paperless' *Save* — erlaubt für alle, die den
+Korrespondenten in Paperless ändern dürfen. Die Datei lässt sich auch von außen befüllen (eigenes
+Stammdatensystem, ein Skript). Der Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
 Kennungen im Prompt, `aliase` im Feedback-Loop — präzisere Klassifizierung.
 
 ## Deployment (Docker)

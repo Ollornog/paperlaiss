@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Stammdaten der Korrespondenten im Paperless-Dialog
+
+- Das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten den Abschnitt *paperlaiss*
+  ein: Kontext für die KI, Aliase, E-Mail, Mail-Domains, Kundennummer, USt-ID, Telefon, Adresse.
+  Gespeichert mit Paperless' *Save* über `GET/POST /knopf/korrespondent/{id}`; berechtigt ist, wer
+  den Korrespondenten in Paperless ändern darf. Import-Felder (`quelle`, `extern_id`) bleiben
+  beim Speichern erhalten (`kern.korr_eintrag()`).
+- Panel: der Seitenkopf mit den Aktionen (etwa „Speichern") bleibt beim Scrollen stehen.
+
 ### Geändert — ein Knopf „KI", Ablauf als Schrittliste mit Eingabe und Ausgabe
 
 - Der OCR-Knopf und der Nur-OCR-Modus (`CLASSIFY_NUR_OCR`) entfallen — der KI-Knopf liest ohnehin

@@ -118,8 +118,11 @@ only). paperlaiss solves this with its **own store** (`correspondents.json`, edi
 keyed **by Paperless correspondent ID** so it survives a rename. Per correspondent: `email`,
 `domains`, `phone`, `address`, `customer_number`, `vat_id`, `context`, `aliases`.
 
-The file is filled from outside (your master data system, a script); the panel no longer edits it.
-The classifier uses it for grounding: `domains` to match senders, `context` and the identifiers in the
+Edited **in Paperless itself**: the buttons script adds a section *paperlaiss* to the correspondent
+edit dialog (context, aliases, e-mail, mail domains, customer number, VAT ID, phone, address),
+saved together with Paperless' *Save* — allowed for whoever may change that correspondent in
+Paperless. The file can also be filled from outside (your master data system, a script). The
+classifier uses it for grounding: `domains` to match senders, `context` and the identifiers in the
 prompt, `aliases` in the feedback loop — sharper classification.
 
 ## Deployment (Docker)
