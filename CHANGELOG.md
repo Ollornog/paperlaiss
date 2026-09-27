@@ -6,6 +6,53 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Export-Knopf in Paperless (ein PDF oder einzeln, mit Inhaltsverzeichnis)
+
+- Neuer Eintrag **„Export"** im Menü „Actions" der Mehrfachauswahl, neben „KI". Der Dialog bietet
+  zwei Varianten:
+  - **Ein PDF**: alle gewählten Dokumente zusammengefügt, ein Lesezeichen je Dokument (die
+    Lesezeichen der Quelle darunter), optional **Seitenzahlen** („Seite i von n", auch auf gedrehten
+    und beschnittenen Seiten) und ein **Inhaltsverzeichnis** vorn: Titel und „Seite n" springen zur
+    ersten Seite des Dokuments, „In Paperless öffnen" führt zur Dokumentansicht.
+  - **Einzeln**: jedes Dokument unverändert (byte-gleich mit dem Download aus Paperless) als eigene
+    Datei; **Dateiname aus einer Vorlage** mit `{titel}` `{korrespondent}` `{typ}` `{datum}` `{jahr}`
+    `{monat}` `{hinzugefuegt}` `{id}` `{asn}` `{seiten}` `{original}` und `{feld:Name}`; optional
+    **durchnummeriert** (`001_`), als **ZIP** und mit **Inhaltsverzeichnis-PDF**. Dort verlinkt der
+    Titel die Nachbardatei per Remote-Go-To (PDF-Betrachter) und „Datei: …" dieselbe per relativem
+    URI (Browser) — je nach Betrachter greift das eine oder das andere; dazu der Paperless-Link.
+  - Beide: **Sortierung** nach einer Variable oder einem Feld, auf- oder absteigend (Text natürlich:
+    „9" vor „10", Ä wie A; ohne Wert hinten; bei Gleichstand die Reihenfolge der Auswahl).
+- Quelle ist das Archiv-PDF, sonst das Original, wenn es ein PDF ist. Alles andere wird übersprungen
+  und genannt — im Dialog und im Verzeichnis unter „Nicht enthalten", mit Grund.
+- **Rechte wie beim KI-Knopf, aber Leserecht genügt**: `X-Paperlaiss: 1` ist Pflicht, das Panel
+  fragt mit der Paperless-Sitzung, und ein nicht lesbares Dokument lehnt den ganzen Export ab (403),
+  statt es still wegzulassen. Status und Download prüfen bei jedem Abruf erneut. Auch Namen
+  (Korrespondent, Typ, Felder) kommen über die Sitzung des Nutzers; die PDFs lädt das Panel mit
+  seinem Token.
+- **Grenzen und Aufräumen**: `EXPORT_MAX_DOKUMENTE` (200), `EXPORT_MAX_MB` (200, Summe der PDFs,
+  beim Herunterladen blockweise gemessen), `EXPORT_PARALLEL` (1), höchstens fünf offene Aufträge. Das
+  Ergebnis bleibt `EXPORT_AUFBEWAHRUNG_MIN` (30) Minuten abrufbar, dann sind Auftrag und Dateien weg
+  (Zeitgeber je Auftrag; beim Start werden Reste eines früheren Prozesses gelöscht). Ein Abbruch
+  räumt sofort auf. Links nach Paperless über `PAPERLESS_PUBLIC_URL`, sonst die Adresse der
+  aufrufenden Paperless-Seite (nur vom selben Ursprung); Uhrzeit in `PAPERLESS_TIME_ZONE` bzw. `TZ`.
+- **Dateinamen entschärft**: keine Pfadtrenner, Steuer- und Formatzeichen (auch keine
+  Richtungsumkehr U+202E), keine unter Windows verbotenen Zeichen oder Namen, kein Punkt am Rand,
+  höchstens 150 Bytes; Kollisionen — ohne Rücksicht auf Groß-/Kleinschreibung — werden „ (2)", „ (3)".
+- **Bibliotheken** (gepinnt, neueste stabile): `pypdf[crypto]` 6.19.0 (BSD-3-Clause) fügt zusammen,
+  setzt Links, Lesezeichen und die Seitenzahl-Ebene; `[crypto]`, damit auch AES-geschützte PDFs mit
+  bloßem Besitzerpasswort lesbar sind. `reportlab` 5.0.1 (BSD) zeichnet Verzeichnis und Seitenzahlen
+  und misst Textbreiten fürs Kürzen. fpdf2 wäre leichter, steht aber unter LGPL-3.0; reportlab passt
+  ohne Abwägung zur MIT-Lizenz. Schrift: DejaVu Sans (`fonts-dejavu-core` im Abbild), sonst
+  Helvetica. Nichts wird vom Browser nachgeladen.
+- Tests: `tests/test_export.py` (Logik, stdlib-only, dazu per AST: jeder Export-Endpunkt fragt die
+  Sitzung, Status und Download prüfen erneut, Start lehnt Unlesbares ab, der Download misst die
+  Größe); `tests/abbild_export.py` prüft den PDF-Bau im gebauten Abbild (neuer Schritt im CI-Job
+  `image`); `tests/test_panel_js.py` prüft jetzt auch das Knopf-Skript mit `node --check`. 23
+  Mutationen — je Schutz einer abgeschaltet — alle rot. Auf dem Testbett im Browser belegt: beide
+  Varianten samt Downloads (mit pypdf geprüft: Sprünge, Lesezeichen, Seitenzahlen, ZIP-Namen,
+  Link-Ziele, byte-gleich mit dem API-Download), Dokumente danach unverändert; Rechte, Grenzen und
+  Aufräumen aus dem Browser heraus.
+
 ### Geändert — KI-Antwort per JSON-Schema, Prompt-Caching, Anfang + Ende
 
 - **Pass 1 und Pass 2 antworten nach JSON-Schema** (`response_format: json_schema`, strict) statt nur

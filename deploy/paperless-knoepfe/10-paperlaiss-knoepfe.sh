@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# paperlaiss — hängt KI-Knopf und Korrespondenten-Abschnitt in Paperless-ngx ein.
+# paperlaiss — hängt KI-Knopf, Export und Korrespondenten-Abschnitt in Paperless-ngx ein.
 #
 # Läuft über den offiziellen Weg /custom-cont-init.d bei JEDEM Start des Paperless-Containers,
 # also auch nach jedem Update — kein Fork, nichts zu mergen. Idempotent.

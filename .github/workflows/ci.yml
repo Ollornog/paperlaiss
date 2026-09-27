@@ -71,3 +71,8 @@ jobs:
           persist-credentials: false
       - name: Panel-Image bauen (nicht veröffentlichen)
         run: docker build -t paperlaiss-panel:ci ./panel
+
+      # Der PDF-Bau des Export-Knopfs braucht pypdf, reportlab und die Schrift — die hat nur das
+      # Abbild, nicht die stdlib-only-Suite. Geprüft wird deshalb dort, wo er auch läuft.
+      - name: Export-Knopf — PDF-Bau im Abbild prüfen
+        run: docker run --rm -v "$PWD/tests:/tests:ro" paperlaiss-panel:ci python /tests/abbild_export.py
