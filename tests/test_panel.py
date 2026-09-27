@@ -160,6 +160,20 @@ _oidc = _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example
 r.check("Anmeldung: mit Gruppensperre wird der Scope groups angefordert",
         "groups" in _oidc["tinysesam"].get("oidc_scopes", "").split()
         and _oidc["tinysesam"]["oidc_allowed_groups"] == ["buero", "chef"], str(_oidc["tinysesam"].get("oidc_scopes")))
+_tp = _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example.com/",
+           "PANEL_OIDC_ISSUER": "https://id.example.com", "PANEL_OIDC_CLIENT_ID": "c",
+           "PANEL_OIDC_CLIENT_SECRET": "s", "PANEL_TRUSTED_PROXIES": "172.16.0.0/12, 192.0.2.7/32"})
+r.check("Anmeldung: Proxys aus PANEL_TRUSTED_PROXIES gehen an TinySesam",
+        not _tp["fehler"] and _tp["tinysesam"].get("trusted_proxies") == ["172.16.0.0/12", "192.0.2.7/32"], str(_tp))
+r.check("Anmeldung: ohne PANEL_TRUSTED_PROXIES bleibt TinySesams Vorgabe",
+        "trusted_proxies" not in _oidc["tinysesam"])
+_tpx = _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example.com/",
+            "PANEL_PASSWORD_LOGIN": "1", "PANEL_TRUSTED_PROXIES": "caddy"})
+r.check("Anmeldung: ein Proxy-Eintrag, der kein IP-Netz ist, hält den Start an",
+        any("PANEL_TRUSTED_PROXIES" in f for f in _tpx["fehler"]), str(_tpx["fehler"]))
+_df = (Path(__file__).resolve().parent.parent / "panel" / "Dockerfile").read_text(encoding="utf-8")
+r.check("Dockerfile: uvicorn schreibt die Client-IP nicht selbst um (--no-proxy-headers)",
+        "--no-proxy-headers" in _df.split("CMD", 1)[1])
 r.check("Anmeldung: Produktion = nur PocketID, Passwort aus", not _oidc["fehler"]
         and _oidc["tinysesam"]["oidc_enabled"] is True and _oidc["tinysesam"]["password_enabled"] is False, str(_oidc))
 r.check("Anmeldung: über https Secure-Cookie", _oidc["tinysesam"]["cookie_secure"] is True

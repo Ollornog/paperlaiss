@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Panel-Anmeldung sah hinter dem Proxy nur eine IP
+
+- **`PANEL_TRUSTED_PROXIES`:** Das Panel gab TinySesam keine Liste vertrauenswürdiger Proxys mit.
+  Im Container ist der Reverse-Proxy nie `127.0.0.1` (TinySesams Vorgabe) — TinySesam verwarf
+  deshalb `X-Forwarded-For`, und jeder Nutzer erschien unter der Proxy-IP: Rate-Limit, IP-Sperre
+  und Audit-Log galten für alle gemeinsam. TinySesam meldete das beim Start als Warnung. Jetzt
+  nimmt das Panel die Netze aller Proxys der Kette aus `PANEL_TRUSTED_PROXIES` (Komma-Liste); ein
+  Eintrag, der kein IP-Netz ist, hält den Start an.
+- **`--no-proxy-headers`** für uvicorn: die Client-IP bestimmt TinySesam selbst; schriebe uvicorn
+  sie vorher um, hätte dessen Prüfung nichts mehr zu prüfen (TinySesam-README).
+
 ### Hinzugefügt — Regel zum Gegenüber einstellbar (Haushalt statt Firma); Mail-Nachlauf ersetzt den Typ
 
 - **`eigene_regel`:** Die Regel, nach der Pass 1 bei gesetzten eigenen Namen das Gegenüber wählt, war
