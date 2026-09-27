@@ -600,7 +600,7 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary):
         "document_date": _NULLBAR("string"),
         "needs_ocr": {"type": "boolean"},
     }
-    pflicht = ["document_type", "correspondent", "fields", "needs_ocr"]
+    pflicht = ["correspondent", "fields", "needs_ocr"]      # document_type kommt unten dazu
     if mit_summary:
         props["summary"] = _NULLBAR("string")
     if mit_tags:
@@ -1586,6 +1586,26 @@ def main():
 
 # Nur beim direkten Aufruf ausführen (Post-Consume / manuell / Panel). So bleibt das Modul
 # importierbar — die Tests prüfen die reinen Hilfsfunktionen, ohne main() oder sys.exit auszulösen.
+def ausfuehren():
+    """Ein Lauf mit Fehlerbehandlung; liefert den Exit-Code.
+
+    Ein Fehler wird immer protokolliert und im Trace vermerkt. Den Exit-Code bekommt er nur bei
+    einem Aufruf mit CLASSIFY_DOC (Panel, KI-Knopf, Mail-Nachlauf): die werten ihn aus. Als
+    Post-Consume-Skript (nur DOCUMENT_ID) bleibt es bei 0 — sonst meldete Paperless den Import als
+    gescheitert, obwohl das Dokument längst gespeichert ist. Bis 2026-09-27 war es immer 0: ein
+    gescheiterter KI-Knopf stand im Panel und in Paperless als „fertig" da."""
+    try:
+        main()
+        return 0
+    except Exception as e:
+        eid = os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
+        log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
+        save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
+        return 2 if os.environ.get("CLASSIFY_DOC") else 0
+    finally:
+        unmark_running(os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
+
+
 if __name__ == "__main__":
     if os.environ.get("CLASSIFY_DUMP_CONFIG") == "1":
         wirksam = {k: v for k, v in CFG.items() if k in _BEKANNT and not k.startswith("api_key")}
@@ -1608,12 +1628,5 @@ if __name__ == "__main__":
                           "ocr_always": CFG["ocr_always"], "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
         sys.exit(0)
 
-    try:
-        main()
-    except Exception as e:
-        eid = os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
-        log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
-        save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
-    finally:
-        unmark_running(os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
+    sys.exit(ausfuehren())
     sys.exit(0)

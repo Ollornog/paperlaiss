@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Schema mit doppeltem Pflichtfeld; gescheiterter KI-Knopf stand als „fertig" da
+
+- **Jeder Lauf scheiterte mit 422** seit „Typ zuletzt im Schema": `document_type` stand zweimal in
+  `required`, Mistral lehnt ein solches Schema ab (`has non-unique elements`). Im Labor gefunden,
+  bevor es ein Produktivsystem erreichte. Ein neuer Test prüft `required` und die Auswahlliste in
+  allen acht Schalter-Kombinationen auf Doppelte.
+- **KI-Knopf meldete „fertig", obwohl der Lauf scheiterte:** `classify.py` endete nach einem
+  protokollierten Fehler immer mit 0. Jetzt liefert ein Aufruf mit `CLASSIFY_DOC` (Panel, KI-Knopf,
+  Mail-Nachlauf) Exit-Code 2, und die Anzeige zeigt den Fehler. Als Post-Consume-Skript bleibt es
+  bei 0 — sonst meldete Paperless den Import als gescheitert, obwohl das Dokument gespeichert ist.
+
 ### Behoben — Dokumenttyp: Auswahlliste zwang ein falsches Wort
 
 - **Typ zuletzt im Schema.** Seit der Antwort als JSON-Schema (Typ als Auswahlliste) wählte Pass 1

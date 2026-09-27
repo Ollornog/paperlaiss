@@ -468,6 +468,16 @@ r.check("Schema Pass 1: der Dokumenttyp steht in jeder Variante zuletzt",
 r.check("Schema Pass 1: Zusammenfassung, Felder und Korrespondent stehen vor dem Typ",
         all(o.index(k) < o.index("document_type") for o in _ord for k in ("correspondent", "fields") )
         and _ord[-1].index("summary") < _ord[-1].index("document_type"))
+# Mistral prüft das Schema gegen das JSON-Schema-Metaschema: `required` mit Doppelten → 422, und
+# JEDER Lauf scheitert (2026-09-27 im Labor, eingeführt mit „Typ zuletzt“). Strukturell je Variante:
+_sch = [classify.pass1_schema({"Bescheid": 1, "Bewerbung": 2}, ["Betrag"], t, a, m)
+        for t in (False, True) for a in (False, True) for m in (False, True)]
+r.check("Schema Pass 1: required ohne Doppelte und nur aus properties (sonst 422 von Mistral)",
+        all(len(x["required"]) == len(set(x["required"])) and set(x["required"]) <= set(x["properties"]) for x in _sch),
+        str([x["required"] for x in _sch if len(x["required"]) != len(set(x["required"]))][:1]))
+r.check("Schema Pass 1: Auswahlliste ohne Doppelte, Dokumenttyp Pflicht",
+        all(len(x["properties"]["document_type"]["enum"]) == len(set(map(str, x["properties"]["document_type"]["enum"])))
+            and "document_type" in x["required"] for x in _sch))
 r.check("Schema Pass 2: nur Kandidaten oder null", classify.pass2_schema(["A", "B"])["properties"]["match"]["enum"] == ["A", "B", None])
 
 # Was tatsächlich an Mistral geht: response_format json_schema (strict) und prompt_cache_key.
@@ -834,5 +844,31 @@ _fehlt = [k for k in sorted(classify._BEKANNT) if not k.startswith("api_key")
 _fehlt += [f"ocr_regeln.{k}" for k in classify.OCR_REGELN_VORGABE if f"ocr_regeln.{k}" not in _meta]
 r.check("Einstellungen: jeder Schlüssel hat Titel und Beschreibung im Panel", not _fehlt, str(_fehlt))
 r.check("Einstellungen: nur bekannte Gruppen", all(g in seiten.GRUPPEN for g, *_ in _meta.values()))
+
+# ausfuehren(): ein gescheiterter Lauf meldet sich per Exit-Code, wenn ihn jemand auswertet (Panel,
+# KI-Knopf, Mail-Nachlauf mit CLASSIFY_DOC) — als Post-Consume-Skript (nur DOCUMENT_ID) nie.
+def _exitcode(fehler, umgebung):
+    alt = {k: getattr(classify, k) for k in ("main", "log", "save_trace", "unmark_running")}
+    altenv = {k: os.environ.pop(k, None) for k in ("CLASSIFY_DOC", "DOCUMENT_ID")}
+    def _main():
+        if fehler:
+            raise RuntimeError("422")
+    classify.main = _main
+    classify.log = classify.save_trace = classify.unmark_running = lambda *a, **k: None
+    os.environ.update(umgebung)
+    try:
+        return classify.ausfuehren()
+    finally:
+        for k, v in alt.items():
+            setattr(classify, k, v)
+        for k in ("CLASSIFY_DOC", "DOCUMENT_ID"):
+            os.environ.pop(k, None)
+            if altenv[k] is not None:
+                os.environ[k] = altenv[k]
+r.check("Exit-Code: Fehler im Knopf-/Panel-Lauf (CLASSIFY_DOC) → 2, damit dort nicht „fertig“ steht",
+        _exitcode(True, {"CLASSIFY_DOC": "5"}) == 2)
+r.check("Exit-Code: Fehler als Post-Consume-Skript (DOCUMENT_ID) → 0, der Import bleibt gültig",
+        _exitcode(True, {"DOCUMENT_ID": "5"}) == 0)
+r.check("Exit-Code: Erfolg → 0", _exitcode(False, {"CLASSIFY_DOC": "5"}) == 0)
 
 sys.exit(r.done())
