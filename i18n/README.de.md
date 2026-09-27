@@ -151,10 +151,20 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
   Absender — sie stehen auf fast jedem eingehenden Dokument. Die Analyse erfährt, wer „wir“ sind, und
   sucht das *Gegenüber*.
 - **Stammdaten nachtragen.** `stammdaten_erfassen` (Vorgabe an): nach der Zuordnung werden USt-ID,
-  IBAN, Mail/Domain, Telefon, Adresse und Kundennummer des Gegenübers aus dem Dokument **nur in leere
-  Felder** geschrieben, nie überschreibend, mit Herkunft (`erfasst`), die der Paperless-Dialog zeigt.
-  Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem Korrespondenten gehört.
-  Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
+  IBAN, Mail/Domain, Telefon, Adresse und Kundennummer des Gegenübers aus dem Dokument in leere Felder
+  geschrieben; IBAN, Mail, Domain, Telefon und Kundennummer werden als weiterer Wert **angehängt**, wenn
+  die Analyse den Korrespondenten exakt genannt hat (höchstens 10 je Feld). Überschrieben wird nie;
+  USt-ID und Adresse bleiben einzeln (eine zweite USt-ID wird gemeldet, nicht gespeichert); ein Wert,
+  der schon einem anderen Korrespondenten gehört, wird verworfen — so zieht eine Fehlzuordnung keine
+  späteren Dokumente zum falschen. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
+  Paperless-Dialog. Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem
+  Korrespondenten gehört. Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
+- **Namensabgleich.** Passt der Name aus der Analyse zu keinem Korrespondenten exakt, fragt eine zweite
+  Nachricht in derselben Unterhaltung („Pass 2“), welcher ähnliche gemeint ist — nur bei ähnlichen
+  Namen, die eine feste Namensregel bestehen (der Name steckt im anderen, Tippfehler nur bei langen
+  Wörtern; Personen: Nach- *und* Vorname gleich; sonst ein seltenes gemeinsames Wort ab 6 Buchstaben).
+  Besteht keiner, wird ohne zweiten Aufruf neu angelegt. Allein zuordnen darf die Regel nie: an zwei
+  echten Namenslisten gemessen hätte sie 10–18 % der Namen einem anderen Korrespondenten zugeschlagen.
 
 ## Deployment (Docker)
 

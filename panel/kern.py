@@ -532,8 +532,15 @@ def korr_eintrag(alt, eingabe):
             vorher = str(alt.get(feld) or "").strip()
         if wert:
             neu[feld] = wert
+        # Herkunft je Wert (Listenfeld, seit 2026-09-27): bleibt für die Werte, die noch da sind.
+        if art == "liste" and isinstance(erfasst.get(feld), dict):
+            rest = {w: q for w, q in erfasst[feld].items() if _einheitlich(feld, str(w)) in wert}
+            if rest:
+                erfasst[feld] = rest
+            else:
+                erfasst.pop(feld, None)
         # Von Hand geändert oder geleert: der Wert stammt nicht mehr von der KI.
-        if wert != vorher:
+        elif wert != vorher:
             erfasst.pop(feld, None)
     if erfasst:
         neu["erfasst"] = erfasst

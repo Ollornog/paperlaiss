@@ -451,14 +451,17 @@
     // Eingabefeld mit Haken; leer bestätigt heisst löschen.
     const knopfKlein = (attr, icon, titel) => '<button type="button" class="btn btn-sm btn-link text-secondary p-1" ' +
       attr + ' title="' + titel + '" aria-label="' + titel + '">' + icon + "</button>";
-    const wertZeile = (wert) => '<div class="d-flex align-items-center border-bottom py-1" data-pl-wert="' + esc(wert) + '">' +
-      '<span class="flex-grow-1 small text-break">' + esc(wert) + "</span>" +
+    // Herkunft je Wert (von der KI aus einem Dokument nachgetragen) — damit man es prüfen kann.
+    const herkunft = (name, wert) => { const e = (d.werte.erfasst || {})[name]; return e && typeof e === "object" ? e[wert] || "" : ""; };
+    const wertZeile = (wert, name) => '<div class="d-flex align-items-center border-bottom py-1" data-pl-wert="' + esc(wert) + '">' +
+      '<span class="flex-grow-1 small text-break">' + esc(wert) +
+      (name && herkunft(name, wert) ? ' <span class="text-muted">· ' + esc(herkunft(name, wert)) + "</span>" : "") + "</span>" +
       (aus ? "" : knopfKlein("data-pl-bearb", ICON.stift, "Bearbeiten") + knopfKlein("data-pl-weg", ICON.muell, "Löschen")) + "</div>";
     const feld = (name, art) => {
       const w = d.werte[name];
       if (art === "liste") {
         const liste = (Array.isArray(w) ? w : String(w || "").split(/[,;\n]/)).map((x) => String(x).trim()).filter(Boolean);
-        return '<div data-pl-feld="' + name + '">' + [...new Set(liste)].map(wertZeile).join("") + "</div>" +
+        return '<div data-pl-feld="' + name + '">' + [...new Set(liste)].map((x) => wertZeile(x, name)).join("") + "</div>" +
           (aus ? (liste.length ? "" : '<div class="small text-muted">—</div>')
                : '<div class="input-group input-group-sm mt-1"><input class="form-control" data-pl-neu="' + name +
                  '" placeholder="Hinzufügen …">' + '<button type="button" class="btn btn-outline-primary" data-pl-plus="' + name +
@@ -471,7 +474,7 @@
       '<div class="small text-muted mb-2">Hilft beim Zuordnen: Kontext und Kennungen gehen in den Prompt, Aliase und Domains in den Abgleich. Telefonnummern ohne Leerzeichen, mit Landesvorwahl (+43…) oder national (0…) — gefunden wird beides. Gespeichert mit „Save".</div>' +
       d.felder.map(([name, titel, art]) => '<div class="mb-2"><label class="form-label small mb-0">' + esc(titel) +
         // Von der KI aus einem Dokument nachgetragen: sagen, woher — damit man es prüfen kann.
-        ((d.werte.erfasst || {})[name] ? ' <span class="text-muted">· erfasst: ' + esc(d.werte.erfasst[name]) + "</span>" : "") + "</label>" +
+        (typeof (d.werte.erfasst || {})[name] === "string" ? ' <span class="text-muted">· erfasst: ' + esc(d.werte.erfasst[name]) + "</span>" : "") + "</label>" +
         feld(name, art) + "</div>").join("");
     if (!d.darf_aendern) return;
     const liste = (name) => box.querySelector('[data-pl-feld="' + name + '"]');

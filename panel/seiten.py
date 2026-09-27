@@ -317,7 +317,8 @@ async function lauf(doc){
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
   if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
     text:'Ergebnis: <b>'+txt(kart)+'</b>'+(kname!=='—'?' — '+txt(kname):''),
-    klappen:k.pass2?[['Eingabe — Pass 2'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Ausgabe — Pass 2',tabelle(k.pass2.response||{})]]:[]});
+    klappen:k.pass2&&k.pass2.uebersprungen?[['Pass 2 nicht gefragt — '+txt(k.pass2.uebersprungen),prosa((k.pass2.abgelehnt||[]).join('\n'))]]:
+            k.pass2?[['Eingabe — Pass 2'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Ausgabe — Pass 2',tabelle(k.pass2.response||{})]].concat((k.pass2.abgelehnt||[]).length?[['Ausgeschlossen (Namensregel)',prosa(k.pass2.abgelehnt.join('\n'))]]:[]):[]});
   const sd=t.stammdaten;
   if(sd) L.push({phase:'Schreiben',art:'code',titel:'Stammdaten nachtragen'+(sd.trocken?' (Trockenlauf — nur gezeigt)':''),
     text:sd.fehler?'Fehler: '+txt(sd.fehler):
@@ -452,12 +453,19 @@ function zeichnen(){
       stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
     {phase:'Korrespondent zuordnen',art:'entscheidung',id:'abgleich',titel:'Abgleich mit den Korrespondenten',knopf:knopf('abgleich'),
       was:'Ordnet den Absender aus Pass 1 einem Korrespondenten in Paperless zu — oder legt einen neuen an.',
-      regeln:[['der Name aus Pass 1 passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2: Die KI wählt einen davon oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
+      regeln:[['der Name aus Pass 1 passt exakt zu einem Korrespondenten','zuordnen'],
+              ['ähnliche Korrespondenten, die die Namensregel bestehen','Pass 2: die KI wählt einen davon oder keinen'],
+              ['kein ähnlicher Name besteht die Namensregel','ohne zweiten KI-Aufruf neu anlegen'],
+              ['Namensregel','Name steckt im anderen (Tippfehler nur bei langen Wörtern) · Personen: Nach- und Vorname gleich · sonst ein seltenes gemeinsames Wort ab 6 Zeichen']],
       klappen:[['Eingabe — Pass 2 (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa(V.pass2_frage||'')],
                ['Ausgabe — Pass 2',tabelle({match:'exakter Name aus der Liste, oder leer'},['Feld','Bedeutung'])]]},
     {phase:'Schreiben',art:'code',id:'stammdaten',titel:'Stammdaten nachtragen',knopf:knopf('stammdaten'),
       was:'Trägt USt-ID, IBAN, Mail, Domain, Telefon, Adresse und Kundennummer des Absenders beim zugeordneten Korrespondenten nach — aus der Absender-Mail und dem, was Pass 1 unter „absender“ liefert. Im Korrespondenten-Dialog in Paperless steht dann, woher der Wert kommt.',
-      regeln:[['das Feld ist schon gefüllt','bleibt — nie überschreiben'],['der Wert ist eine eigene Kennung','verworfen'],
+      regeln:[['das Feld ist leer','füllen'],
+              ['Listenfeld (IBAN, Mail, Domain, Telefon, Kundennummer), Korrespondent exakt zugeordnet','neuen Wert anhängen (höchstens 10)'],
+              ['Zuordnung nur über Pass 2 (ähnlicher Name)','nichts anhängen, nur leere Felder füllen'],
+              ['USt-ID oder Adresse schon gefüllt','bleibt — nie überschreiben; eine andere USt-ID wird als Warnung gemeldet'],
+              ['der Wert gehört schon einem anderen Korrespondenten','verworfen'],['der Wert ist eine eigene Kennung','verworfen'],
               ['USt-ID, IBAN oder Mail hat kein gültiges Format','verworfen'],['Freemail-Adresse (gmail, gmx …)','nur die Adresse, keine Domain'],
               ['die Absender-Mail gehört nicht erkennbar zu diesem Absender (z. B. ein Portal)','Mail und Domain nicht übernehmen'],
               ['die Zuordnung ist unsicher (bestehender behalten)','nichts nachtragen'],['sonst','nachtragen, mit Herkunft']],
