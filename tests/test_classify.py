@@ -908,4 +908,26 @@ _sj = _app[_app.index("def schreibe_json"):_app.index("raise\n", _app.index("def
 r.check("Panel-schreibe_json übernimmt Rechte und Besitzer genauso",
         "os.chown(tmp, vorbild.st_uid, vorbild.st_gid)" in _sj and "os.chmod(tmp, vorbild.st_mode" in _sj)
 
+# ---- Pass-2-Sperre (2026-09-27): die KI ordnete „Anna Berger“ → „Anna Zeller“ (gleicher Vorname) und
+# „Klein + Verbrauchsmaterial“ → „Klein Werkzeughandel“ zu; die Stammdaten-Erfassung trug dann die IBAN des einen
+# beim anderen ein. Die Sperre im Code lässt nur echte Namensvarianten durch.
+_p2 = [("Anna Berger", "Anna Zeller", False), ("Berger Anna", "Anna Zeller", False),
+       ("Klein + Verbrauchsmaterial", "Klein Werkzeughandel Ges.m.b.H.", False),
+       ("Mustrmann GmbH", "Mustermann", True), ("Autohaus Neuhauserr", "Autohaus Neuhauser GmbH", True),
+       ("AUER Reifen GesmbH", "AUER REIFEN GmbH", True), ("Amazon EU Sarl", "Amazon EU S.à r.l.", True),
+       ("ÖBB", "ÖBB-Personenverkehr AG", True), ("Deutsche Telekom", "Telekom Deutschland GmbH", True),
+       ("Max Mustermann", "Maximilian Mustermann", True), ("Mustermann Max", "Max Mustermann", True)]
+_p2f = [(v, n, classify.pass2_plausibel(v, n)) for v, n, soll in _p2 if classify.pass2_plausibel(v, n)[0] != soll]
+r.check("Pass-2-Sperre: gleicher Vorname oder kurzes Allerweltswort reicht nicht, echte Varianten gehen durch",
+        not _p2f, str(_p2f))
+r.check("Pass-2-Sperre: ein Alias zählt als Name (Zuordnung über den gepflegten Alias bleibt möglich)",
+        classify.pass2_plausibel("Telefonica", "O2", "Telefónica Germany, O2")[0])
+# Echter Lauf: Pass 1 erkennt „Anna Berger“, Pass 2 wählt „Anna Zeller“ → nicht zuordnen, neu anlegen.
+_sp = _lauf([{**_ok, "correspondent": "Anna Berger"}, {"match": "Anna Zeller"}], dry=False,
+            korrespondenten=[{"id": 192, "name": "Anna Zeller"}])
+_sp_korr = [p.get("correspondent") for p in _sp.get("patch", [])]
+r.check("Pass-2-Sperre im Lauf: die KI-Wahl „Anna Zeller“ wird verworfen, der Beleg geht nicht an 192",
+        192 not in _sp_korr and (classify.TRACE.get("correspondent") or {}).get("pass2", {}).get("sperre", {}).get("zugelassen") is False,
+        f"{_sp_korr} {(classify.TRACE.get('correspondent') or {}).get('pass2', {}).get('sperre')}")
+
 sys.exit(r.done())

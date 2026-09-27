@@ -6,6 +6,20 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Namensabgleich (Pass 2) ordnete fremden Korrespondenten zu und verteilte deren Stammdaten
+
+- **Sperre hinter der KI-Antwort:** Pass 2 ordnete „Anna Berger“ dem Korrespondenten „Anna Zeller“
+  zu (gleicher Vorname) und „Klein + Verbrauchsmaterial“ dem Korrespondenten „Klein Werkzeughandel“ (ein
+  gleiches Allerweltswort); die Stammdaten-Erfassung trug danach IBAN, Mail und Adresse des einen beim
+  anderen ein. `pass2_plausibel` lässt eine Wahl nur zu, wenn der Vorschlag im Namen (oder Alias)
+  steckt, bei zwei Personennamen der Nachname passt oder ein gemeinsames Wort mindestens 6 Zeichen hat.
+  Sonst wird ein neuer Korrespondent angelegt — lieber einer zu viel als fremde Stammdaten beim
+  falschen. Grund und Entscheidung stehen im Trace (`pass2.sperre`), eine Ablehnung im Log.
+- **Prompt:** „Namensvariante heisst derselbe Name anders geschrieben — nicht ein anderer Name mit
+  gleichem Vornamen oder Allerweltswort.“
+- Gegen alle bisherigen Pass-2-Zuordnungen aus den Traces zweier Installationen geprüft: die drei
+  falschen abgelehnt, die richtigen durchgelassen; ebenso die Beispielpaare der Configs.
+
 ### Hinzugefügt — Mails als Dokument mit Kopf und großen Bildern (Pre-Consume)
 
 - **`deploy/mail-pdf/mailbilder.py`:** Pre-Consume-Skript für Mail-Regeln, die die ganze Mail nehmen.

@@ -1068,12 +1068,53 @@ PASS2_SYSTEM = ('Du ordnest einen Absender bestehenden Korrespondenten zu. '
                 'Antworte NUR JSON {"match": <exakter Name aus der Liste> ODER null}.')
 
 
+def _aehnlich(a, b, grenze=0.85):
+    return a == b or difflib.SequenceMatcher(None, a, b).ratio() >= grenze
+
+
+def _personenname(roh):
+    """2–3 reine Wörter ohne Rechtsform — wie „Anna Zeller“, nicht „Klein Werkzeughandel GmbH“."""
+    alle, kern = norm(roh).split(), ctoks(roh)
+    return alle == kern and 2 <= len(kern) <= 3 and all(w.isalpha() and len(w) >= 2 for w in kern)
+
+
+def pass2_plausibel(vorschlag, name, alias=""):
+    """Darf Pass 2 den Vorschlag diesem bestehenden Korrespondenten zuordnen? (ja/nein, Grund)
+
+    Eine Sperre im Code hinter der KI-Antwort: Pass 2 ordnete 2026-09-27 „Anna Berger“ dem
+    Korrespondenten „Anna Zeller“ zu (gleicher Vorname) und „Klein + Verbrauchsmaterial“ dem
+    Korrespondenten „Klein Werkzeughandel“ (ein gleiches Allerweltswort) — und die Stammdaten-Erfassung
+    trug dann IBAN, Mail und Adresse des einen beim anderen ein. Die Regeln, der Reihe nach:
+      1. Steckt der Vorschlag im Kandidaten (jedes Wort, Tippfehler erlaubt): ja.
+      2. Sind beide Personennamen: nur wenn der Nachname passt.
+      3. Sonst: ein gemeinsames Wort mit mindestens 6 Zeichen („telekom“ ja, „klein“ nein).
+    Lieber einmal ein neuer Korrespondent zu viel als fremde Stammdaten beim falschen."""
+    a = set(ctoks(vorschlag))
+    b = set(ctoks(name)) | {w for teil in str(alias or "").split(",") for w in ctoks(teil)}
+    if not a or not b:
+        return True, "nichts zu vergleichen"
+    if all(any(_aehnlich(x, y) for y in b) for x in a):
+        return True, "Vorschlag steckt im Namen"
+    gemeinsam = [x for x in a if any(_aehnlich(x, y) for y in b)]
+    if not gemeinsam:
+        return False, "kein gemeinsames Wort"
+    if _personenname(vorschlag) and _personenname(name):
+        if _aehnlich(ctoks(vorschlag)[-1], ctoks(name)[-1]):
+            return True, "gleicher Nachname"
+        return False, "anderer Nachname (nur der Vorname gleich)"
+    if any(len(x) >= 6 for x in gemeinsam):
+        return True, f"gemeinsam: {', '.join(sorted(gemeinsam))}"
+    return False, f"nur kurzes gemeinsames Wort ({', '.join(sorted(gemeinsam))})"
+
+
 def pass2_frage(name, kandidaten, beispiele=""):
     """Die Zuordnungsfrage, die an die Pass-1-Unterhaltung angehängt wird."""
     return (f"{PASS2_SYSTEM}\nDein vorgeschlagener Absender: '{name}'.\n"
             f"Bestehende Korrespondenten, die in Frage kommen: {kandidaten}.\n"
             "Welcher bezeichnet DIESELBE Firma/Behörde/Person wie im Dokument oben? Rechtsform/Zusätze "
             f"(GmbH/AG/OG) egal; auch OCR-/Tippfehler, Abkürzungen und Namensvarianten berücksichtigen{beispiele}. "
+            "Namensvariante heisst: derselbe Name anders geschrieben — NICHT ein anderer Name mit gleichem "
+            "Vornamen oder einem gleichen Allerweltswort (Anna Berger ist nicht Anna Zeller). "
             "Nur bei echter Übereinstimmung, sonst null.")
 
 
@@ -1486,7 +1527,13 @@ def main():
                 if m:
                     for c in cands:
                         if norm(c["name"]) == norm(m):
-                            corr_id = c["id"]; corr_info = f"gewählt='{c['name']}'"; break
+                            ok, grund = pass2_plausibel(corr_name, c["name"], calias(c))
+                            pass2["sperre"] = {"kandidat": c["name"], "zugelassen": ok, "grund": grund}
+                            if ok:
+                                corr_id = c["id"]; corr_info = f"gewählt='{c['name']}'"
+                            else:
+                                log(f"PASS2-SPERRE {doc.get('id')} | '{corr_name}' ≠ '{c['name']}' ({grund})")
+                            break
             if corr_id is None:
                 # Kein erfundener Absender aus Zeichensalat: den bisherigen Korrespondenten nur
                 # behalten, wenn die KI den Text SELBST als unlesbar meldet — sie hat ihn gelesen —
