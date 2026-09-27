@@ -153,8 +153,9 @@ def _load_json(name, default):
 # war — eine stille Kollision, sobald je ein Adressbuch angebunden wird. Alte Stores werden
 # beim Lesen weiter verstanden.
 CORR_META = _load_json("correspondents.json", {})
-for _f in _STORE_FEHLER:
-    log(f"STORE: {_f}")
+# Gemeldet wird weiter unten, wenn log() existiert. Bis 2026-09-27 stand hier ein log()-Aufruf VOR der
+# Definition: eine unlesbare Store-Datei (etwa root-eigen nach einem Lauf als root) endete in einem
+# NameError — Exit 1, und Paperless 3 meldet damit den ganzen Import als gescheitert.
 
 
 def cmeta(cid):
@@ -421,6 +422,9 @@ def log(m):
 if _CFG_FEHLER:
     log(f"KONFIGURATION: {_CFG_FEHLER}")
     print(f"classify: {_CFG_FEHLER}", file=sys.stderr)
+for _f in _STORE_FEHLER:
+    log(f"STORE: {_f}")
+    print(f"classify: STORE: {_f}", file=sys.stderr)
 
 TRACE_DIR = os.path.join(os.path.dirname(LOG), "traces")
 RUN_DIR = os.path.join(os.path.dirname(LOG), "running")
@@ -433,14 +437,29 @@ def schreibe_json(pfad, daten):
     `json.dump(d, open(pfad, "w"))` kürzt die Zieldatei sofort auf null; bricht der Vorgang
     danach ab, steht dort eine halbe Datei. Bei einem Trace heisst das: die Panel-Ansicht
     zeigt kaputtes JSON statt des letzten brauchbaren Standes.
+
+    Rechte und Besitzer bleiben: die Ersatzdatei übernimmt Modus und Besitzer der alten, eine
+    neue Datei den Besitzer des Ordners. Bis 2026-09-27 gehörte sie dem, der gerade schrieb — ein
+    Lauf als root machte den Korrespondenten-Store root-eigen (0600), und der Paperless-Worker
+    konnte ihn danach nicht mehr lesen.
     """
     ordner = os.path.dirname(os.path.abspath(pfad)) or "."
+    try:
+        vorbild, bestand = os.stat(pfad), True
+    except FileNotFoundError:
+        vorbild, bestand = os.stat(ordner), False
     fd, tmp = tempfile.mkstemp(dir=ordner, prefix=".tmp-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(daten, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
+        if bestand:
+            os.chmod(tmp, vorbild.st_mode & 0o777)
+        try:
+            os.chown(tmp, vorbild.st_uid, vorbild.st_gid)   # nur als root wirksam
+        except PermissionError:
+            pass
         os.replace(tmp, pfad)
     except BaseException:
         try:

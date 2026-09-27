@@ -871,4 +871,41 @@ r.check("Exit-Code: Fehler als Post-Consume-Skript (DOCUMENT_ID) → 0, der Impo
         _exitcode(True, {"DOCUMENT_ID": "5"}) == 0)
 r.check("Exit-Code: Erfolg → 0", _exitcode(False, {"CLASSIFY_DOC": "5"}) == 0)
 
+# Eine unlesbare Store-Datei ist eine Warnung, kein Absturz. Bis 2026-09-27 rief classify.py dafür
+# log() VOR dessen Definition auf: NameError, Exit 1 — und Paperless 3 wertet den Import dann als
+# gescheitert. Echter Aufruf in einem eigenen Verzeichnis (SCRIPT_DIR = Ort der Datei).
+import shutil as _sh, subprocess as _sp, stat as _stat
+with tempfile.TemporaryDirectory() as _td:
+    _sh.copy(Path(__file__).resolve().parent.parent / "classify.py", _td)
+    Path(_td, "correspondents.json").write_text("{kaputt", encoding="utf-8")
+    _env = {**os.environ, "CLASSIFY_LOG": str(Path(_td, "classify.log")), "CLASSIFY_CONFIG": str(Path(_td, "fehlt.json")),
+            "CLASSIFY_DUMP_DEFAULTS": "1"}
+    _run = _sp.run([sys.executable, str(Path(_td, "classify.py"))], env=_env, capture_output=True, text=True, timeout=60)
+    _logtext = Path(_td, "classify.log").read_text(encoding="utf-8") if Path(_td, "classify.log").exists() else ""
+r.check("Store kaputt: classify.py stürzt nicht ab (Exit 0), meldet es aber im Log",
+        _run.returncode == 0 and "STORE: correspondents.json nicht lesbar" in _logtext,
+        f"rc={_run.returncode} log={_logtext[:120]!r} err={_run.stderr[-200:]!r}")
+
+# schreibe_json: Rechte und Besitzer bleiben — ein Lauf als root darf den Store nicht root-eigen machen.
+with tempfile.TemporaryDirectory() as _td:
+    _alt = Path(_td, "store.json"); _alt.write_text("{}", encoding="utf-8"); os.chmod(_alt, 0o640)
+    _aufrufe = []
+    _chown = os.chown
+    os.chown = lambda p, u, g: _aufrufe.append((os.path.basename(str(p)), u, g))
+    try:
+        classify.schreibe_json(str(_alt), {"a": 1})
+        classify.schreibe_json(str(Path(_td, "neu.json")), {"b": 2})
+    finally:
+        os.chown = _chown
+    _st_dir = os.stat(_td)
+    r.check("schreibe_json: der Modus der alten Datei bleibt (0640 statt 0600 aus mkstemp)",
+            _stat.S_IMODE(os.stat(_alt).st_mode) == 0o640, oct(_stat.S_IMODE(os.stat(_alt).st_mode)))
+    r.check("schreibe_json: Besitzer der alten Datei bzw. des Ordners wird übernommen",
+            len(_aufrufe) == 2 and _aufrufe[0][1:] == (os.stat(_alt).st_uid, os.stat(_alt).st_gid)
+            and _aufrufe[1][1:] == (_st_dir.st_uid, _st_dir.st_gid), str(_aufrufe))
+_app = (Path(__file__).resolve().parent.parent / "panel" / "app.py").read_text(encoding="utf-8")
+_sj = _app[_app.index("def schreibe_json"):_app.index("raise\n", _app.index("def schreibe_json"))]
+r.check("Panel-schreibe_json übernimmt Rechte und Besitzer genauso",
+        "os.chown(tmp, vorbild.st_uid, vorbild.st_gid)" in _sj and "os.chmod(tmp, vorbild.st_mode" in _sj)
+
 sys.exit(r.done())

@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — unlesbarer Store brach jeden Import ab; Schreiben als root sperrte den Worker aus
+
+- **Absturz statt Warnung:** Konnte `classify.py` beim Start eine Store-Datei nicht lesen, wollte es
+  das melden — rief dafür aber `log()` vor dessen Definition auf. Folge: `NameError`, Exit 1, und
+  Paperless 3 wertet das Post-Consume-Skript als Fehlschlag: der Import galt als gescheitert, das
+  Dokument blieb ohne Klassifizierung. Jetzt wird der Befund gemeldet, sobald das Log bereitsteht,
+  und der Lauf geht weiter. Test mit echtem Aufruf (kaputter Store), Mutation auf die alte Stelle rot.
+- **Rechte bleiben beim Schreiben:** `schreibe_json` (Klassifizierer und Panel) ersetzt Dateien
+  atomar — die neue Datei gehörte aber dem, der gerade schrieb. Ein Lauf als root (etwa ein Mail-Import
+  per `docker exec` ohne `-u`) machte den Korrespondenten-Store root-eigen mit 0600, der Worker
+  (uid 1000) konnte ihn nicht mehr lesen — und stürzte über den ersten Fehler. Jetzt übernimmt die
+  Ersatzdatei Modus und Besitzer der alten, eine neue Datei den Besitzer des Ordners.
+
 ### Geändert — Export 20 Minuten abrufbar; kein Einmal-Token mehr im Log
 
 - **Export-Aufbewahrung:** Vorgabe von `EXPORT_AUFBEWAHRUNG_MIN` 20 Minuten statt 24 Stunden
