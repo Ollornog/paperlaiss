@@ -12,6 +12,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   Pass-1-Unterhaltung: die KI sieht dabei das ganze Dokument und ihre eigene Analyse
   (`pass2_frage()`). Die Schnittstelle hat kein Gedächtnis — der Verlauf wird mitgeschickt, wie
   schon beim OCR-Nachlauf und der Selbstkorrektur. Test belegt die Verdrahtung (Mutation rot).
+- Lauf-Popup: nur noch die Schritte, die in diesem Lauf passiert sind (kein OCR-Schritt ohne OCR).
+- Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
   Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.
 

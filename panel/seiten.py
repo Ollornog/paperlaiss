@@ -202,7 +202,8 @@ async function lauf(doc){
   const o=t.ocr||{}, p0=t.pass0||{}, p1=t.pass1||{}, r=p1.response||{}, k=t.correspondent||{}, w=t.writeback||{};
   const L=[{art:'grenze',titel:(t.trigger||'automatisch')+' · '+(t.ts||'')}];
   if(t.hinweis) L.push({art:'code',titel:'Hinweis vom Knopf',text:txt(t.hinweis)});
-  L.push({art:'entscheidung',titel:'Text brauchbar? — sonst Mistral-OCR',
+  // Nur Schritte, die in DIESEM Lauf passiert sind: was fehlt, lief nicht.
+  if(o.triggered) L.push({art:'entscheidung',titel:'Text brauchbar? — sonst Mistral-OCR',
     ergebnis:o.triggered?(o.error?'OCR-Fehler':o.verworfen?'OCR verworfen':'OCR gelesen'):'Paperless-Text',
     variante:o.error?'destructive':o.triggered?'info':'success',
     text:txt(o.grund||'')+(o.chars?' · '+o.chars+' Zeichen':'')+(o.verworfen?' · '+txt(o.verworfen):'')+(o.error?' · '+txt(o.error):''),
@@ -210,18 +211,18 @@ async function lauf(doc){
   if(t.pass0) L.push({art:'ki',titel:'Pass 0 — Absender',ergebnis:p0.vorschlag||'keiner',
     text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+(p0.kandidaten||[]).map(txt).join(', '),
     klappen:p0.system?[['Eingabe — Anweisung',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
-  L.push({art:'ki',titel:'Pass 1 — Analyse',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
+  if(t.pass1) L.push({art:'ki',titel:'Pass 1 — Analyse',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
     text:'Korrespondent: '+txt(r.correspondent||'—')+' · Datum: '+txt(r.document_date||'—')+(r.needs_ocr?' · meldet unlesbaren Text':''),
     klappen:[['Eingabe — System-Prompt',prosa(p1.system||'—')],['Eingabe — Nachricht',prosa(p1.user||'—')],['Ausgabe',tabelle(r),true]]});
   if(o.nach_pass1) L.push({art:'entscheidung',titel:'OCR-Nachlauf',ergebnis:o.nachlauf_fehler?'Fehler':o.nachlauf_verworfen?'verworfen':'nachgeholt',
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
-  L.push({art:'entscheidung',titel:'Korrespondent zuordnen',ergebnis:kart+(kname!=='—'?': '+kname:''),
+  if(t.correspondent) L.push({art:'entscheidung',titel:'Korrespondent zuordnen',ergebnis:kart+(kname!=='—'?': '+kname:''),
     variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
     klappen:k.pass2?[['Pass 2 — Eingabe'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Pass 2 — Ausgabe',tabelle(k.pass2.response||{})]]:[]});
   const felder=Object.entries(w.fields_ki||{});
-  L.push({art:'paperless',titel:'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
+  if(t.writeback||t.error) L.push({art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
     klappen:[['Ausgabe — geschrieben',tabelle(w)]]});
   L.push({art:'grenze',titel:'Ende'});
@@ -278,7 +279,7 @@ def ablauf() -> str:
     return (kopf("Ablauf & Prompt",
                  "Jeder Schritt, den ein Dokument durchläuft — aufklappbar mit Eingabe und Ausgabe, bei der KI mit Prompt "
                  "und Antwortformat. Der Prompt ist hier bearbeitbar.")
-            + '<div id="schritte" class="mx-auto grid max-w-3xl gap-2"><p class="text-muted-foreground">lädt…</p></div>' + editor
+            + '<div id="schritte" class="grid gap-2"><p class="text-muted-foreground">lädt…</p></div>' + editor
             + "<script>" + _JS_GRUND + _JS_SCHRITTE_FERTIG + "const KNOTEN=" + knoten_js + ";" + _JS_ABLAUF + "</script>")
 
 
@@ -392,7 +393,7 @@ def info() -> str:
                 f'{symbol("external-link")}{text}</a>')
     return (kopf("Info", "Was paperlaiss ist und wo es herkommt.",
                  link("https://github.com/Ollornog/paperlaiss", "paperlaiss auf GitHub"))
-            + '<div class="mx-auto max-w-3xl">'
+            + '<div>'
             + abschnitt("Was es macht", (
                 '<div class="grid gap-3 text-sm">'
                 '<p>paperlaiss ist eine Middleware für Paperless-ngx: Es liest neue Dokumente, lässt eine KI '
@@ -489,7 +490,7 @@ def einstellungen() -> str:
                  '<span id="meld" class="text-muted-foreground text-sm"></span>'
                  '<button type="button" class="btn" onclick="sichern()">'
                  f'{symbol("save")}Speichern</button>')
-            + '<div id="felder" class="mx-auto grid max-w-3xl gap-6"><p class="text-muted-foreground">lädt…</p></div>'
+            + '<div id="felder" class="grid gap-6"><p class="text-muted-foreground">lädt…</p></div>'
             + "<script>" + _JS_GRUND + "const META=" + json.dumps(EINSTELLUNGEN, ensure_ascii=False)
             + ";const GRUPPEN=" + json.dumps(GRUPPEN + ["Weitere"], ensure_ascii=False) + ";" + _JS_EINSTELLUNGEN + "</script>")
 
