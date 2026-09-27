@@ -14,6 +14,10 @@ aus verschiedenen Gründen. Ein Redesign fasst idealerweise nur diese Datei und 
 from __future__ import annotations
 
 import html
+import json
+import os
+
+import kern
 
 # Lucide-Pfade, wörtlich aus den C22-Komponenten (gleiche Strichstärke, gleicher Rahmen).
 _ICONS = {
@@ -75,15 +79,26 @@ def symbol(name: str, klasse: str = "") -> str:
             f'stroke-linejoin="round"{k}>{_ICONS[name]}</svg>')
 
 
+# Pfad, unter dem das Panel im Browser liegt (PANEL_PFAD, etwa „/paperlaiss" hinter der Paperless-
+# Domain). Jede Adresse, die das Panel dem Browser gibt, läuft über u() — auch die im JavaScript
+# (PL_BASIS in holen()). Ohne das landete jeder Klick unter einem Unterpfad bei Paperless.
+BASIS = kern.panel_pfad(os.environ)
+
+
+def u(pfad: str) -> str:
+    return BASIS + pfad
+
+
 def rahmen(titel: str, koerper: str) -> str:
     """Das HTML-Dokument: Stylesheet und Verhaltensschicht aus dem vendorten C22."""
     return (
         '<!doctype html><html lang="de" class="dark"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>{e(titel)} — paperlaiss</title><link rel="icon" href="/logo.png">'
-        '<link rel="stylesheet" href="/static/c22/css/c22.css">'
-        '<script src="/static/c22/js/basecoat.all.min.js" defer></script>'
-        '<script src="/static/c22/js/c22.js" defer></script>'
+        f'<title>{e(titel)} — paperlaiss</title><link rel="icon" href="{u("/logo.png")}">'
+        f'<link rel="stylesheet" href="{u("/static/c22/css/c22.css")}">'
+        f'<script>const PL_BASIS={json.dumps(BASIS)};</script>'
+        f'<script src="{u("/static/c22/js/basecoat.all.min.js")}" defer></script>'
+        f'<script src="{u("/static/c22/js/c22.js")}" defer></script>'
         f'</head><body>{koerper}</body></html>'
     )
 
@@ -98,18 +113,18 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
     """
     def punkt(name: str, pfad: str, sym: str) -> str:
         if pfad == aktiv:
-            return (f'<a href="{e(pfad)}" class="btn bg-accent text-accent-foreground" data-variant="ghost" '
+            return (f'<a href="{e(u(pfad))}" class="btn bg-accent text-accent-foreground" data-variant="ghost" '
                     f'data-size="sm" aria-current="page">{symbol(sym)}{e(name)}</a>')
-        return f'<a href="{e(pfad)}" class="btn" data-variant="ghost" data-size="sm">{symbol(sym)}{e(name)}</a>'
+        return f'<a href="{e(u(pfad))}" class="btn" data-variant="ghost" data-size="sm">{symbol(sym)}{e(name)}</a>'
 
     punkte = "".join(punkt(*n) for n in NAVIGATION)
-    raus = (f'<a class="btn" data-variant="outline" data-size="sm" href="/auth/logout">'
+    raus = (f'<a class="btn" data-variant="outline" data-size="sm" href="{u("/auth/logout")}">'
             f'{symbol("log-out")}Abmelden</a>' if abmelden else "")
     koerper = f"""<div class="flex h-screen w-full flex-col bg-background text-foreground">
   <header class="shrink-0 border-b bg-card">
     <div class="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-2">
-      <a href="/" class="flex items-center gap-2 text-base font-bold">
-        <img src="/logo.png" alt="" width="28" height="28"> paperlaiss
+      <a href="{u("/")}" class="flex items-center gap-2 text-base font-bold">
+        <img src="{u("/logo.png")}" alt="" width="28" height="28"> paperlaiss
       </a>
       <nav class="ms-2 flex items-center gap-1" aria-label="Hauptbereiche">{punkte}</nav>
       <div class="ms-auto flex items-center gap-3">{raus}</div>

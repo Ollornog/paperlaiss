@@ -157,6 +157,9 @@ r.check("Anmeldung: Erst-Admin wird übergeben", _pw["admin"] == ("admin", "x"))
 _oidc = _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example.com/",
              "PANEL_OIDC_ISSUER": "https://id.example.com", "PANEL_OIDC_CLIENT_ID": "c",
              "PANEL_OIDC_CLIENT_SECRET": "s", "PANEL_OIDC_GROUPS": "buero, chef"})
+r.check("Anmeldung: mit Gruppensperre wird der Scope groups angefordert",
+        "groups" in _oidc["tinysesam"].get("oidc_scopes", "").split()
+        and _oidc["tinysesam"]["oidc_allowed_groups"] == ["buero", "chef"], str(_oidc["tinysesam"].get("oidc_scopes")))
 r.check("Anmeldung: Produktion = nur PocketID, Passwort aus", not _oidc["fehler"]
         and _oidc["tinysesam"]["oidc_enabled"] is True and _oidc["tinysesam"]["password_enabled"] is False, str(_oidc))
 r.check("Anmeldung: über https Secure-Cookie", _oidc["tinysesam"]["cookie_secure"] is True
@@ -229,6 +232,30 @@ r.check("Adressbuch: von Hand geänderter Wert verliert den KI-Vermerk, unverän
 _leer = kern.korr_eintrag(_ki, {})
 r.check("Adressbuch: alles geleert → kein verwaister Vermerk", "erfasst" not in _leer, str(_leer))
 r.check("Adressbuch: IBAN ist ein Feld im Dialog", any(f == "iban" for f, _, _ in kern.KORR_FELDER))
+
+# ---- PANEL_PFAD: das Panel unter einem Unterpfad derselben Domain (etwa /paperlaiss hinter Paperless).
+r.check("Pfad: normalisiert, ungültige Werte zählen als leer",
+        kern.panel_pfad({"PANEL_PFAD": "/paperlaiss/"}) == "/paperlaiss" and kern.panel_pfad({}) == ""
+        and kern.panel_pfad({"PANEL_PFAD": '/x"><script>'}) == "" and kern.panel_pfad({"PANEL_PFAD": "paperlaiss"}) == "")
+_sub = {**_basis, "PANEL_BASE_URL": "https://paper.example.com/paperlaiss", "PANEL_PASSWORD_LOGIN": "1",
+        "PANEL_ADMIN_USER": "admin", "PANEL_ADMIN_PASSWORD": "x"}
+r.check("Pfad: Basisadresse mit Pfad ohne passendes PANEL_PFAD startet nicht", _ae(_sub)["fehler"])
+_ok_sub = _ae({**_sub, "PANEL_PFAD": "/paperlaiss"})
+r.check("Pfad: passend konfiguriert startet, Logo der Anmeldeseite trägt den Pfad",
+        not _ok_sub["fehler"] and _ok_sub["tinysesam"]["brand_icon"] == "/paperlaiss/logo.png", str(_ok_sub["fehler"]))
+import importlib, os as _os
+_os.environ["PANEL_PFAD"] = "/pl"
+try:
+    import huelle
+    importlib.reload(huelle)
+    _html = huelle.seite("T", "/", "<p>x</p>", abmelden=True)
+finally:
+    _os.environ.pop("PANEL_PFAD")
+    importlib.reload(huelle)
+_roh = _re.findall(r'(?:href|src)="(/[^"]*)"', _html)
+r.check("Pfad: jede Adresse der Seite trägt den Präfix (Navigation, Stile, Logo, Abmelden)",
+        _roh and all(x == "/pl" or x.startswith("/pl/") for x in _roh), str([x for x in _roh if not x.startswith("/pl")]))
+r.check("Pfad: das JavaScript bekommt den Präfix für seine Abrufe", 'const PL_BASIS="/pl"' in _html)
 
 r.check("Aktivität: Trockenlauf ist eine eigene Art, keine Info",
         kern.eintrag_lesen("2026-09-20 19:52:14 DRY DRY 918 | exakt='X' | typ=Rechnung |")["art"] == "trockenlauf")
