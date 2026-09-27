@@ -17,6 +17,7 @@ ARTEN = [
     ("ocr", "OCR gelesen", "file-text", "info"),
     ("repariert", "Repariert", "refresh-ccw", "secondary"),
     ("fehler", "Fehler", "circle-alert", "destructive"),
+    ("pruefen", "Prüfen", "triangle-alert", "warning"),
     ("uebersprungen", "Übersprungen", "clock", "outline"),
 ]
 
@@ -214,7 +215,7 @@ function setzeFilter(neu, ersetzen){
   F=f; laden();
 }
 window.addEventListener('popstate',()=>{F=Object.fromEntries(new URLSearchParams(location.search));laden()});
-const ART_SYM={klassifiziert:'circle-check',ocr:'file-text',repariert:'refresh-ccw',fehler:'circle-alert',uebersprungen:'clock',trockenlauf:'eye',hinweis:'info'};
+const ART_SYM={klassifiziert:'circle-check',ocr:'file-text',repariert:'refresh-ccw',fehler:'circle-alert',pruefen:'triangle-alert',uebersprungen:'clock',trockenlauf:'eye',hinweis:'info'};
 function badge(art){const a=ARTEN[art]||[art,'outline'];return '<span class="flex items-center gap-2">'+(SYMK[ART_SYM[art]]||'')+'<span class="badge" data-variant="'+a[1]+'">'+txt(a[0])+'</span></span>'}
 async function laden(){
   const q=new URLSearchParams({...F}); let d;
@@ -229,7 +230,7 @@ async function laden(){
   tb.innerHTML = d.eintraege.length ? d.eintraege.map(e=>{
     const typ = e.typ ? (TYPEN[e.typ]||e.typ) : '';
     const korr = e.korrespondent ? txt(e.korrespondent)+(e.korrespondent_neu?' <span class="badge" data-variant="warning">neu</span>':'') : '';
-    const hinweis = e.ocr ? 'mit OCR' : (e.art==='fehler'||e.art==='hinweis'||e.art==='ocr'||e.art==='uebersprungen' ? txt(e.text.replace(/^\S+\s+\d+:?\s*\|?\s*/,'')).slice(0,90) : '');
+    const hinweis = e.ocr ? 'mit OCR' : (e.art==='fehler'||e.art==='pruefen'||e.art==='hinweis'||e.art==='ocr'||e.art==='uebersprungen' ? txt(e.text.replace(/^\S+\s+\d+:?\s*\|?\s*/,'')).slice(0,90) : '');
     return '<tr class="cursor-pointer hover:bg-muted" onclick="lauf('+(e.doc||0)+')">'+
       '<td class="whitespace-nowrap tabular-nums text-muted-foreground">'+txt(e.ts)+'</td>'+
       '<td class="tabular-nums">'+(e.doc?'#'+e.doc:'—')+'</td><td>'+badge(e.art)+'</td>'+
@@ -465,7 +466,9 @@ function zeichnen(){
               ['Listenfeld (IBAN, Mail, Domain, Telefon, Kundennummer), Korrespondent exakt zugeordnet','neuen Wert anhängen (höchstens 10)'],
               ['Zuordnung nur über Pass 2 (ähnlicher Name)','nichts anhängen, nur leere Felder füllen'],
               ['USt-ID oder Adresse schon gefüllt','bleibt — nie überschreiben; eine andere USt-ID wird als Warnung gemeldet'],
-              ['der Wert gehört schon einem anderen Korrespondenten','verworfen'],['der Wert ist eine eigene Kennung','verworfen'],
+              ['IBAN, USt-ID, Mail, Domain oder Telefon gehört schon einem anderen Korrespondenten','verworfen — Dokument „Prüfen“ (Aktivität, Tag „'+txt(CFG.unsicher_tag||'—')+'“)'],
+              ['die USt-ID weicht von der gespeicherten ab','ebenso „Prüfen“'],
+              ['Kontext (was das Gegenüber ist) leer','den Satz der KI übernehmen'],['der Wert ist eine eigene Kennung','verworfen'],
               ['USt-ID, IBAN oder Mail hat kein gültiges Format','verworfen'],['Freemail-Adresse (gmail, gmx …)','nur die Adresse, keine Domain'],
               ['die Absender-Mail gehört nicht erkennbar zu diesem Absender (z. B. ein Portal)','Mail und Domain nicht übernehmen'],
               ['die Zuordnung ist unsicher (bestehender behalten)','nichts nachtragen'],['sonst','nachtragen, mit Herkunft']],

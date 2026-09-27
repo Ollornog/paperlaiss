@@ -1102,4 +1102,62 @@ finally:
     classify.CFG["titel_setzen"] = _alt_ts
 r.check("Titel im Lauf: „Titel setzen“ aus → kein Titel", "title" not in (_t4.get("patch") or [{}])[0], str(_t4.get("patch")))
 
+
+# ---- Kontext: was ist das Gegenüber (PO 2026-09-27) — bis dahin verlangt, aber nie gespeichert
+_sk = classify.pass1_schema({"Rechnung": 1}, ["Betrag"], False, True, False)
+r.check("Kontext: Pass 1 muss korrespondent_kontext liefern, wenn Stammdaten erfasst werden",
+        "korrespondent_kontext" in _sk["required"] and "korrespondent_kontext" in _sk["properties"]
+        and "korrespondent_kontext" not in classify.pass1_schema({"Rechnung": 1}, [], False, False, False)["properties"])
+_nk, _gk, _ = classify.stammdaten_nachtragen({}, {}, "", _eig, _q, kontext="Kfz-Werkstatt in Salzburg")
+r.check("Kontext: leerer Kontext wird gefüllt, mit Herkunft",
+        _nk.get("kontext") == "Kfz-Werkstatt in Salzburg" and _nk["erfasst"].get("kontext") == _q, str(_nk))
+r.check("Kontext: ein gepflegter Kontext bleibt, auch bei anderem Satz der KI",
+        classify.stammdaten_nachtragen({"kontext": "Hausbank"}, {}, "", _eig, _q, anhaengen=True, kontext="Bank")[0]["kontext"] == "Hausbank")
+r.check("Kontext: null/leer von der KI schreibt nichts", "kontext" not in classify.stammdaten_nachtragen({}, {}, "", _eig, _q, kontext="null")[0])
+r.check("Kontext: gleiche Adresse oder Kundennummer bei einem anderen ist kein Widerspruch (fremd nur für eindeutige Kennungen)",
+        classify.stammdaten_fremd([{"id": 2, "name": "B"}], lambda i: {"kundennummer": ["12345"], "adresse": "Weg 1"}, 1)("kundennummer", "12345") is None)
+
+# ---- Prüfen: Daten des Dokuments passen nicht zum Korrespondenten → markieren (Tag, Log, Aktivität)
+classify.CORR_META.clear(); classify.CORR_META.update({"7": {"ustid": ["ATU11122233"]}, "8": {"iban": ["DE89 3704 0044 0532 0130 00"]}})
+_alt_ut = classify.CFG.get("unsicher_tag")
+classify.CFG["unsicher_tag"] = "KI-unsicher"
+_log_vorher = []
+_alt_log = classify.log
+classify.log = lambda m: _log_vorher.append(m)
+try:
+    # Trockenlauf: Stammdaten gegen den geladenen Stand (CORR_META) — beide Widersprüche im Trace.
+    _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00", "ustid": "ATU99988777"}}],
+          korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+    _pr_trace = classify.TRACE.get("pruefen") or {}
+    # Echter Lauf (Store im Testordner leer, fremd prüft gegen CORR_META): IBAN eines anderen → PRÜFEN-Zeile, Tag.
+    _alt_rt = classify.resolve_tag
+    classify.resolve_tag = lambda idx, name: 77 if name == "KI-unsicher" else _alt_rt(idx, name)
+    _pr = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00"}}],
+                dry=False, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+    _ok_tags = _lauf([{**_ok, "correspondent": "Beispiel Software"}], dry=False,
+                     korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
+    classify.resolve_tag = _alt_rt
+finally:
+    classify.log = _alt_log
+    classify.CFG["unsicher_tag"] = _alt_ut
+    classify.CORR_META.clear()
+_pr_zeilen = [m for m in _log_vorher if m.startswith("PRÜFEN 5")]
+r.check("Prüfen: IBAN eines anderen und abweichende USt-ID stehen im Trace",
+        "Andere Firma" in _pr_trace.get("iban", "") and "USt-ID" in _pr_trace.get("ustid", ""), str(_pr_trace))
+r.check("Prüfen: Tag „KI-unsicher“ am Dokument — ohne Widerspruch nicht",
+        77 in (_pr.get("patch") or [{}])[0].get("tags", []) and 77 not in (_ok_tags.get("patch") or [{}])[0].get("tags", []),
+        f"{_pr.get('patch')} {_ok_tags.get('patch')}")
+r.check("Prüfen: eigene Logzeile NACH der OK-Zeile (die Aktivität zeigt „Prüfen“)",
+        len(_pr_zeilen) == 1 and _log_vorher.index(_pr_zeilen[0]) > 0
+        and _log_vorher[_log_vorher.index(_pr_zeilen[0]) - 1].startswith("OK 5"),
+        str(_log_vorher[-3:]))
+
+# ---- Pass 2 sieht Aliase und Kontext der Kandidaten, nicht nur Namen
+classify.CORR_META.clear(); classify.CORR_META.update({"55": {"kontext": "Autohaus in Wien", "aliase": ["Mavros Wien"]}})
+_pk = _lauf([{**_ok, "correspondent": "Mavros"}, {"match": "Georg Mavros Automobil GmbH"}],
+            korrespondenten=[{"id": 55, "name": "Georg Mavros Automobil GmbH"}])
+classify.CORR_META.clear()
+r.check("Pass 2: Kandidat mit Alias und Kontext in der Frage", len(_pk["chat"]) == 2 and "Autohaus in Wien" in _pk["chat"][1]
+        and "Mavros Wien" in _pk["chat"][1], _pk["chat"][-1][:400])
+
 sys.exit(r.done())

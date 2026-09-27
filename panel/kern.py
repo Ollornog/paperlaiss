@@ -144,6 +144,8 @@ def log_art(zeile):
         return "uebersprungen"
     if erstes == "repariert":
         return "repariert"
+    if erstes == "PRÜFEN":          # Daten des Dokuments passen nicht zum Korrespondenten (seit 2026-09-27)
+        return "pruefen"
     if erstes.startswith("FEHLER") or erstes.endswith("-fail") or erstes.endswith("fehlgeschlagen"):
         return "fehler"
     if erstes.startswith("OCR-"):
@@ -207,8 +209,8 @@ def auffaelligkeiten(zeilen, geloest_nach=None):
     behoben wurde — und eine Liste, in der alles steht, liest irgendwann niemand mehr.
     """
     import re
-    doc_re = re.compile(r"\b(?:OK|VORSCHLAG|skip|FEHLER|OCR-rescue|OCR-rescue-fail|patch-fail|"
-                        r"repariert|repair-fehlgeschlagen|KI-OCR-fail)\s+(\d+)")
+    doc_re = re.compile(r"(?:\bOK|\bVORSCHLAG|\bskip|\bFEHLER|\bOCR-rescue|\bOCR-rescue-fail|\bpatch-fail|"
+                        r"\brepariert|\brepair-fehlgeschlagen|\bKI-OCR-fail|PRÜFEN)\s+(\d+)")
     erfolg_zuletzt = {}
     for zeile in zeilen or []:
         if len(zeile) < 19:
@@ -219,12 +221,13 @@ def auffaelligkeiten(zeilen, geloest_nach=None):
             erfolg_zuletzt[m.group(1)] = zeile[:19]
     out = []
     for zeile in zeilen or []:
-        if len(zeile) < 19 or log_art(zeile[20:]) != "fehler":
+        art = log_art(zeile[20:]) if len(zeile) >= 19 else None
+        if art not in ("fehler", "pruefen"):
             continue
         m = doc_re.search(zeile[20:])
         doc = m.group(1) if m else None
         ts = zeile[:19]
-        out.append({"ts": ts, "doc": doc, "text": zeile[20:].strip()[:200],
+        out.append({"ts": ts, "doc": doc, "art": art, "text": zeile[20:].strip()[:200],
                     "geloest": bool(doc and erfolg_zuletzt.get(doc, "") > ts)})
     out.sort(key=lambda e: e["ts"], reverse=True)
     return out
@@ -360,7 +363,7 @@ def auth_einstellungen(env):
     return out
 
 
-KENNZAHL_ARTEN = ("klassifiziert", "ocr", "repariert", "fehler", "uebersprungen")
+KENNZAHL_ARTEN = ("klassifiziert", "ocr", "repariert", "fehler", "pruefen", "uebersprungen")
 _DOC = None
 
 
@@ -381,7 +384,7 @@ def eintrag_lesen(zeile):
     # Trockenläufe (DRY) haben nichts geschrieben — eigene Art, damit man sie nicht für Fehler
     # oder echte Läufe hält. Alles Übrige ohne bekanntes erstes Wort ist ein Hinweis.
     art = "trockenlauf" if rest.startswith("DRY") else (log_art(rest) or "hinweis")
-    m = re.match(r"^(?:DRY\s+)?[A-Za-z-]+\s+(\d+)\b", rest)
+    m = re.match(r"^(?:DRY\s+)?\S+\s+(\d+)\b", rest)
     doc = int(m.group(1)) if m else None
     korr = re.search(r"(exakt|NEU|kandidat\w*)='([^']*)'", rest)
     typ = re.search(r"\btyp=(\d+|[^|\s][^|]*?)\s*(?:\||$)", rest)
