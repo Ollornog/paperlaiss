@@ -28,6 +28,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   Kastenränder nicht mehr abgeschnitten. Die Schritt-Kästen heben sich mit eigener Fläche und
   Schatten vom Hintergrund ab; der Chip nennt, wer den Schritt ausführt („paperlaiss" statt
   „Schritt").
+- Ablauf und Lauf-Popup: ein Schritt ist jetzt ein nummerierter Container um alles, was zu ihm
+  gehört (Vorbereiten · Text beschaffen · Absender erkennen · Analysieren · Korrespondent
+  zuordnen · Schreiben), darin die Teilschritte mit kleinen Pfeilen. Oben stehen die Auslöser je
+  mit Symbol (im Popup der eine, der den Lauf gestartet hat), unten „Ende" mit Haken bzw.
+  „Abgebrochen" mit Kreuz — beide mit Abstand zum Rand.
 - Panel: eine Spur für alle Seiten (die innere, schmalere entfällt).
 - Panel: „Nachbearbeitung" heißt jetzt „Eigenes Skript danach (optional)" — sie ist nicht die
   Selbstkorrektur bei abgelehnten Werten, die gehört zum Schreiben. Mehr Luft um den Seitentitel.

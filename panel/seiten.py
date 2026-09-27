@@ -51,7 +51,7 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, PFEIL_K=%PFEILK%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
+const CHEV=%CHEV%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
 const ART={paperless:['Paperless','info','inbox'],code:['paperlaiss','outline','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Lesbar statt Code: Text mit Absätzen und Zeilenumbrüchen in normaler Schrift, Objekte als Tabelle.
 function prosa(t){
@@ -71,7 +71,11 @@ function tabelle(obj,kopf){
 }
 function klapp(titel,inhalt,offen){return '<details class="min-w-0"'+(offen?' open':'')+'><summary>'+txt(titel)+CHEV+'</summary><div class="min-w-0">'+inhalt+'</div></details>'}
 function schritt(o){
-  if(o.art==='grenze') return '<div class="mx-auto w-fit rounded-full border bg-muted px-6 py-2 text-center text-sm font-medium">'+txt(o.titel)+'</div>';
+  // Auslöser oben (jeder mit Symbol) und Ende unten (Haken oder Kreuz), mit Luft zum Rand.
+  const pille=(sym,t)=>'<div class="flex items-center gap-2 rounded-full border bg-muted px-4 py-2 text-sm font-medium">'+sym+txt(t)+'</div>';
+  if(o.art==='grenze'&&o.ende) return '<div class="flex justify-center mb-6">'+pille(SYME[o.fehler?'x':'check'],o.titel)+'</div>';
+  if(o.art==='grenze') return '<div class="flex flex-col items-center gap-3 pt-6"><span class="text-muted-foreground text-sm">Auslöser</span>'+
+    '<div class="flex flex-wrap justify-center gap-3">'+o.ausloeser.map(a=>pille(SYMG[a[0]]||'',a[1])).join('')+'</div></div>';
   const a=ART[o.art]||['',''];
   // Symbol GETRENNT vom Chip und größer — im Chip war es zu klein, um etwas zu sagen.
   const badge=(SYMG[a[2]]||'')+'<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
@@ -83,11 +87,24 @@ function schritt(o){
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
   const klappen=(o.klappen||[]).length?'<div class="accordion min-w-0" data-multiple>'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
   return '<div class="card bg-muted shadow-md"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-3">'+
-    '<h2 class="flex items-center gap-3 text-lg font-semibold"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
+    '<h3 class="flex items-center gap-3 text-base font-semibold">'+badge+txt(o.titel)+'</h3>'+
     '<div class="flex items-center gap-2">'+erg+(o.knopf||'')+'</div></header>'+
     '<section class="grid min-w-0 gap-4 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
 }
-function kette(liste){let n=0;return liste.map(o=>schritt(o.art==='grenze'?o:{...o,nr:++n})).join(PFEIL_K)}
+// Ein Schritt ist ein Container um alles, was zu ihm gehört: aufeinanderfolgende Einträge mit
+// derselben Phase werden zu einem nummerierten Schritt zusammengefasst, darin kleine Pfeile.
+function kette(liste){
+  const gruppen=[];
+  for(const o of liste){ const g=gruppen[gruppen.length-1];
+    if(o.phase&&g&&g.phase===o.phase) g.teile.push(o); else gruppen.push({phase:o.phase,teile:[o]}); }
+  let n=0;
+  return gruppen.map(g=>{
+    if(!g.phase) return g.teile.map(schritt).join(PFEIL_K);
+    return '<div class="card shadow-md"><header><h2 class="flex items-center gap-3 text-xl font-semibold">'+
+      '<span class="text-muted-foreground tabular-nums">'+(++n)+'</span>'+txt(g.phase)+'</h2></header>'+
+      '<section class="grid min-w-0">'+g.teile.map(schritt).join(PFEIL_I)+'</section></div>';
+  }).join(PFEIL_K);
+}
 """
 
 
@@ -216,32 +233,34 @@ async function lauf(doc){
   ziel.innerHTML='<p class="text-muted-foreground">lädt…</p>'; dlg.showModal();
   let t; try{ t=await holen('/api/trace/'+doc); }catch(e){ ziel.innerHTML='<p>Kein Ablauf gespeichert ('+txt(e.message)+'). Aufgezeichnet wird je Dokument der letzte Lauf.</p>'; return; }
   const o=t.ocr||{}, p0=t.pass0||{}, p1=t.pass1||{}, r=p1.response||{}, k=t.correspondent||{}, w=t.writeback||{};
-  const L=[{art:'grenze',titel:(t.trigger||'automatisch')+' · '+(t.ts||'')}];
-  if(t.hinweis) L.push({art:'code',titel:'Hinweis vom Knopf',text:txt(t.hinweis)});
+  const tr=t.trigger||'automatisch (Post-Consume)';
+  const trSym=tr.startsWith('KI-Knopf mit')?'message-square':tr.startsWith('KI-Knopf')?'bot':tr.startsWith('Bestands')?'list':tr.startsWith('manuell')?'layout-dashboard':'file-plus';
+  const L=[{art:'grenze',ausloeser:[[trSym,tr+(t.ts?' · '+t.ts:'')]]}];
+  if(t.hinweis) L.push({phase:'Vorbereiten',art:'code',titel:'Hinweis vom Knopf',text:txt(t.hinweis)});
   // Nur Schritte, die in DIESEM Lauf passiert sind: was fehlt, lief nicht.
-  if(o.triggered) L.push({art:'ocr',titel:'Text neu lesen',
+  if(o.triggered) L.push({phase:'Text beschaffen',art:'ocr',titel:'Text neu lesen',
     ergebnis:o.triggered?(o.error?'OCR-Fehler':o.verworfen?'OCR verworfen':'OCR gelesen'):'Paperless-Text',
     variante:o.error?'destructive':o.triggered?'info':'success',
     text:txt(o.grund||'')+(o.chars?' · '+o.chars+' Zeichen':'')+(o.verworfen?' · '+txt(o.verworfen):'')+(o.error?' · '+txt(o.error):''),
     klappen:o.excerpt?[['Ausgabe — gelesener Text','<div class="grid gap-2">'+md(o.excerpt)+'</div>']]:[]});
-  if(t.pass0) L.push({art:'ki',titel:'Pass 0 — Absender',ergebnis:p0.vorschlag||'keiner',
+  if(t.pass0) L.push({phase:'Absender erkennen',art:'ki',titel:'Pass 0 — Absender',ergebnis:p0.vorschlag||'keiner',
     text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+(p0.kandidaten||[]).map(txt).join(', '),
     klappen:p0.system?[['Eingabe — Anweisung',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
-  if(t.pass1) L.push({art:'ki',titel:'Pass 1 — Analyse',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
+  if(t.pass1) L.push({phase:'Analysieren',art:'ki',titel:'Pass 1 — Analyse',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
     text:'Korrespondent: '+txt(r.correspondent||'—')+' · Datum: '+txt(r.document_date||'—')+(r.needs_ocr?' · meldet unlesbaren Text':''),
     klappen:[['Eingabe — System-Prompt',prosa(p1.system||'—')],['Eingabe — Nachricht',prosa(p1.user||'—')],['Ausgabe',tabelle(r),true]]});
-  if(o.nach_pass1) L.push({art:'entscheidung',titel:'OCR-Nachlauf',ergebnis:o.nachlauf_fehler?'Fehler':o.nachlauf_verworfen?'verworfen':'nachgeholt',
+  if(o.nach_pass1) L.push({phase:'Analysieren',art:'entscheidung',titel:'OCR-Nachlauf',ergebnis:o.nachlauf_fehler?'Fehler':o.nachlauf_verworfen?'verworfen':'nachgeholt',
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
-  if(t.correspondent) L.push({art:'entscheidung',titel:'Korrespondent zuordnen',ergebnis:kart+(kname!=='—'?': '+kname:''),
+  if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',ergebnis:kart+(kname!=='—'?': '+kname:''),
     variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
     klappen:k.pass2?[['Pass 2 — Eingabe'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Pass 2 — Ausgabe',tabelle(k.pass2.response||{})]]:[]});
   const felder=Object.entries(w.fields_ki||{});
-  if(t.writeback||t.error) L.push({art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
+  if(t.writeback||t.error) L.push({phase:'Schreiben',art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
     klappen:[['Ausgabe — geschrieben',tabelle(w)]]});
-  L.push({art:'grenze',titel:'Ende'});
+  L.push({art:'grenze',ende:true,fehler:!!t.error,titel:t.error?'Abgebrochen':'Ende'});
   ziel.innerHTML=kette(L);
 }
 setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterval(()=>{ if(!document.getElementById('lauf').open) laden(); },30000);
@@ -307,14 +326,14 @@ function knopf(id){return '<button type="button" class="btn" data-variant="outli
 function zeichnen(){
   const o=CFG.ocr_regeln||{}, mz=o.min_zeichen??CFG.ocr_min_len;
   const L=[
-    {art:'grenze',titel:'Start — nach dem Import · KI-Knopf in Paperless · Panel'},
-    {art:'paperless',titel:'Dokument laden',text:'Titel, Text, Metadaten und Felder aus Paperless.'},
-    {art:'entscheidung',id:'vorpruefung',titel:'Schon klassifiziert?',knopf:knopf('vorpruefung'),
+    {art:'grenze',ausloeser:[['file-plus','nach dem Import (automatisch)'],['bot','KI-Knopf in Paperless'],['message-square','KI-Knopf mit Hinweis'],['layout-dashboard','Panel'],['list','Bestands-Durchlauf']]},
+    {phase:'Vorbereiten',art:'paperless',titel:'Dokument laden',text:'Titel, Text, Metadaten und Felder aus Paperless.'},
+    {phase:'Vorbereiten',art:'entscheidung',id:'vorpruefung',titel:'Schon klassifiziert?',knopf:knopf('vorpruefung'),
       regeln:[['der Klassifizierer ist ausgeschaltet (automatischer Lauf)','Ende'],
               ['automatischer Lauf und das Dokument trägt den Marker-Tag','Ende — schon klassifiziert (Schleifenschutz)'],
               ['KI-Knopf oder Panel','immer weiter'],['sonst','weiter']],
       stand:[['Klassifizierer',an(CFG.enabled)],['Marker-Tag',CFG.marker_tag]]},
-    {art:'ocr',id:'ocr',titel:'Text neu lesen',knopf:knopf('ocr'),
+    {phase:'Text beschaffen',art:'ocr',id:'ocr',titel:'Text neu lesen',knopf:knopf('ocr'),
       text:'Liest das Dokument mit <b>'+txt(CFG.ocr_model)+'</b> neu und ersetzt den Paperless-Text — aber nur unter diesen Bedingungen:',
       regeln:[['KI-Knopf in Paperless','lesen'],['„Immer OCR“ ist eingeschaltet','lesen'],
               ['der Text ist kürzer als '+mz+' Zeichen','lesen'],
@@ -323,13 +342,13 @@ function zeichnen(){
               ['sonst','nicht lesen — Paperless-Text verwenden']],
       stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
       klappen:[['Eingabe','<p>Das Dokument als PDF.</p>'],['Ausgabe','<p>Der Text als Markdown (Überschriften, Tabellen).</p>']]},
-    {art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
+    {phase:'Absender erkennen',art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
       text:'Modell <b>'+txt(CFG.model)+'</b>, kurzer Aufruf.',
       regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, kein KI-Aufruf'],['sonst','KI-Aufruf']],
       klappen:[['Eingabe — Anweisung',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa('TITEL: <Titel>\n\nINHALT:\n<die ersten 2500 Zeichen>')],
                ['Ausgabe',tabelle({correspondent:'Name des Absenders oder leer'},['Feld','Bedeutung'])]]},
-    {art:'code',titel:'Kandidaten suchen',text:'Namensabgleich des Absenders gegen alle Korrespondenten (auch Aliase). Die besten gehen samt Kontext an Pass 1.'},
-    {art:'ki',id:'pass1',titel:'Pass 1 — Analyse',knopf:knopf('pass1'),
+    {phase:'Absender erkennen',art:'code',titel:'Kandidaten suchen',text:'Namensabgleich des Absenders gegen alle Korrespondenten (auch Aliase). Die besten gehen samt Kontext an Pass 1.'},
+    {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Analyse',knopf:knopf('pass1'),
       text:'Modell <b>'+txt(CFG.model)+'</b> · Temperatur '+txt(CFG.temperature)+' · Text bis '+txt(CFG.content_max_len)+' Zeichen.',
       klappen:[['Eingabe — System-Prompt (bearbeitbar)','<textarea class="textarea max-h-96 w-full font-mono" rows="12" id="prompt-vorlage">'+txt(CFG.system_prompt||'')+'</textarea>'+
                   '<div class="mt-2 flex items-center gap-2"><button type="button" class="btn" data-size="sm" onclick="promptSpeichern()">Prompt speichern</button>'+
@@ -339,22 +358,22 @@ function zeichnen(){
                ['Ausgabe',tabelle({document_type:'Dokumenttyp aus der Liste, oder leer',correspondent:'Name des Absenders, oder leer',
                   fields:'je Feld: Wert · leer (löschen) · „BEHALTEN“',document_date:'tatsächliches Dokumentdatum (JJJJ-MM-TT)',
                   summary:'kurze Zusammenfassung',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
-    {art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),
+    {phase:'Analysieren',art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),
       regeln:[['in diesem Lauf wurde schon per OCR gelesen','weiter — kein zweites OCR'],
               ['die KI meldet unlesbaren Text','OCR nachholen, Pass 1 wiederholen'],
               ['kein Dokumenttyp erkannt','ebenso (wenn eingeschaltet)'],['kein Korrespondent erkannt','ebenso (wenn eingeschaltet)'],
               ['sonst','weiter']],
       stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
-    {art:'entscheidung',titel:'Korrespondent zuordnen',
+    {phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
       regeln:[['der Name passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2 — die KI wählt in derselben Unterhaltung einen oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
       klappen:[['Pass 2 — Eingabe (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa((V.pass2_system||'')+"\nDein vorgeschlagener Absender: <Name>\nBestehende Korrespondenten, die in Frage kommen: <Namen>")],
                ['Pass 2 — Ausgabe',tabelle({match:'exakter Name aus der Kandidatenliste, oder leer'},['Feld','Bedeutung'])]]},
-    {art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
-      text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.',
-      regeln:[['Paperless lehnt einen Wert ab','Selbstkorrektur — die Fehlermeldung geht in dieselbe KI-Unterhaltung, die KI korrigiert, es wird erneut geschrieben (mehrere Runden)']]},
-    {art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
+    {phase:'Schreiben',art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
+      text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
+      regeln:[['Paperless lehnt einen Wert ab','Selbstkorrektur (mehrere Runden)']]},
+    {phase:'Schreiben',art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
       text:CFG.nachbearbeitung?'Skript <b>'+txt(CFG.nachbearbeitung)+'</b> bekommt das Ergebnis.':'nicht eingerichtet — nur für Zusatzschritte einer einzelnen Installation, etwa eine Verknüpfung in ein eigenes System'},
-    {art:'grenze',titel:'Ende'}];
+    {art:'grenze',ende:true,titel:'Ende'}];
   document.getElementById('schritte').innerHTML=kette(L);
 }
 async function laden(){
@@ -571,8 +590,13 @@ def _json(x):
 _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down")))
                        .replace("%PFEILK%", _json('<div class="flex justify-center py-3 text-muted-foreground">'
                                                   + symbol("arrow-down", "size-14") + "</div>"))
+                       .replace("%PFEILI%", _json('<div class="flex justify-center py-2 text-muted-foreground">'
+                                                  + symbol("arrow-down", "size-8") + "</div>"))
                        .replace("%SYMG%", _json({n: symbol(n, "size-6 shrink-0 text-muted-foreground")
-                                                 for n in ("inbox", "settings-2", "bot", "file-text", "git-branch")}))
+                                                 for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
+                                                           "file-plus", "message-square", "layout-dashboard", "list")}))
+                       .replace("%SYME%", _json({"check": symbol("circle-check", "size-6 shrink-0 text-success"),
+                                                 "x": symbol("x", "size-6 shrink-0 text-destructive")}))
                        .replace("%SYMK%", _json({n: symbol(n, "size-5 shrink-0 text-muted-foreground") for n in
                                                  ("circle-check", "file-text", "refresh-ccw", "circle-alert", "clock", "eye", "info")}))
                        .replace("%SYM%", _json({n: symbol(n) for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
