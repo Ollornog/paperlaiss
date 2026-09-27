@@ -356,7 +356,7 @@ KNOTEN_FELDER = {
                                                  ("eigene_kennungen.iban", "Eigene IBANs"),
                                                  ("eigene_kennungen.domains", "Eigene Mail-Domains"),
                                                  ("eigene_kennungen.email", "Eigene Mail-Adressen"),
-                                                 ("eigene_kennungen.namen", "Eigene Firmennamen")]),
+                                                 ("eigene_kennungen.namen", "Eigene Namen")]),
     "abgleich": ("Abgleich mit den Korrespondenten", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
     "stammdaten": ("Stammdaten nachtragen", [("stammdaten_erfassen", "Stammdaten erfassen"),
                                              ("eigene_kennungen.ustid", "Eigene USt-IDs"),
@@ -364,6 +364,7 @@ KNOTEN_FELDER = {
                                              ("eigene_kennungen.domains", "Eigene Mail-Domains"),
                                              ("eigene_kennungen.email", "Eigene Mail-Adressen")]),
     "pass1": ("Pass 1 — Analyse", [("system_prompt", "System-Prompt (leer = eingebaut; {TYPES}, {TAGBLOCK}/{TAGS})"),
+                                   ("eigene_regel", "Regel zum Gegenüber (leer = eingebaut)"),
                                    ("model", "Modell"), ("temperature", "Temperatur"),
                                    ("content_max_len", "Text bis (Zeichen, gesamt)"),
                                    ("content_end_len", "Davon am Ende (Zeichen)")]),
@@ -425,7 +426,7 @@ function zeichnen(){
       regeln:[['die Absender-Mail passt zu genau einem Korrespondenten','starker Kandidat, keine Zuordnung (Portale!)'],
               ['die Mail kommt von einer eigenen Adresse oder Domain','Weiterleitung — zählt nicht'],
               ['Stammdaten eines Korrespondenten stehen im Text','Kandidat (stärkster Hinweis)'],
-              ['alle Wörter eines Namens oder Alias stehen im Briefkopf (erste 1000 Zeichen)','Kandidat (schwächer)'],['der Name ist ein eigener Firmenname','kein Kandidat'],
+              ['alle Wörter eines Namens oder Alias stehen im Briefkopf (erste 1000 Zeichen)','Kandidat (schwächer)'],['der Name ist ein eigener Name (Firma oder Haushalt)','kein Kandidat'],
               ['eigene Kennungen im Text','zählen nie'],['nichts gefunden','Pass 1 nennt den Absender ohne Kandidaten']],
       stand:[['eigene USt-IDs',((CFG.eigene_kennungen||{}).ustid||[]).length],['eigene IBANs',((CFG.eigene_kennungen||{}).iban||[]).length],['eigene Domains',((CFG.eigene_kennungen||{}).domains||[]).length],['eigene Adressen',((CFG.eigene_kennungen||{}).email||[]).length]]},
     {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Dokument analysieren',knopf:knopf('pass1'),
@@ -517,6 +518,7 @@ function feldHtml(pfad,name){
   if(typeof v==='boolean') return '<div class="field" role="group" data-orientation="horizontal"><input class="input" type="checkbox" role="switch" id="'+id+'"'+(v?' checked':'')+'><label class="label" for="'+id+'">'+txt(name)+'</label></div>';
   let e;
   if(pfad==='system_prompt') e='<textarea class="textarea max-h-96 font-mono" rows="18" id="'+id+'">'+txt(v)+'</textarea>';
+  else if(pfad==='eigene_regel') e='<textarea class="textarea max-h-48 font-mono" rows="6" id="'+id+'">'+txt(v??'')+'</textarea>';
   else if(Array.isArray(v)&&v.every(x=>typeof x==='string')) e='<textarea class="textarea max-h-48 font-mono" rows="5" id="'+id+'">'+txt(v.join('\n'))+'</textarea><p class="text-muted-foreground text-sm">Ein Eintrag je Zeile.</p>';
   else if(Array.isArray(v)||(v&&typeof v==='object')) e='<textarea class="textarea max-h-48 font-mono" rows="5" id="'+id+'">'+txt(JSON.stringify(v,null,1))+'</textarea>';
   else if(typeof v==='number') e='<input class="input" type="number" step="any" id="'+id+'" value="'+txt(v)+'">';
@@ -653,14 +655,19 @@ EINSTELLUNGEN = {
                             "An: USt-ID, IBAN, Mail, Telefon, Adresse und Kundennummer des Absenders werden beim "
                             "zugeordneten Korrespondenten nachgetragen — nur in leere Felder, nie überschreibend."),
     "eigene_kennungen.ustid": ("Korrespondenten", "Eigene USt-IDs",
-                               "USt-IDs der eigenen Firma. Stehen auf fast jedem Dokument und zählen nie als Absender. Eine je Zeile."),
+                               "Eigene USt-IDs. Stehen auf fast jedem Dokument und zählen nie als Absender. Eine je Zeile."),
     "eigene_kennungen.iban": ("Korrespondenten", "Eigene IBANs",
-                              "IBANs der eigenen Firma (etwa bei Lastschriften). Zählen nie als Absender. Eine je Zeile."),
+                              "Eigene IBANs (etwa bei Lastschriften). Zählen nie als Absender. Eine je Zeile."),
     "eigene_kennungen.domains": ("Korrespondenten", "Eigene Mail-Domains",
                                  "Mail von hier ist eine Weiterleitung und ordnet nichts zu; nie als Absender erfasst. Eine je Zeile."),
-    "eigene_kennungen.namen": ("Korrespondenten", "Eigene Firmennamen",
-                               "Stehen im Empfängerblock jedes Dokuments. Korrespondenten mit diesem Namen sind bei der Namenssuche "
-                               "keine Kandidaten, und Pass 1 erfährt, wer „wir“ sind — gesucht ist immer das Gegenüber. Einer je Zeile."),
+    "eigene_kennungen.namen": ("Korrespondenten", "Eigene Namen",
+                               "Firma oder Personen des Haushalts. Stehen im Empfängerblock jedes Dokuments. Korrespondenten mit "
+                               "diesem Namen sind bei der Namenssuche keine Kandidaten, und Pass 1 erfährt, wer „wir“ sind — "
+                               "gesucht ist immer das Gegenüber. Einer je Zeile."),
+    "eigene_regel": ("Korrespondenten", "Regel zum Gegenüber",
+                     "Wie Pass 1 den Korrespondenten wählt, wenn eigene Namen gesetzt sind (der Satz nach „… das sind WIR.“). "
+                     "Leer = eingebaute Regel für eine Firma (Kunden, Ausgangsrechnung, Lohnabrechnung). {ERSTER} = erster "
+                     "eigener Name. Ein Haushalt nennt hier seine eigenen Fälle (eigener Brief, Lebenslauf, Vollmacht)."),
     "eigene_kennungen.email": ("Korrespondenten", "Eigene Mail-Adressen",
                                "Wie die Domains, aber als volle Adresse — für eine eigene Freemail-Adresse (gmail, gmx …), "
                                "deren Domain man nicht sperren kann. Eine je Zeile."),
@@ -694,6 +701,7 @@ function feld(pfad,v){
   if(typeof v==='boolean') return [gruppe,'<div class="field" role="group" data-orientation="horizontal"><input class="input" type="checkbox" role="switch" id="'+id+'"'+(v?' checked':'')+'><label class="label" for="'+id+'">'+txt(titel)+'</label></div>'+hilfe];
   let e;
   if(pfad==='system_prompt') e='<textarea class="textarea max-h-96 font-mono" rows="12" id="'+id+'">'+txt(v)+'</textarea>';
+  else if(pfad==='eigene_regel') e='<textarea class="textarea max-h-48 font-mono" rows="5" id="'+id+'">'+txt(v??'')+'</textarea>';
   else if(Array.isArray(v)&&v.every(x=>typeof x==='string')) e='<textarea class="textarea max-h-48 font-mono" rows="4" id="'+id+'">'+txt(v.join('\n'))+'</textarea>';
   else if(v&&typeof v==='object') e='<textarea class="textarea max-h-48 font-mono" rows="4" id="'+id+'">'+txt(JSON.stringify(v,null,1))+'</textarea>';
   else if(typeof v==='number') e='<input class="input" type="number" step="any" id="'+id+'" value="'+txt(v)+'">';

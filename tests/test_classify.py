@@ -268,10 +268,29 @@ r.check("Prompt: interne Dokumente dürfen zur eigenen Firma, eine Bank nur als 
         "NUR bei internen Dokumenten" in _ew and "unter dem Namen Eigenfirma" in _ew
         and "nicht weil ihre Bankverbindung" in _ew and "NIE die eigene Firma" not in _ew)
 r.check("Prompt: ohne eigene Firmennamen kein Zusatz", classify.eigene_firma_anweisung({}) == ""
-        and not any("Eigene Firma" in (v or "") for _, v in classify.pass1_system_teile({}, {"A": 1}, [], set(), False)))
+        and not any("Wir und das Gegenüber" in (v or "") for _, v in classify.pass1_system_teile({}, {"A": 1}, [], set(), False)))
 r.check("Prompt: der Zusatz steht im gesendeten System-Prompt",
-        any(v and v.startswith("Eigene Firma") for _, v in classify.pass1_system_teile(
+        any(v and v.startswith("Wir und das Gegenüber") for _, v in classify.pass1_system_teile(
             {"eigene_kennungen": {"namen": ["Eigenfirma"]}}, {"A": 1}, [], set(), False)))
+# Eigene Regel (Haushalt statt Firma): ersetzt nur den Satz nach „das sind WIR.“ — Kopf mit Namen und
+# Kennungen und der Schluss „absender enthält NIE …“ bleiben, sonst landete die eigene IBAN beim Absender.
+_hr = classify.eigene_firma_anweisung({"eigene_kennungen": {"namen": ["Erika Muster", "Max Muster"], "iban": ["DE00 1"]},
+                                        "eigene_regel": "Bei Lebenslauf die Person selbst; erster: {ERSTER}."})
+r.check("Eigene Regel: ersetzt die Firmenregel, Kopf und Schluss bleiben, {ERSTER} eingesetzt",
+        "Erika Muster / Max Muster (IBAN DE00 1) — das sind WIR. Bei Lebenslauf die Person selbst; erster: Erika Muster."
+        in _hr and _hr.endswith("absender enthält NIE unsere eigenen Stammdaten.")
+        and "Ausgangsrechnung" not in _hr and "Kunden" not in _hr, _hr)
+r.check("Eigene Regel: leer oder nur Leerzeichen = eingebaute Firmenregel",
+        classify.eigene_firma_anweisung({"eigene_kennungen": {"namen": ["Eigenfirma"]}, "eigene_regel": "  "})
+        == classify.eigene_firma_anweisung({"eigene_kennungen": {"namen": ["Eigenfirma"]}})
+        and "Ausgangsrechnung" in classify.eigene_firma_anweisung({"eigene_kennungen": {"namen": ["Eigenfirma"]}}))
+r.check("Eigene Regel: ohne eigene Namen kein Zusatz, auch mit Regel",
+        classify.eigene_firma_anweisung({"eigene_regel": "irgendwas"}) == "")
+r.check("Eigene Regel: das Panel nennt die Quelle des Blocks",
+        any(v and "Regel zum Gegenüber" in v for _, v in classify.pass1_system_teile(
+            {"eigene_kennungen": {"namen": ["X"]}, "eigene_regel": "R."}, {"A": 1}, [], set(), False)))
+r.check("Eigene Regel: ist ein bekannter Config-Schlüssel (sonst zeigt das Panel ihn nicht)",
+        "eigene_regel" in classify.CFG and classify.CFG["eigene_regel"] == "")
 r.check("Namen: Zeilen mit Bankdaten zählen nicht, auch wenn sie im Briefkopf stehen",
         not classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "",
                                     "Eigenfirma - Testweg 1\nRechnung\nBank Raiffeisenbank IBAN AT00")
@@ -341,6 +360,7 @@ r.check("Typ-Vorschlag: vorbelegter Typ steht als Vorschlag in der Nachricht",
 r.check("Typ überschreibbar: Import ohne FORCE, Knopf, Panel ja — Bestand, FORCE-Handaufruf, Unbekanntes nein",
         classify.typ_ueberschreibbar("", False) and classify.typ_ueberschreibbar("knopf", True)
         and classify.typ_ueberschreibbar("manual", True) and not classify.typ_ueberschreibbar("", True)
+        and classify.typ_ueberschreibbar("mail", True)
         and not classify.typ_ueberschreibbar("bulk", False) and not classify.typ_ueberschreibbar("irgendwas", False))
 r.check("Typ-Vorschlag: ohne vorbelegten Typ kein Hinweis",
         "vorbelegt" not in "".join(t for t, _, _ in classify.pass1_nachricht_teile("", None, "", "", "", "d", "", "a", "", "T", "I")))
@@ -367,6 +387,10 @@ r.check("Schreibstelle: Import (keine Quelle, kein FORCE) überschreibt den vorb
         _typ_geschrieben() == [2], str(_typ_geschrieben()))
 r.check("Schreibstelle: KI-Knopf und Panel überschreiben",
         _typ_geschrieben(source="knopf") == [2] and _typ_geschrieben(source="manual") == [2])
+# Der Mail-Nachlauf läuft mit FORCE (das Dokument trägt vom Import schon den Marker), ist aber noch der
+# Import: der Typ kann nur von der Paperless-Automatik stammen.
+r.check("Schreibstelle: Mail-Nachlauf (Quelle mail, mit FORCE) überschreibt den vorbelegten Typ",
+        _typ_geschrieben(source="mail", force=True) == [2], str(_typ_geschrieben(source="mail", force=True)))
 r.check("Schreibstelle: Handaufruf mit FORCE oder FORCE_OCR und Bestands-Durchlauf lassen den Typ stehen",
         _typ_geschrieben(force=True) == [None] and _typ_geschrieben(source="bulk") == [None]
         and _typ_geschrieben(force_ocr=True) == [None],

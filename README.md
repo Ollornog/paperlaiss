@@ -141,9 +141,12 @@ classifier uses it in three ways:
   context and where it was found. The mail sender is a strong candidate, not an assignment: a portal
   sends documents of many companies from one address. (Until 2026-09-27 a separate LLM call —
   "Pass 0" — guessed a sender name first; the search replaces it.)
-- **Own company.** `eigene_kennungen` (names, VAT IDs, IBANs, mail domains/addresses) never count as a
-  sender: they appear on almost every incoming document. The analysis is told who "we" are and to
-  look for the *counterpart*.
+- **Own company or household.** `eigene_kennungen` (names, VAT IDs, IBANs, mail domains/addresses)
+  never count as a sender: they appear on almost every incoming document. The analysis is told who
+  "we" are and to look for the *counterpart*. The built-in rule for that is written for a company
+  (customers, outgoing invoices, payroll); `eigene_regel` replaces it — a household names its own
+  cases there (own letters, CV, a power of attorney between members). `{ERSTER}` inserts the first
+  own name.
 - **Filling in master data.** `stammdaten_erfassen` (on by default): after assignment, the
   counterpart's VAT ID, IBAN, e-mail/domain, phone, address and customer number from the document
   are written into **empty** fields only, never overwriting, with their origin (`erfasst`) shown in
