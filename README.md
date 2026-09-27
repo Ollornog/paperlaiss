@@ -122,7 +122,8 @@ See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 
 ### Buttons in Paperless (optional)
 
-Two buttons next to Paperless' own *Suggest* in the document view — without a fork:
+Two buttons in the document view (replacing Paperless' own *Suggest*, which is hidden) and in the
+multi-select bar of the document list (for all selected documents) — without a fork:
 
 - **KI** (magic wand) — an optional hint for the AI, then re-classify (always with Mistral OCR).
 - **OCR** — only re-read the text with Mistral OCR; metadata stays as it is.
@@ -134,7 +135,9 @@ again after every update, nothing to merge. The buttons only talk to the **Paper
 user's own session**: they set the redo tag / hint field or the OCR tag, and the existing workflow
 calls paperlaiss. Set up tag, field and workflow once with `deploy/neu-klassifizieren-einrichten.py`.
 Names: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` in the Paperless
-container (defaults `KI-neu`, `KI-OCR`, `KI-Hinweis`). If Paperless changes its page, the buttons
+container (defaults `KI-neu`, `KI-OCR`, `KI-Hinweis`). With *Select all* across pages only the
+visible selected documents are processed, and the button says so. The panel runs at most
+`PANEL_PARALLEL` (default 2) of these jobs at once. If Paperless changes its page, the buttons
 are missing — Paperless itself keeps working. After the run the page reloads, so Paperless does
 not save its stale state back over the result.
 
