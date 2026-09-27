@@ -19,7 +19,7 @@ ENV:
                   alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
 """
-import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, urllib.request, urllib.error
+import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, threading, urllib.request, urllib.error
 from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
@@ -334,6 +334,17 @@ async def reclassify(request: Request):
     return {"ok": rc == 0, "doc": doc, "mode": mode, "output": out[-1500:]}
 
 
+# Wie viele Laeufe aus Paperless gleichzeitig laufen. Eine Mehrfachauswahl in Paperless schickt je
+# Dokument einen Webhook; ohne Grenze starteten 50 markierte Dokumente 50 OCR-Laeufe auf einmal —
+# Mistral drosselt dann, und der Container haelt 50 Prozesse offen.
+PARALLEL = threading.BoundedSemaphore(max(1, int(os.environ.get("PANEL_PARALLEL") or 2)))
+
+
+def run_classify_begrenzt(*args, **kwargs):
+    with PARALLEL:
+        return run_classify(*args, **kwargs)
+
+
 # ---------- Neu klassifizieren aus Paperless ----------
 # Die reine Logik steht in kern.py — dort ist sie ohne FastAPI testbar.
 
@@ -383,7 +394,7 @@ async def redo(request: Request, hintergrund: BackgroundTasks, x_redo_secret: st
         # Der Workflow feuert bei JEDER Aenderung, die zu einem Ausloeser passt — auch bei der,
         # mit der wir die Ausloeser gerade selbst entfernt haben. Dann gibt es nichts zu tun.
         return {"ok": True, "doc": doc_id, "gestartet": False}
-    hintergrund.add_task(run_classify, doc_id, force=True, force_ocr=True, source="redo",
+    hintergrund.add_task(run_classify_begrenzt, doc_id, force=True, force_ocr=True, source="redo",
                          hinweis=hinweis, nur_ocr=(modus == "nur_ocr"))
     return {"ok": True, "doc": doc_id, "modus": modus, "hinweis": bool(hinweis), "gestartet": True}
 

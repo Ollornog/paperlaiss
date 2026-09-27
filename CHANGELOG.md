@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Knöpfe auch in der Mehrfachauswahl, „Suggest" ausgeblendet
+
+- KI/OCR stehen jetzt auch in der Leiste der Mehrfachauswahl und gelten für alle markierten
+  (sichtbaren) Dokumente — über Paperless' Sammelbearbeitung, ein Workflow-Lauf je Dokument.
+  Mit Hinweis wird nur das Hinweisfeld gesetzt, damit nicht zwei Läufe je Dokument entstehen.
+- Paperless' eigenes „Suggest" ist in der Dokumentansicht ausgeblendet.
+- Das Panel fährt Läufe aus Paperless höchstens `PANEL_PARALLEL` (Vorgabe 2) gleichzeitig.
+
 ### Hinzugefügt — KI- und OCR-Knopf in Paperless (ohne Fork)
 
 - `deploy/paperless-knoepfe/`: Init-Skript für `/custom-cont-init.d` + Browser-Skript. **KI**

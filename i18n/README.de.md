@@ -124,7 +124,8 @@ ergänzen. `scripts/` muss für beide Container schreibbar sein.
 
 ### Knöpfe in Paperless (optional)
 
-Zwei Knöpfe neben Paperless' eigenem *Suggest* in der Dokumentansicht — ohne Fork:
+Zwei Knöpfe in der Dokumentansicht (anstelle von Paperless' eigenem *Suggest*, das ausgeblendet
+wird) und in der Leiste der Mehrfachauswahl (für alle markierten Dokumente) — ohne Fork:
 
 - **KI** (Zauberstab) — optional ein Hinweis für die KI, dann neu klassifizieren (immer mit Mistral-OCR).
 - **OCR** — nur den Text per Mistral-OCR neu lesen; die Metadaten bleiben.
@@ -136,7 +137,9 @@ nach jedem Update erneut, nichts zu mergen. Die Knöpfe sprechen nur die **Paper
 Sitzung des Nutzers** an: sie setzen Auslöser-Tag/Hinweisfeld bzw. OCR-Tag, und der vorhandene
 Workflow ruft paperlaiss. Tag, Feld und Workflow einmal mit `deploy/neu-klassifizieren-einrichten.py`
 anlegen. Namen: `PAPERLAISS_REDO_TAG`, `PAPERLAISS_OCR_TAG`, `PAPERLAISS_HINWEIS_FELD` im
-Paperless-Container (Vorgaben `KI-neu`, `KI-OCR`, `KI-Hinweis`). Baut Paperless seine Seite um,
+Paperless-Container (Vorgaben `KI-neu`, `KI-OCR`, `KI-Hinweis`). Bei *Alle auswählen* über
+mehrere Seiten werden nur die sichtbaren markierten verarbeitet, und der Knopf sagt das. Das Panel
+fährt höchstens `PANEL_PARALLEL` (Vorgabe 2) solcher Läufe gleichzeitig. Baut Paperless seine Seite um,
 fehlen die Knöpfe — Paperless selbst läuft weiter. Nach dem Lauf lädt die Seite neu, damit Paperless
 nicht seinen alten Stand über das Ergebnis speichert.
 

@@ -4,6 +4,9 @@
  *   KI  (Zauberstab)  optionaler Hinweis, dann neu klassifizieren (immer mit Mistral-OCR)
  *   OCR (Textblatt)   nur den Text per Mistral-OCR neu lesen, Metadaten bleiben
  *
+ * In der Dokumentansicht ersetzen sie Paperless' eigenes „Suggest" (ausgeblendet); in der
+ * Dokumentliste stehen sie in der Leiste der Mehrfachauswahl und gelten für alle markierten.
+ *
  * Kein Fork: Paperless lädt diese Datei, weil ein Init-Skript sie beim Start einhängt
  * (10-paperlaiss-knoepfe.sh). Die Knöpfe sprechen NUR die Paperless-API mit der Sitzung des
  * Nutzers an — sie setzen Tag bzw. Hinweisfeld, den Rest erledigt der Paperless-Workflow mit
@@ -115,12 +118,12 @@
     }
   }
 
-  function dialogKi() {
+  function dialogKi(anzahl, weiter) {
     const dlg = document.createElement("dialog");
     dlg.className = "p-0 border-0 rounded shadow";
     dlg.innerHTML =
       '<form method="dialog" class="card" style="min-width:min(520px,90vw)">' +
-      '<div class="card-header">Mit paperlaiss neu klassifizieren</div>' +
+      '<div class="card-header">Mit paperlaiss neu klassifizieren' + (anzahl > 1 ? ` (${anzahl} Dokumente)` : "") + '</div>' +
       '<div class="card-body"><label class="form-label small">Hinweis für die KI (optional)</label>' +
       '<textarea class="form-control" rows="3" placeholder="z. B. Das ist eine Gutschrift, kein Rechnungseingang"></textarea>' +
       '<div class="form-text">Das Dokument wird per Mistral-OCR neu gelesen und neu klassifiziert.</div></div>' +
@@ -129,7 +132,7 @@
       '<button value="ja" class="btn btn-sm btn-primary">Neu klassifizieren</button></div></form>';
     document.body.appendChild(dlg);
     dlg.addEventListener("close", () => {
-      if (dlg.returnValue === "ja") ausloesen("ki", dlg.querySelector("textarea").value.trim());
+      if (dlg.returnValue === "ja") weiter(dlg.querySelector("textarea").value.trim());
       dlg.remove();
     });
     dlg.showModal();
@@ -153,13 +156,81 @@
     if (!gruppe) return;
     const g = document.createElement("div");
     g.className = "btn-group " + MARKE;
-    g.appendChild(knopf(ICON.ki, "KI", "paperlaiss: neu klassifizieren (optional mit Hinweis)", dialogKi));
+    g.appendChild(knopf(ICON.ki, "KI", "paperlaiss: neu klassifizieren (optional mit Hinweis)",
+      () => dialogKi(1, (h) => ausloesen("ki", h))));
     g.appendChild(knopf(ICON.ocr, "OCR", "paperlaiss: Text per OCR neu lesen", () => {
       if (confirm("Text dieses Dokuments per Mistral-OCR neu lesen? Die Metadaten bleiben.")) ausloesen("ocr");
     }));
     gruppe.after(g);
+    gruppe.style.display = "none";   // Paperless' eigenes „Suggest" — paperlaiss ersetzt es
   }
 
-  new MutationObserver(einfuegen).observe(document.documentElement, { childList: true, subtree: true });
-  einfuegen();
+  // ---------- Mehrfachauswahl in der Dokumentliste ----------
+  // Paperless hält die Auswahl nur im Speicher der App. Lesbar sind die angehakten Kästchen der
+  // sichtbaren Seite (Tabelle: docCheck<id>, Karten: smallCardCheck<id>). Mit „Alle auswählen"
+  // über mehrere Seiten sind mehr markiert als sichtbar — dann wird das offen gesagt.
+  function auswahl() {
+    return Array.from(document.querySelectorAll('input[id^="docCheck"]:checked, input[id^="smallCardCheck"]:checked'))
+      .map((el) => parseInt(el.id.replace(/\D+/g, ""), 10)).filter((n) => n > 0);
+  }
+
+  function markiertLautPaperless() {
+    const b = document.querySelector("pngx-document-list pngx-clearable-badge");
+    const n = b ? parseInt((b.textContent || "").replace(/\D+/g, ""), 10) : NaN;
+    return isNaN(n) ? null : n;
+  }
+
+  async function mehrfach(modus, hinweis) {
+    const ids = auswahl();
+    if (!ids.length) { meldung("paperlaiss: keine sichtbaren Dokumente markiert.", "warning"); return; }
+    try {
+      let aufruf;
+      if (modus === "ki" && hinweis) {
+        // NUR das Feld setzen: ein befülltes Hinweisfeld löst allein aus. Tag UND Feld wären zwei
+        // Sammelaufrufe, also zwei Workflow-Läufe je Dokument.
+        const fid = await idVon("custom_fields", NAMEN.feld);
+        if (!fid) throw new Error(`Feld „${NAMEN.feld}" fehlt in Paperless`);
+        aufruf = { method: "modify_custom_fields",
+                   parameters: { add_custom_fields: { [fid]: hinweis }, remove_custom_fields: [] } };
+      } else {
+        const name = modus === "ocr" ? NAMEN.ocrTag : NAMEN.tag;
+        const tid = await idVon("tags", name);
+        if (!tid) throw new Error(`Tag „${name}" fehlt in Paperless`);
+        aufruf = { method: "add_tag", parameters: { tag: tid } };
+      }
+      await api("/documents/bulk_edit/", Object.assign({ documents: ids }, aufruf), "POST");
+      meldung(`paperlaiss: ${ids.length} Dokument(e) übergeben — ` +
+              (modus === "ocr" ? "Text wird neu gelesen." : "werden neu klassifiziert (mit OCR).") +
+              " Die Liste zeigt das Ergebnis nach dem Neuladen.", "success");
+    } catch (e) {
+      meldung("paperlaiss: " + e.message, "danger");
+    }
+  }
+
+  function mehrfachPruefen(weiter) {
+    const ids = auswahl(), gesamt = markiertLautPaperless();
+    if (gesamt !== null && gesamt > ids.length &&
+        !confirm(`Markiert sind ${gesamt}, sichtbar sind ${ids.length}. paperlaiss verarbeitet nur die ` +
+                 `${ids.length} sichtbaren. Fortfahren?`)) return;
+    weiter(ids.length);
+  }
+
+  function einfuegenListe() {
+    // Direkter Pfad: ein blosses ".ms-auto" trifft zuerst die Zaehl-Plaketten in den Dropdowns.
+    const leiste = document.querySelector("pngx-bulk-editor > div > div.ms-auto");
+    if (!leiste || leiste.querySelector("." + MARKE)) return;
+    const g = document.createElement("div");
+    g.className = "btn-group " + MARKE;
+    g.appendChild(knopf(ICON.ki, "KI", "paperlaiss: markierte neu klassifizieren (optional mit Hinweis)",
+      () => mehrfachPruefen((n) => dialogKi(n, (h) => mehrfach("ki", h)))));
+    g.appendChild(knopf(ICON.ocr, "OCR", "paperlaiss: Text der markierten per OCR neu lesen",
+      () => mehrfachPruefen((n) => {
+        if (confirm(`Text von ${n} Dokument(en) per Mistral-OCR neu lesen? Die Metadaten bleiben.`)) mehrfach("ocr");
+      })));
+    leiste.prepend(g);
+  }
+
+  function alles() { einfuegen(); einfuegenListe(); }
+  new MutationObserver(alles).observe(document.documentElement, { childList: true, subtree: true });
+  alles();
 })();
