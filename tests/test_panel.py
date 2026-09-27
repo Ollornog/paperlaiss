@@ -222,6 +222,13 @@ r.check("Adressbuch: Werte getrimmt, leere Felder fallen weg", _neu.get("kontext
         and "email" not in _neu, str(_neu))
 r.check("Adressbuch: Import-Herkunft bleibt erhalten", _neu.get("quelle") == "import" and _neu.get("extern_id") == "K-7")
 r.check("Adressbuch: unbekannte Eingaben werden nicht übernommen", "unbekannt" not in _neu)
+_ki = {"ustid": "ATU1", "iban": "AT11", "erfasst": {"ustid": "KI · Dok 5", "iban": "KI · Dok 5"}}
+_hand = kern.korr_eintrag(_ki, {"ustid": "ATU1", "iban": "AT22"})
+r.check("Adressbuch: von Hand geänderter Wert verliert den KI-Vermerk, unveränderter behält ihn",
+        _hand["erfasst"] == {"ustid": "KI · Dok 5"} and _hand["iban"] == "AT22", str(_hand))
+_leer = kern.korr_eintrag(_ki, {})
+r.check("Adressbuch: alles geleert → kein verwaister Vermerk", "erfasst" not in _leer, str(_leer))
+r.check("Adressbuch: IBAN ist ein Feld im Dialog", any(f == "iban" for f, _, _ in kern.KORR_FELDER))
 
 r.check("Aktivität: Trockenlauf ist eine eigene Art, keine Info",
         kern.eintrag_lesen("2026-09-20 19:52:14 DRY DRY 918 | exakt='X' | typ=Rechnung |")["art"] == "trockenlauf")

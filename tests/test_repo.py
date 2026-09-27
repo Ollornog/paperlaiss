@@ -101,10 +101,23 @@ r.check("nur neutrale Beispieladressen", not adressen, " | ".join(sorted(set(adr
 # lizenzpflichtige Bildnachweis fürs Logo) und ghcr.io (die Registry des Release-Laufs).
 # Er ist NICHT automatisch erzeugt — ab jetzt wird jede NEUE Adresse rot, und das ist der
 # Zweck. Nie blind erweitern: genau so segnet man den nächsten echten Kundennamen ab.
+# Dazu die Freemail-Anbieter aus classify.FREEMAIL (2026-09-27): öffentliche Mail-Dienste, über
+# deren Domain paperlaiss nie einen Korrespondenten zuordnet — keine private Infrastruktur. Die
+# Liste steht hier ausgeschrieben und durchgesehen; eine Ergänzung in classify.py macht den Test
+# unten rot, bis jemand sie auch hier freigibt.
+FREEMAIL_DURCHGESEHEN = ["gmail.com", "googlemail.com", "gmx.at", "gmx.de", "gmx.net", "gmx.ch", "web.de",
+                         "outlook.com", "outlook.de", "hotmail.com", "hotmail.de", "live.com", "live.at",
+                         "yahoo.com", "yahoo.de", "icloud.com", "me.com", "aon.at", "a1.net", "chello.at",
+                         "t-online.de", "posteo.de", "proton.me", "protonmail.com", "mail.de", "freenet.de"]
 blank = hygiene.pruefe_blanke_adressen(str(ROOT), DATEIEN, POLICY,
                                        grundstock=["python.org", "devguide.python.org",
-                                                   "flaticon.com", "ghcr.io"])
+                                                   "flaticon.com", "ghcr.io"] + FREEMAIL_DURCHGESEHEN)
 r.check("keine blanken fremden Hostnamen", not blank, " | ".join(sorted(set(blank))[:4]))
+
+sys.path.insert(0, str(ROOT))
+import classify  # noqa: E402
+_neu_freemail = sorted(set(classify.FREEMAIL) - set(FREEMAIL_DURCHGESEHEN))
+r.check("jede Freemail-Domain in classify.py ist durchgesehen", not _neu_freemail, str(_neu_freemail))
 
 # ---- Keine Geheimnisse; Version steht überall gleich
 lecks = hygiene.pruefe_geheimnisse(str(ROOT), DATEIEN, POLICY)

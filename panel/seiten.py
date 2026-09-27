@@ -51,7 +51,7 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, CHEVK=%CHEVK%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
+const CHEV=%CHEV%, CHEVK=%CHEVK%, SYMA=%SYMA%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
 const ART={paperless:['Paperless','info','inbox'],code:['paperlaiss','outline','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Eingesetzte Werte und Platzhalter farbig hinterlegt — so sieht man, was fest im Prompt steht
 // und was je Dokument eingesetzt wird (Muster aus Prompt-Editoren wie Langfuse).
@@ -96,17 +96,39 @@ function tabelle(obj,kopf){
 function klapp(titel,inhalt,offen){
   const m=/^(Eingabe|Ausgabe)(?: — )?(.*)$/.exec(titel), art=m?m[1]:'', rest=m?m[2]:titel;
   const etikett=art?'<span class="badge" data-variant="'+(art==='Eingabe'?'info':'success')+'">'+art+'</span>':'';
-  return '<details class="min-w-0 rounded-lg border bg-background/70"'+(offen?' open':'')+'>'+
-    '<summary class="flex cursor-pointer list-none items-center gap-3 px-4 py-3 font-medium select-none">'+etikett+
-    '<span>'+txt(rest)+'</span><span class="ms-auto">'+CHEVK+'</span></summary>'+
-    '<div class="grid min-w-0 gap-3 border-t p-4">'+inhalt+'</div></details>';
+  // Die ersten drei Zeilen stehen immer da; ist mehr Text da, blendet er nach unten aus
+  // (Maske statt Farbverlauf: kommt ohne Farbwert aus) und „… mehr anzeigen" klappt ihn auf.
+  // Sonderweg: C22 hat weder line-clamp noch eine Ausblende-Klasse (C22-Backlog T-9).
+  const klemme=offen?'':' data-klemme style="'+KLEMME+'"';
+  return '<div class="min-w-0 rounded-lg border bg-background/70">'+
+    '<div class="flex items-center gap-3 px-4 py-3 font-medium">'+etikett+'<span>'+txt(rest)+'</span></div>'+
+    '<div class="grid min-w-0 gap-2 border-t p-4">'+
+    // Klemme als Block, der Inhalt als Grid darin: Wäre die Klemme selbst ein Grid, schrumpfte ein
+    // innerer Scrollbereich auf ihre Höhe — dann gäbe es nie einen Überhang zu messen.
+    '<div class="min-w-0 overflow-hidden leading-relaxed"'+klemme+'><div class="grid min-w-0 gap-3">'+inhalt+'</div></div>'+
+    '<button type="button" class="btn w-fit" data-variant="ghost" data-size="sm" hidden onclick="aufklemmen(this)">… mehr anzeigen</button></div></div>';
+}
+const KLEMME='max-height:5.6em;mask-image:linear-gradient(to bottom,black 60%,transparent)';
+// Nach dem Zeichnen messen: Wo alles in drei Zeilen passt, fällt die Klemme weg (kein Ausblenden,
+// kein Knopf); sonst erscheint der Knopf. Messen geht erst, wenn die Kästen im Dokument stehen.
+function klemmen(wurzel){
+  for(const k of wurzel.querySelectorAll('[data-klemme]')){
+    const knopf=k.nextElementSibling;
+    if(k.scrollHeight>k.clientHeight+2){ knopf.hidden=false; }
+    else { k.removeAttribute('style'); k.removeAttribute('data-klemme'); }
+  }
+}
+function aufklemmen(knopf){
+  const k=knopf.previousElementSibling, zu=k.hasAttribute('data-klemme');
+  if(zu){ k.removeAttribute('style'); k.removeAttribute('data-klemme'); knopf.textContent='weniger anzeigen'; }
+  else { k.setAttribute('style',KLEMME); k.setAttribute('data-klemme',''); knopf.textContent='… mehr anzeigen'; }
 }
 function schritt(o){
   // Auslöser oben (jeder mit Symbol) und Ende unten (Haken oder Kreuz), mit Luft zum Rand.
-  const pille=(sym,t)=>'<div class="flex items-center gap-2 rounded-full border bg-muted px-4 py-2 text-sm font-medium">'+sym+txt(t)+'</div>';
+  const pille=(sym,t)=>'<div class="flex items-center gap-3 rounded-full border bg-muted px-6 py-3 text-base font-semibold shadow-md">'+sym+txt(t)+'</div>';
   if(o.art==='grenze'&&o.ende) return '<div class="flex justify-center mb-6">'+pille(SYME[o.fehler?'x':'check'],o.titel)+'</div>';
-  if(o.art==='grenze') return '<div class="flex flex-col items-center gap-3 pt-6"><span class="text-muted-foreground text-sm">Auslöser</span>'+
-    '<div class="flex flex-wrap justify-center gap-3">'+o.ausloeser.map(a=>pille(SYMG[a[0]]||'',a[1])).join('')+'</div></div>';
+  if(o.art==='grenze') return '<div class="flex flex-col items-center gap-3 pt-6"><span class="text-muted-foreground text-base">Auslöser</span>'+
+    '<div class="flex flex-wrap justify-center gap-3">'+o.ausloeser.map(a=>pille(SYMA[a[0]]||'',a[1])).join('')+'</div></div>';
   const a=ART[o.art]||['',''];
   // Symbol GETRENNT vom Chip und größer — im Chip war es zu klein, um etwas zu sagen.
   const badge=(SYMG[a[2]]||'')+'<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
@@ -274,8 +296,13 @@ async function lauf(doc){
     variante:o.error?'destructive':o.triggered?'info':'success',
     text:txt(o.grund||'')+(o.chars?' · '+o.chars+' Zeichen':'')+(o.verworfen?' · '+txt(o.verworfen):'')+(o.error?' · '+txt(o.error):''),
     klappen:o.excerpt?[['Ausgabe — erkannter Text','<div class="grid gap-2">'+md(o.excerpt)+'</div>']]:[]});
-  if(t.pass0) L.push({phase:'Absender erkennen',art:'ki',titel:'Pass 0 — Absender erkennen',ergebnis:p0.vorschlag||'keiner',
-    text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+(p0.kandidaten||[]).map(txt).join(', '),
+  // Seit 2026-09-27: Vorsuche ohne KI (t.vorsuche). Ältere Läufe haben noch Pass 0 (t.pass0).
+  const vs=t.vorsuche, vk=Object.entries((vs&&vs.kandidaten)||{});
+  if(vs) L.push({phase:'Kandidaten suchen',art:'code',titel:'Mail, Stammdaten und Namen im Text',
+    text:(vs.mail?'Mail: '+txt(vs.mail)+'<br>':'')+
+      (vk.length?'Kandidaten für Pass 1: '+vk.map(([n,g])=>'<b>'+txt(n)+'</b> ('+g.map(txt).join(', ')+')').join(' · '):'Nichts gefunden — Pass 1 nennt den Absender selbst.')});
+  if(t.pass0) L.push({phase:'Kandidaten suchen',art:'ki',titel:'Pass 0 — Absender erkennen (alter Lauf)',ergebnis:p0.vorschlag||'keiner',
+    text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+((p0.kandidaten||[]).map(txt).join(', ')||'keine'),
     klappen:p0.system?[['Eingabe — Anweisung (System-Prompt)',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
   if(t.pass1) L.push({phase:'Analysieren',art:'ki',titel:'Pass 1 — Dokument analysieren',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
     text:'Korrespondent: '+txt(r.correspondent||'—')+' · Datum: '+txt(r.document_date||'—')+(r.needs_ocr?' · meldet unlesbaren Text':''),
@@ -284,15 +311,20 @@ async function lauf(doc){
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
   const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
-  if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',ergebnis:kart+(kname!=='—'?': '+kname:''),
-    variante:(k.ergebnis||'').startsWith('NEU')?'warning':'success',
+  if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
+    text:'Ergebnis: <b>'+txt(kart)+'</b>'+(kname!=='—'?' — '+txt(kname):''),
     klappen:k.pass2?[['Eingabe — Pass 2'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Ausgabe — Pass 2',tabelle(k.pass2.response||{})]]:[]});
+  const sd=t.stammdaten;
+  if(sd) L.push({phase:'Schreiben',art:'code',titel:'Stammdaten nachtragen'+(sd.trocken?' (Trockenlauf — nur gezeigt)':''),
+    text:sd.fehler?'Fehler: '+txt(sd.fehler):
+      (Object.keys(sd.geschrieben||{}).length?'Nachgetragen: '+Object.entries(sd.geschrieben).map(([k,v])=>txt(k)+' <b>'+txt(v)+'</b>').join(' · '):'nichts nachzutragen — Felder schon gefüllt oder nichts gefunden')+
+      (Object.keys(sd.verworfen||{}).length?'<br>Verworfen: '+Object.entries(sd.verworfen).map(([k,v])=>txt(k)+' ('+txt(v)+')').join(' · '):'')});
   const felder=Object.entries(w.fields_ki||{});
   if(t.writeback||t.error) L.push({phase:'Schreiben',art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
-    klappen:[['Ausgabe — geschrieben',tabelle(w)]]});
+    klappen:[['Ausgabe — geschrieben',tabelle(w),true]]});
   L.push({art:'grenze',ende:true,fehler:!!t.error,titel:t.error?'Abgebrochen':'Ende'});
-  ziel.innerHTML=kette(L);
+  ziel.innerHTML=kette(L); klemmen(ziel);
 }
 setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterval(()=>{ if(!document.getElementById('lauf').open) laden(); },30000);
 """
@@ -313,13 +345,24 @@ setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterva
 # Punkt liegen verschachtelt (ocr_regeln.max_muell_anteil).
 KNOTEN_FELDER = {
     "vorpruefung": ("Schon klassifiziert?", [("enabled", "Klassifizierer aktiv"), ("marker_tag", "Marker-Tag")]),
-    "ocr": ("Text brauchbar?", [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
+    "ocr": ("OCR — Text neu erkennen", [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
                                 ("ocr_model", "OCR-Modell"), ("ocr_min_len", "Mindestlänge (Zeichen)"),
                                 ("ocr_regeln.min_schluesselwoerter", "Mindestens bekannte Wörter"),
                                 ("ocr_regeln.max_zeichen_je_wort", "Höchstens Zeichen je echtem Wort"),
                                 ("ocr_regeln.max_muell_anteil", "Höchstanteil Zeichensalat (0–1)"),
                                 ("ocr_regeln.schluesselwoerter", "Bekannte Wörter")]),
-    "pass0": ("Pass 0 — Absender", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
+    "vorsuche": ("Mail, Stammdaten und Namen im Text", [("mail_from_field", "Feld mit Absender-Mail"),
+                                                 ("eigene_kennungen.ustid", "Eigene USt-IDs"),
+                                                 ("eigene_kennungen.iban", "Eigene IBANs"),
+                                                 ("eigene_kennungen.domains", "Eigene Mail-Domains"),
+                                                 ("eigene_kennungen.email", "Eigene Mail-Adressen"),
+                                                 ("eigene_kennungen.namen", "Eigene Firmennamen")]),
+    "abgleich": ("Abgleich mit den Korrespondenten", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
+    "stammdaten": ("Stammdaten nachtragen", [("stammdaten_erfassen", "Stammdaten erfassen"),
+                                             ("eigene_kennungen.ustid", "Eigene USt-IDs"),
+                                             ("eigene_kennungen.iban", "Eigene IBANs"),
+                                             ("eigene_kennungen.domains", "Eigene Mail-Domains"),
+                                             ("eigene_kennungen.email", "Eigene Mail-Adressen")]),
     "pass1": ("Pass 1 — Analyse", [("system_prompt", "System-Prompt (leer = eingebaut; {TYPES}, {TAGBLOCK}/{TAGS})"),
                                    ("model", "Modell"), ("temperature", "Temperatur"),
                                    ("content_max_len", "Text bis (Zeichen)")]),
@@ -376,13 +419,14 @@ function zeichnen(){
               ['sonst','Paperless-Text behalten']],
       stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
       klappen:[['Eingabe — das Dokument','<p>Die PDF-Datei aus Paperless.</p>'],['Ausgabe — der erkannte Text','<p>Text als Markdown, mit Überschriften und Tabellen.</p>']]},
-    {phase:'Absender erkennen',art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
-      was:'Eine kurze KI-Anfrage mit dem Anfang des Textes. Sie nennt nur den Absender, damit Pass 1 die passenden Korrespondenten samt Stammdaten bekommt. Modell <b>'+txt(CFG.model)+'</b>.',
-      regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, keine KI-Anfrage'],['sonst','KI-Anfrage']],
-      klappen:[['Eingabe — Anweisung (System-Prompt)',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa(V.pass0_nachricht||'')],
-               ['Ausgabe',tabelle({correspondent:'Name des Absenders oder leer'},['Feld','Bedeutung'])]]},
-    {phase:'Absender erkennen',art:'code',titel:'Kandidaten suchen',
-      was:'Ohne KI: Der Absender wird mit allen Korrespondenten in Paperless verglichen, auch mit ihren Aliasen. Die bis zu 8 ähnlichsten gehen mit ihren Stammdaten an Pass 1.'},
+    {phase:'Kandidaten suchen',art:'code',id:'vorsuche',titel:'Mail, Stammdaten und Namen im Text',knopf:knopf('vorsuche'),
+      was:'Ohne KI: Kam das Dokument per Mail, zählt die Absender-Mail. Außerdem sucht paperlaiss immer im Text nach den Stammdaten aller Korrespondenten (USt-ID, IBAN, Mail, Domain, Kundennummer) und im Briefkopf nach ihren Namen und Aliasen. Was gefunden wird, geht mit Kontext und Fundstelle als Kandidat an Pass 1.',
+      regeln:[['die Absender-Mail passt zu genau einem Korrespondenten','starker Kandidat, keine Zuordnung (Portale!)'],
+              ['die Mail kommt von einer eigenen Adresse oder Domain','Weiterleitung — zählt nicht'],
+              ['Stammdaten eines Korrespondenten stehen im Text','Kandidat (stärkster Hinweis)'],
+              ['alle Wörter eines Namens oder Alias stehen im Briefkopf (erste 1000 Zeichen)','Kandidat (schwächer)'],['der Name ist ein eigener Firmenname','kein Kandidat'],
+              ['eigene Kennungen im Text','zählen nie'],['nichts gefunden','Pass 1 nennt den Absender ohne Kandidaten']],
+      stand:[['eigene USt-IDs',((CFG.eigene_kennungen||{}).ustid||[]).length],['eigene IBANs',((CFG.eigene_kennungen||{}).iban||[]).length],['eigene Domains',((CFG.eigene_kennungen||{}).domains||[]).length],['eigene Adressen',((CFG.eigene_kennungen||{}).email||[]).length]]},
     {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Dokument analysieren',knopf:knopf('pass1'),
       was:'Die Hauptanfrage: Die KI liest den Text und bestimmt Dokumenttyp, Absender, Datum, Felder, Zusammenfassung und Tags. '+
           'Modell <b>'+txt(CFG.model)+'</b>, Temperatur '+txt(CFG.temperature)+', Text bis '+txt(CFG.content_max_len)+' Zeichen.',
@@ -398,11 +442,18 @@ function zeichnen(){
               ['kein Dokumenttyp erkannt','ebenso (wenn eingeschaltet)'],['kein Korrespondent erkannt','ebenso (wenn eingeschaltet)'],
               ['sonst','weiter']],
       stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
-    {phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
+    {phase:'Korrespondent zuordnen',art:'entscheidung',id:'abgleich',titel:'Abgleich mit den Korrespondenten',knopf:knopf('abgleich'),
       was:'Ordnet den Absender aus Pass 1 einem Korrespondenten in Paperless zu — oder legt einen neuen an.',
-      regeln:[['der Name passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2: Die KI wählt einen davon oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
+      regeln:[['der Name aus Pass 1 passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2: Die KI wählt einen davon oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
       klappen:[['Eingabe — Pass 2 (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa(V.pass2_frage||'')],
                ['Ausgabe — Pass 2',tabelle({match:'exakter Name aus der Liste, oder leer'},['Feld','Bedeutung'])]]},
+    {phase:'Schreiben',art:'code',id:'stammdaten',titel:'Stammdaten nachtragen',knopf:knopf('stammdaten'),
+      was:'Trägt USt-ID, IBAN, Mail, Domain, Telefon, Adresse und Kundennummer des Absenders beim zugeordneten Korrespondenten nach — aus der Absender-Mail und dem, was Pass 1 unter „absender“ liefert. Im Korrespondenten-Dialog in Paperless steht dann, woher der Wert kommt.',
+      regeln:[['das Feld ist schon gefüllt','bleibt — nie überschreiben'],['der Wert ist eine eigene Kennung','verworfen'],
+              ['USt-ID, IBAN oder Mail hat kein gültiges Format','verworfen'],['Freemail-Adresse (gmail, gmx …)','nur die Adresse, keine Domain'],
+              ['die Absender-Mail gehört nicht erkennbar zu diesem Absender (z. B. ein Portal)','Mail und Domain nicht übernehmen'],
+              ['die Zuordnung ist unsicher (bestehender behalten)','nichts nachtragen'],['sonst','nachtragen, mit Herkunft']],
+      stand:[['Stammdaten erfassen',an(CFG.stammdaten_erfassen!==false)]]},
     {phase:'Schreiben',art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       was:'Schreibt das Ergebnis über die API zurück nach Paperless. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
       text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.'},
@@ -410,7 +461,7 @@ function zeichnen(){
       was:'Optional: Ein eigenes Skript bekommt das Ergebnis, etwa für eine Verknüpfung in ein anderes System.',
       text:CFG.nachbearbeitung?'Eingerichtet: <b>'+txt(CFG.nachbearbeitung)+'</b>':'Nicht eingerichtet.'},
     {art:'grenze',ende:true,titel:'Ende'}];
-  document.getElementById('schritte').innerHTML=kette(L);
+  const sch=document.getElementById('schritte'); sch.innerHTML=kette(L); klemmen(sch);
 }
 async function laden(){
   try{ CFG=await holen('/api/config'); }catch(e){}
@@ -435,7 +486,9 @@ function promptEditor(){
     '<div id="p-vorschau">'+teileHtml(V.system_teile,V.platzhalter)+'</div>';
 }
 function promptAuf(){
-  const t=document.getElementById('prompt-vorlage'); t.value=V.vorlage||'';
+  const t=document.getElementById('prompt-vorlage'), k=t.closest('[data-klemme]');
+  if(k) aufklemmen(k.nextElementSibling);
+  t.value=V.vorlage||'';
   document.getElementById('p-editor').hidden=false; document.getElementById('p-titel').hidden=false;
   document.getElementById('p-auf').hidden=true; t.focus();
 }
@@ -547,7 +600,7 @@ EINSTELLUNGEN = {
     "marker_tag": ("Allgemein", "Marker-Tag",
                    "Setzt paperlaiss nach jeder Klassifizierung. Ein Dokument mit diesem Tag wird beim "
                    "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz)."),
-    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 0, 1 und 2)."),
+    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 1 und 2)."),
     "temperature": ("KI-Modell & Prompt", "Temperatur",
                     "Wie frei das Modell antwortet: 0 = immer gleich, höher = kreativer. Für Klassifizierung niedrig halten (0–0,2)."),
     "content_max_len": ("KI-Modell & Prompt", "Text bis (Zeichen)",
@@ -591,6 +644,21 @@ EINSTELLUNGEN = {
                         "Custom Field mit der Absenderadresse; hilft, den Korrespondenten über die Domain zu finden. Leer = aus."),
     "korrespondent_beispiele": ("Korrespondenten", "Beispielpaare für den Abgleich",
                                 "Paare [\"falsch geschrieben\", \"richtiger Name\"] — helfen der KI bei OCR-Fehlern im Absender."),
+    "stammdaten_erfassen": ("Korrespondenten", "Stammdaten erfassen",
+                            "An: USt-ID, IBAN, Mail, Telefon, Adresse und Kundennummer des Absenders werden beim "
+                            "zugeordneten Korrespondenten nachgetragen — nur in leere Felder, nie überschreibend."),
+    "eigene_kennungen.ustid": ("Korrespondenten", "Eigene USt-IDs",
+                               "USt-IDs der eigenen Firma. Stehen auf fast jedem Dokument und zählen nie als Absender. Eine je Zeile."),
+    "eigene_kennungen.iban": ("Korrespondenten", "Eigene IBANs",
+                              "IBANs der eigenen Firma (etwa bei Lastschriften). Zählen nie als Absender. Eine je Zeile."),
+    "eigene_kennungen.domains": ("Korrespondenten", "Eigene Mail-Domains",
+                                 "Mail von hier ist eine Weiterleitung und ordnet nichts zu; nie als Absender erfasst. Eine je Zeile."),
+    "eigene_kennungen.namen": ("Korrespondenten", "Eigene Firmennamen",
+                               "Stehen im Empfängerblock jedes Dokuments. Korrespondenten mit diesem Namen sind bei der Namenssuche "
+                               "keine Kandidaten, und Pass 1 erfährt, wer „wir“ sind — gesucht ist immer das Gegenüber. Einer je Zeile."),
+    "eigene_kennungen.email": ("Korrespondenten", "Eigene Mail-Adressen",
+                               "Wie die Domains, aber als volle Adresse — für eine eigene Freemail-Adresse (gmail, gmx …), "
+                               "deren Domain man nicht sperren kann. Eine je Zeile."),
     "nachbearbeitung": ("Erweitert", "Eigenes Skript danach",
                         "Pfad zu einem Skript, das nach dem Schreiben läuft — für alles, was nur diese Installation braucht. Leer = aus."),
 }
@@ -667,8 +735,10 @@ _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down
                        .replace("%SYMG%", _json({n: symbol(n, "size-6 shrink-0 text-muted-foreground")
                                                  for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
                                                            "file-plus", "message-square", "layout-dashboard", "list")}))
-                       .replace("%SYME%", _json({"check": symbol("circle-check", "size-6 shrink-0 text-success"),
-                                                 "x": symbol("x", "size-6 shrink-0 text-destructive")}))
+                       .replace("%SYMA%", _json({n: symbol(n, "size-7 shrink-0 text-muted-foreground")
+                                                 for n in ("bot", "file-plus", "message-square", "layout-dashboard", "list")}))
+                       .replace("%SYME%", _json({"check": symbol("circle-check", "size-7 shrink-0 text-success"),
+                                                 "x": symbol("x", "size-7 shrink-0 text-destructive")}))
                        .replace("%SYMK%", _json({n: symbol(n, "size-5 shrink-0 text-muted-foreground") for n in
                                                  ("circle-check", "file-text", "refresh-ccw", "circle-alert", "clock", "eye", "info")}))
                        .replace("%SYM%", _json({n: symbol(n) for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",

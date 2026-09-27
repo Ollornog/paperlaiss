@@ -6,6 +6,39 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Kandidaten ohne Pass 0, Stammdaten nachtragen, eigene Firma
+
+- **Pass 0 entfällt.** Statt eines eigenen KI-Aufrufs, der nur einen Absendernamen riet, sucht
+  paperlaiss im Text nach den Stammdaten *aller* Korrespondenten (USt-ID, IBAN, Mail, Domain,
+  Kundennummer) und im Briefkopf nach ihren Namen und Aliasen; die Absender-Mail zählt mit. Alles geht
+  mit Fundstelle als Kandidat an Pass 1. Stichprobe auf dem Testbett (16 Dokumente gegen den Stand in
+  Paperless): gleich viele Treffer wie mit Pass 0 (10), ein KI-Aufruf weniger.
+- Die Absender-Mail ist ein **Kandidat, keine Zuordnung** — ein Portal verschickt Dokumente vieler
+  Firmen von einer Adresse. Mail-Abgleich über volle Adresse, dann Domain (auch Subdomain, nie
+  Freemail); mehrdeutig heißt „keine Aussage“. Bisher reichte ein Teilstring.
+- **Stammdaten nachtragen** (`stammdaten_erfassen`, Vorgabe an): Pass 1 liefert die Kontaktdaten des
+  Gegenübers (`absender`), paperlaiss schreibt sie nach der Zuordnung nur in **leere** Felder von
+  `correspondents.json`, mit Herkunft (`erfasst`), die der Paperless-Dialog zeigt. Formate werden
+  geprüft, die Absender-Mail nur bei nachweislicher Zugehörigkeit übernommen. Neues Feld **IBAN**.
+  Panel und Klassifizierer schreiben unter derselben Dateisperre (`correspondents.json.lock`).
+- **Eigene Firma** (`eigene_kennungen`: Namen, USt-IDs, IBANs, Mail-Domains und -Adressen): zählt nie
+  als Absender, wird nie nachgetragen, ist bei der Namenssuche kein Kandidat, und Pass 1 erfährt, wer
+  „wir“ sind — gesucht ist immer das Gegenüber.
+- Ablauf und Lauf-Popup zeigen die neue Suche und das Nachtragen; ältere Läufe mit Pass 0 werden
+  weiter angezeigt.
+
+### Geändert — Panel auf Python 3.14, Ablauf mit Textvorschau
+
+- Panel-Abbild auf `python:3.14-slim` (vorher 3.12; der Dependabot-PR dazu hatte sich selbst
+  geschlossen). Auf dem Testbett gebaut und gestartet, alle Seiten laden.
+- Ablauf und Lauf-Popup: Eingabe und Ausgabe zeigen immer die ersten drei Zeilen; ist mehr Text
+  da, blendet er nach unten aus, und „… mehr anzeigen" klappt ihn auf. Passt alles, gibt es weder
+  Ausblenden noch Knopf. Sonderweg per Inline-Maske, weil C22 kein line-clamp hat (C22 T-9).
+- Auslöser und Ende größer (Chip, Symbol, Schrift).
+- Lauf-Popup: die Ausgabe von „Nach Paperless geschrieben" ist aufgeklappt; die
+  Korrespondenten-Zuordnung steht als Text im Kasten statt als Chip.
+- Backlog T-4 („Erneut verarbeiten" gegen „KI") verworfen: bleibt so (PO-Entscheidung).
+
 ### Geändert — Korrespondent zuordnen (Pass 2) in derselben KI-Unterhaltung wie Pass 1
 
 - Pass 2 ist kein eigener Aufruf mit nur dem Namen mehr, sondern eine weitere Nachricht in der

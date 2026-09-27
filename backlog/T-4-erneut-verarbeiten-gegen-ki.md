@@ -2,7 +2,7 @@
 id: T-4
 type: Task
 title: Paperless' „Erneut verarbeiten" überschreibt den OCR-Text des KI-Knopfs
-status: offen
+status: verworfen
 milestone: M-1
 tags: [paperless, knoepfe, ocr]
 created: 2026-09-27
@@ -23,3 +23,8 @@ Hinweis zeigen; oder nach „Erneut verarbeiten" automatisch KI anstoßen.
 
 **Fertig, wenn** entschieden ist, welcher Weg gilt, und der Knopf entsprechend umgebaut ist.
 Bis dahin bewusst so gelassen (PO 2026-09-27: „lass das dann im todo für später").
+
+## Entscheidung (2026-09-27)
+
+Verworfen: Der PO lässt das Verhalten so. „Erneut verarbeiten" und „KI" bleiben nebeneinander
+stehen; wer nach dem KI-Knopf „Erneut verarbeiten" drückt, bekommt wieder den Paperless-Text.

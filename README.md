@@ -116,14 +116,29 @@ curl -F "file=@scan.pdf" -H "X-Ingest-Token: secret-office-scanner" http://panel
 Paperless **cannot** natively extend correspondents with fields (custom fields hang off documents
 only). paperlaiss solves this with its **own store** (`correspondents.json`, edited in the panel),
 keyed **by Paperless correspondent ID** so it survives a rename. Per correspondent: `email`,
-`domains`, `phone`, `address`, `customer_number`, `vat_id`, `context`, `aliases`.
+`domains`, `telefon`, `adresse`, `kundennummer`, `ustid`, `iban`, `kontext`, `aliase`.
 
 Edited **in Paperless itself**: the buttons script adds a section *paperlaiss* to the correspondent
 edit dialog (context, aliases, e-mail, mail domains, customer number, VAT ID, phone, address),
 saved together with Paperless' *Save* — allowed for whoever may change that correspondent in
 Paperless. The file can also be filled from outside (your master data system, a script). The
-classifier uses it for grounding: `domains` to match senders, `context` and the identifiers in the
-prompt, `aliases` in the feedback loop — sharper classification.
+classifier uses it in three ways:
+
+- **Finding candidates, without an LLM call.** Before the analysis, paperlaiss searches the text for
+  the stored identifiers of *all* correspondents (VAT ID, IBAN, e-mail, domain, customer number) and,
+  in the letterhead (first 1000 characters), for their names and aliases. A document that came by
+  mail also counts its sender address. Everything found goes to the analysis as a candidate, with
+  context and where it was found. The mail sender is a strong candidate, not an assignment: a portal
+  sends documents of many companies from one address. (Until 2026-09-27 a separate LLM call —
+  "Pass 0" — guessed a sender name first; the search replaces it.)
+- **Own company.** `eigene_kennungen` (names, VAT IDs, IBANs, mail domains/addresses) never count as a
+  sender: they appear on almost every incoming document. The analysis is told who "we" are and to
+  look for the *counterpart*.
+- **Filling in master data.** `stammdaten_erfassen` (on by default): after assignment, the
+  counterpart's VAT ID, IBAN, e-mail/domain, phone, address and customer number from the document
+  are written into **empty** fields only, never overwriting, with their origin (`erfasst`) shown in
+  the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
+  correspondent. Writes are serialised with a file lock shared with the panel.
 
 ## Deployment (Docker)
 
