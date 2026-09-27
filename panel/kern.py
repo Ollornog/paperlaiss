@@ -396,6 +396,7 @@ KORR_FELDER = (
     ("domains", "Mail-Domains (kommagetrennt)", False),
     ("kundennummer", "Unsere Kundennummer dort", False),
     ("ustid", "USt-ID", False),
+    ("iban", "IBAN", False),
     ("telefon", "Telefon", False),
     ("adresse", "Adresse", True),
 )
@@ -408,10 +409,19 @@ def korr_eintrag(alt, eingabe):
     kennt (`quelle`, `extern_id` aus einem Import), bleibt erhalten — sonst löschte jedes
     Speichern im Dialog die Herkunft eines importierten Eintrags.
     """
-    neu = {k: v for k, v in (alt or {}).items() if k not in {f for f, _, _ in KORR_FELDER}}
+    alt = alt or {}
+    neu = {k: v for k, v in alt.items() if k not in {f for f, _, _ in KORR_FELDER}}
+    erfasst = dict(alt.get("erfasst") or {})
     for feld, _, _ in KORR_FELDER:
         wert = str((eingabe or {}).get(feld) or "").strip()
         if wert:
             neu[feld] = wert[:4000]
+        # Von Hand geändert oder geleert: der Wert stammt nicht mehr von der KI.
+        if wert != str(alt.get(feld) or "").strip():
+            erfasst.pop(feld, None)
+    if erfasst:
+        neu["erfasst"] = erfasst
+    else:
+        neu.pop("erfasst", None)
     return neu
 

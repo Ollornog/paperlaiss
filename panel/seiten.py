@@ -296,8 +296,13 @@ async function lauf(doc){
     variante:o.error?'destructive':o.triggered?'info':'success',
     text:txt(o.grund||'')+(o.chars?' · '+o.chars+' Zeichen':'')+(o.verworfen?' · '+txt(o.verworfen):'')+(o.error?' · '+txt(o.error):''),
     klappen:o.excerpt?[['Ausgabe — erkannter Text','<div class="grid gap-2">'+md(o.excerpt)+'</div>']]:[]});
-  if(t.pass0) L.push({phase:'Absender erkennen',art:'ki',titel:'Pass 0 — Absender erkennen',ergebnis:p0.vorschlag||'keiner',
-    text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+(p0.kandidaten||[]).map(txt).join(', '),
+  // Seit 2026-09-27: Vorsuche ohne KI (t.vorsuche). Ältere Läufe haben noch Pass 0 (t.pass0).
+  const vs=t.vorsuche, vk=Object.entries((vs&&vs.kandidaten)||{});
+  if(vs) L.push({phase:'Kandidaten suchen',art:'code',titel:'Mail, Stammdaten und Namen im Text',
+    text:(vs.mail?'Mail: '+txt(vs.mail)+'<br>':'')+
+      (vk.length?'Kandidaten für Pass 1: '+vk.map(([n,g])=>'<b>'+txt(n)+'</b> ('+g.map(txt).join(', ')+')').join(' · '):'Nichts gefunden — Pass 1 nennt den Absender selbst.')});
+  if(t.pass0) L.push({phase:'Kandidaten suchen',art:'ki',titel:'Pass 0 — Absender erkennen (alter Lauf)',ergebnis:p0.vorschlag||'keiner',
+    text:'Quelle: '+txt(p0.quelle||'—')+' · Kandidaten: '+((p0.kandidaten||[]).map(txt).join(', ')||'keine'),
     klappen:p0.system?[['Eingabe — Anweisung (System-Prompt)',prosa(p0.system)],['Eingabe — Nachricht',prosa(p0.user||'')],['Ausgabe',tabelle(p0.response||{})]]:[]});
   if(t.pass1) L.push({phase:'Analysieren',art:'ki',titel:'Pass 1 — Dokument analysieren',ergebnis:r.document_type||'kein Typ',variante:r.document_type?'success':'warning',
     text:'Korrespondent: '+txt(r.correspondent||'—')+' · Datum: '+txt(r.document_date||'—')+(r.needs_ocr?' · meldet unlesbaren Text':''),
@@ -309,6 +314,11 @@ async function lauf(doc){
   if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
     text:'Ergebnis: <b>'+txt(kart)+'</b>'+(kname!=='—'?' — '+txt(kname):''),
     klappen:k.pass2?[['Eingabe — Pass 2'+(k.pass2.im_gespraech?' (angehängt an die Pass-1-Unterhaltung)':''),prosa((k.pass2.system?k.pass2.system+'\n\n':'')+(k.pass2.user||''))],['Ausgabe — Pass 2',tabelle(k.pass2.response||{})]]:[]});
+  const sd=t.stammdaten;
+  if(sd) L.push({phase:'Schreiben',art:'code',titel:'Stammdaten nachtragen'+(sd.trocken?' (Trockenlauf — nur gezeigt)':''),
+    text:sd.fehler?'Fehler: '+txt(sd.fehler):
+      (Object.keys(sd.geschrieben||{}).length?'Nachgetragen: '+Object.entries(sd.geschrieben).map(([k,v])=>txt(k)+' <b>'+txt(v)+'</b>').join(' · '):'nichts nachzutragen — Felder schon gefüllt oder nichts gefunden')+
+      (Object.keys(sd.verworfen||{}).length?'<br>Verworfen: '+Object.entries(sd.verworfen).map(([k,v])=>txt(k)+' ('+txt(v)+')').join(' · '):'')});
   const felder=Object.entries(w.fields_ki||{});
   if(t.writeback||t.error) L.push({phase:'Schreiben',art:'paperless',titel:t.error?'Abgebrochen':'Nach Paperless geschrieben',ergebnis:t.error?'Fehler':(t._stage||'fertig'),variante:t.error?'destructive':'success',
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
@@ -335,13 +345,24 @@ setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterva
 # Punkt liegen verschachtelt (ocr_regeln.max_muell_anteil).
 KNOTEN_FELDER = {
     "vorpruefung": ("Schon klassifiziert?", [("enabled", "Klassifizierer aktiv"), ("marker_tag", "Marker-Tag")]),
-    "ocr": ("Text brauchbar?", [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
+    "ocr": ("OCR — Text neu erkennen", [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
                                 ("ocr_model", "OCR-Modell"), ("ocr_min_len", "Mindestlänge (Zeichen)"),
                                 ("ocr_regeln.min_schluesselwoerter", "Mindestens bekannte Wörter"),
                                 ("ocr_regeln.max_zeichen_je_wort", "Höchstens Zeichen je echtem Wort"),
                                 ("ocr_regeln.max_muell_anteil", "Höchstanteil Zeichensalat (0–1)"),
                                 ("ocr_regeln.schluesselwoerter", "Bekannte Wörter")]),
-    "pass0": ("Pass 0 — Absender", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
+    "vorsuche": ("Mail, Stammdaten und Namen im Text", [("mail_from_field", "Feld mit Absender-Mail"),
+                                                 ("eigene_kennungen.ustid", "Eigene USt-IDs"),
+                                                 ("eigene_kennungen.iban", "Eigene IBANs"),
+                                                 ("eigene_kennungen.domains", "Eigene Mail-Domains"),
+                                                 ("eigene_kennungen.email", "Eigene Mail-Adressen"),
+                                                 ("eigene_kennungen.namen", "Eigene Firmennamen")]),
+    "abgleich": ("Abgleich mit den Korrespondenten", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
+    "stammdaten": ("Stammdaten nachtragen", [("stammdaten_erfassen", "Stammdaten erfassen"),
+                                             ("eigene_kennungen.ustid", "Eigene USt-IDs"),
+                                             ("eigene_kennungen.iban", "Eigene IBANs"),
+                                             ("eigene_kennungen.domains", "Eigene Mail-Domains"),
+                                             ("eigene_kennungen.email", "Eigene Mail-Adressen")]),
     "pass1": ("Pass 1 — Analyse", [("system_prompt", "System-Prompt (leer = eingebaut; {TYPES}, {TAGBLOCK}/{TAGS})"),
                                    ("model", "Modell"), ("temperature", "Temperatur"),
                                    ("content_max_len", "Text bis (Zeichen)")]),
@@ -398,13 +419,14 @@ function zeichnen(){
               ['sonst','Paperless-Text behalten']],
       stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
       klappen:[['Eingabe — das Dokument','<p>Die PDF-Datei aus Paperless.</p>'],['Ausgabe — der erkannte Text','<p>Text als Markdown, mit Überschriften und Tabellen.</p>']]},
-    {phase:'Absender erkennen',art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
-      was:'Eine kurze KI-Anfrage mit dem Anfang des Textes. Sie nennt nur den Absender, damit Pass 1 die passenden Korrespondenten samt Stammdaten bekommt. Modell <b>'+txt(CFG.model)+'</b>.',
-      regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, keine KI-Anfrage'],['sonst','KI-Anfrage']],
-      klappen:[['Eingabe — Anweisung (System-Prompt)',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa(V.pass0_nachricht||'')],
-               ['Ausgabe',tabelle({correspondent:'Name des Absenders oder leer'},['Feld','Bedeutung'])]]},
-    {phase:'Absender erkennen',art:'code',titel:'Kandidaten suchen',
-      was:'Ohne KI: Der Absender wird mit allen Korrespondenten in Paperless verglichen, auch mit ihren Aliasen. Die bis zu 8 ähnlichsten gehen mit ihren Stammdaten an Pass 1.'},
+    {phase:'Kandidaten suchen',art:'code',id:'vorsuche',titel:'Mail, Stammdaten und Namen im Text',knopf:knopf('vorsuche'),
+      was:'Ohne KI: Kam das Dokument per Mail, zählt die Absender-Mail. Außerdem sucht paperlaiss immer im Text nach den Stammdaten aller Korrespondenten (USt-ID, IBAN, Mail, Domain, Kundennummer) und im Briefkopf nach ihren Namen und Aliasen. Was gefunden wird, geht mit Kontext und Fundstelle als Kandidat an Pass 1.',
+      regeln:[['die Absender-Mail passt zu genau einem Korrespondenten','starker Kandidat, keine Zuordnung (Portale!)'],
+              ['die Mail kommt von einer eigenen Adresse oder Domain','Weiterleitung — zählt nicht'],
+              ['Stammdaten eines Korrespondenten stehen im Text','Kandidat (stärkster Hinweis)'],
+              ['alle Wörter eines Namens oder Alias stehen im Briefkopf (erste 1000 Zeichen)','Kandidat (schwächer)'],['der Name ist ein eigener Firmenname','kein Kandidat'],
+              ['eigene Kennungen im Text','zählen nie'],['nichts gefunden','Pass 1 nennt den Absender ohne Kandidaten']],
+      stand:[['eigene USt-IDs',((CFG.eigene_kennungen||{}).ustid||[]).length],['eigene IBANs',((CFG.eigene_kennungen||{}).iban||[]).length],['eigene Domains',((CFG.eigene_kennungen||{}).domains||[]).length],['eigene Adressen',((CFG.eigene_kennungen||{}).email||[]).length]]},
     {phase:'Analysieren',art:'ki',id:'pass1',titel:'Pass 1 — Dokument analysieren',knopf:knopf('pass1'),
       was:'Die Hauptanfrage: Die KI liest den Text und bestimmt Dokumenttyp, Absender, Datum, Felder, Zusammenfassung und Tags. '+
           'Modell <b>'+txt(CFG.model)+'</b>, Temperatur '+txt(CFG.temperature)+', Text bis '+txt(CFG.content_max_len)+' Zeichen.',
@@ -420,11 +442,18 @@ function zeichnen(){
               ['kein Dokumenttyp erkannt','ebenso (wenn eingeschaltet)'],['kein Korrespondent erkannt','ebenso (wenn eingeschaltet)'],
               ['sonst','weiter']],
       stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
-    {phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
+    {phase:'Korrespondent zuordnen',art:'entscheidung',id:'abgleich',titel:'Abgleich mit den Korrespondenten',knopf:knopf('abgleich'),
       was:'Ordnet den Absender aus Pass 1 einem Korrespondenten in Paperless zu — oder legt einen neuen an.',
-      regeln:[['der Name passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2: Die KI wählt einen davon oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
+      regeln:[['der Name aus Pass 1 passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2: Die KI wählt einen davon oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
       klappen:[['Eingabe — Pass 2 (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa(V.pass2_frage||'')],
                ['Ausgabe — Pass 2',tabelle({match:'exakter Name aus der Liste, oder leer'},['Feld','Bedeutung'])]]},
+    {phase:'Schreiben',art:'code',id:'stammdaten',titel:'Stammdaten nachtragen',knopf:knopf('stammdaten'),
+      was:'Trägt USt-ID, IBAN, Mail, Domain, Telefon, Adresse und Kundennummer des Absenders beim zugeordneten Korrespondenten nach — aus der Absender-Mail und dem, was Pass 1 unter „absender“ liefert. Im Korrespondenten-Dialog in Paperless steht dann, woher der Wert kommt.',
+      regeln:[['das Feld ist schon gefüllt','bleibt — nie überschreiben'],['der Wert ist eine eigene Kennung','verworfen'],
+              ['USt-ID, IBAN oder Mail hat kein gültiges Format','verworfen'],['Freemail-Adresse (gmail, gmx …)','nur die Adresse, keine Domain'],
+              ['die Absender-Mail gehört nicht erkennbar zu diesem Absender (z. B. ein Portal)','Mail und Domain nicht übernehmen'],
+              ['die Zuordnung ist unsicher (bestehender behalten)','nichts nachtragen'],['sonst','nachtragen, mit Herkunft']],
+      stand:[['Stammdaten erfassen',an(CFG.stammdaten_erfassen!==false)]]},
     {phase:'Schreiben',art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       was:'Schreibt das Ergebnis über die API zurück nach Paperless. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
       text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.'},
@@ -571,7 +600,7 @@ EINSTELLUNGEN = {
     "marker_tag": ("Allgemein", "Marker-Tag",
                    "Setzt paperlaiss nach jeder Klassifizierung. Ein Dokument mit diesem Tag wird beim "
                    "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz)."),
-    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 0, 1 und 2)."),
+    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 1 und 2)."),
     "temperature": ("KI-Modell & Prompt", "Temperatur",
                     "Wie frei das Modell antwortet: 0 = immer gleich, höher = kreativer. Für Klassifizierung niedrig halten (0–0,2)."),
     "content_max_len": ("KI-Modell & Prompt", "Text bis (Zeichen)",
@@ -615,6 +644,21 @@ EINSTELLUNGEN = {
                         "Custom Field mit der Absenderadresse; hilft, den Korrespondenten über die Domain zu finden. Leer = aus."),
     "korrespondent_beispiele": ("Korrespondenten", "Beispielpaare für den Abgleich",
                                 "Paare [\"falsch geschrieben\", \"richtiger Name\"] — helfen der KI bei OCR-Fehlern im Absender."),
+    "stammdaten_erfassen": ("Korrespondenten", "Stammdaten erfassen",
+                            "An: USt-ID, IBAN, Mail, Telefon, Adresse und Kundennummer des Absenders werden beim "
+                            "zugeordneten Korrespondenten nachgetragen — nur in leere Felder, nie überschreibend."),
+    "eigene_kennungen.ustid": ("Korrespondenten", "Eigene USt-IDs",
+                               "USt-IDs der eigenen Firma. Stehen auf fast jedem Dokument und zählen nie als Absender. Eine je Zeile."),
+    "eigene_kennungen.iban": ("Korrespondenten", "Eigene IBANs",
+                              "IBANs der eigenen Firma (etwa bei Lastschriften). Zählen nie als Absender. Eine je Zeile."),
+    "eigene_kennungen.domains": ("Korrespondenten", "Eigene Mail-Domains",
+                                 "Mail von hier ist eine Weiterleitung und ordnet nichts zu; nie als Absender erfasst. Eine je Zeile."),
+    "eigene_kennungen.namen": ("Korrespondenten", "Eigene Firmennamen",
+                               "Stehen im Empfängerblock jedes Dokuments. Korrespondenten mit diesem Namen sind bei der Namenssuche "
+                               "keine Kandidaten, und Pass 1 erfährt, wer „wir“ sind — gesucht ist immer das Gegenüber. Einer je Zeile."),
+    "eigene_kennungen.email": ("Korrespondenten", "Eigene Mail-Adressen",
+                               "Wie die Domains, aber als volle Adresse — für eine eigene Freemail-Adresse (gmail, gmx …), "
+                               "deren Domain man nicht sperren kann. Eine je Zeile."),
     "nachbearbeitung": ("Erweitert", "Eigenes Skript danach",
                         "Pfad zu einem Skript, das nach dem Schreiben läuft — für alles, was nur diese Installation braucht. Leer = aus."),
 }

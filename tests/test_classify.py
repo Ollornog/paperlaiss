@@ -88,12 +88,12 @@ r.check("Typ: gleich oder nichts erkannt → nichts schreiben",
 import contextlib as _ctx, io as _io
 
 
-def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=()):
+def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=()):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
-                                "custom_fields": [], "created": "2026-01-01"},
+                                "custom_fields": list(feldwerte), "created": "2026-01-01"},
               "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}]},
-              "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": []}}
+              "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
     def get(pfad, raw=False):
         return next(v for k, v in routen.items() if pfad.startswith(k))
@@ -108,9 +108,8 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=()):
         aufrufe.setdefault("laengen", []).append(len(messages))
         aufrufe.setdefault("system", messages[0]["content"])
         return dict(antworten.pop(0)), "{}"
-    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "mistral", "TOK", "DRY", "FORCE_OCR")}
+    alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "TOK", "DRY", "FORCE_OCR")}
     classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
-    classify.mistral = lambda *a, **k: {}
     classify.TOK, classify.DRY, classify.FORCE_OCR = "x", True, force_ocr
     os.environ["CLASSIFY_DOC"] = "5"
     try:
@@ -193,6 +192,160 @@ r.check("Kandidatenliste ist ein Angebot, keine Pflicht (kein „GENAU einen die
         "GENAU einen" not in classify.KAND_KOPF and "tatsächlichen Absender" in classify.KAND_KOPF)
 r.check("Verdrahtung: der Lauf schickt die aus Stücken gebaute Nachricht",
         _b["chat"][0].startswith("METADATEN:") and "VERFÜGBARE FELDER" in _b["chat"][0] and "\nINHALT:\n" in _b["chat"][0])
+
+# ---- Stammdaten: Mail-Zuordnung, Suche im Text, Nachtragen (PO 2026-09-27) ----------------
+_eig = classify.eigene_kennungen({"eigene_kennungen": {"ustid": ["ATU 1111 2222"], "iban": ["AT61 1904 3002 3457 3201"],
+                                                        "domains": ["eigenfirma.example"], "email": ["chef.firma@gmail.com"],
+                                                        "namen": ["Eigenfirma"]}})
+_ks = [{"id": 1, "name": "Beispiel Software"}, {"id": 2, "name": "Nord Autoteile"}, {"id": 3, "name": "Privat Maier"},
+       {"id": 4, "name": "Zweitfirma"}]
+_km = {1: {"domains": "software.example", "ustid": "ATU99988777", "kundennummer": "424242"},
+       2: {"email": "office@nord.example", "iban": "AT48 3200 0000 1234 5864"},
+       3: {"email": "maier@gmail.com"}, 4: {"domains": "zweit.example, software.example"}}
+_meta = lambda cid: _km.get(cid, {})
+_z = lambda m, ks=_ks[:3]: classify.mail_zuordnung(ks, _meta, m, _eig)
+r.check("Mail: volle Adresse ordnet zu", (_z("Office@Nord.example")[0] or {}).get("id") == 2)
+r.check("Mail: Domain ordnet zu, auch als Subdomain", (_z("rechnung@mail.software.example")[0] or {}).get("id") == 1)
+r.check("Mail: Freemail nur über die volle Adresse",
+        (_z("maier@gmail.com")[0] or {}).get("id") == 3 and _z("jemand@gmail.com")[0] is None)
+r.check("Mail: eigene Domain ist eine Weiterleitung und ordnet nichts zu",
+        _z("chef@eigenfirma.example")[0] is None and "Weiterleitung" in _z("chef@eigenfirma.example")[1])
+r.check("Mail: eigene Freemail-Adresse ist eine Weiterleitung, andere gmail-Adressen nicht gesperrt",
+        # auch dann, wenn die eigene Adresse versehentlich bei einem Korrespondenten steht
+        classify.mail_zuordnung([{"id": 5, "name": "Falsch"}], lambda c: {"email": "chef.firma@gmail.com"},
+                                "Chef.Firma@gmail.com", _eig)[0] is None
+        and (_z("maier@gmail.com")[0] or {}).get("id") == 3)
+r.check("Nachtragen: eigene Freemail-Adresse wird nie erfasst",
+        not classify.stammdaten_nachtragen({}, {"email": "chef.firma@gmail.com"}, "", _eig, "q")[1])
+r.check("Mail: passt zu mehreren → entscheidet nicht", _z("x@software.example", _ks)[0] is None)
+
+_txt = ("Rechnung an Eigenfirma, UID ATU 1111 2222.\nAbsender Beispiel, UID: ATU 999 88777, Ihre Kundennummer 424242, "
+        "Mail info@notnord.example, IBAN AT48 3200 0000 1234 5864")
+_tr = {c["id"]: g for c, g in classify.stammdaten_treffer(_ks[:3], _meta, _txt, _eig)}
+r.check("Treffer: USt-ID trotz Leerzeichen im Text gefunden", any("ATU99988777" in g for g in _tr.get(1, [])), str(_tr))
+r.check("Treffer: Kundennummer als ganzes Wort", any("424242" in g for g in _tr.get(1, [])))
+r.check("Treffer: IBAN trotz Gruppierung", "IBAN" in _tr.get(2, []))
+r.check("Treffer: Domain nur als ganze Domain (notnord ≠ klein), Namen zählen nicht",
+        not any("Mail" in g for g in _tr.get(2, [])) and 3 not in _tr)
+_dm = lambda c: {"domains": "nord.example"}
+r.check("Treffer: Domain nur als ganze Domain hinter @/www.",
+        not classify.stammdaten_treffer([{"id": 2, "name": "K"}], _dm, "info@notnord.example", _eig)
+        and classify.stammdaten_treffer([{"id": 2, "name": "K"}], _dm, "Mail: info@nord.example", _eig))
+r.check("Treffer: eigene USt-ID im Empfängerblock zählt nie",
+        not classify.stammdaten_treffer([{"id": 9, "name": "Ich"}], lambda c: {"ustid": "ATU11112222"}, _txt, _eig))
+
+_nk = [{"id": 1, "name": "Nord Autoteile GmbH"}, {"id": 2, "name": "Autohaus Groß"}, {"id": 3, "name": "ACME AG"}]
+_na = lambda c: {3: "Acme Versicherung"}.get(c["id"], "")
+_nt = [c["id"] for c, _ in classify.namens_treffer(_nk, _na, "Rechnung der nord autoteile, Mühlweg 5; ACME Versicherung AG")]
+r.check("Namen: ein kurzes Einzelwort („Bank“) ist kein Kandidat, ein langes schon",
+        not classify.namens_treffer([{"id": 5, "name": "Bank"}], lambda c: "", "Überweisung an die Bank")
+        and classify.namens_treffer([{"id": 6, "name": "Stahlgruber"}], lambda c: "", "Lieferung Stahlgruber"))
+r.check("Namen: eigene Firma ist bei der Namenssuche kein Kandidat",
+        not classify.namens_treffer([{"id": 9, "name": "Eigenfirma e.U."}], lambda c: "", "an Eigenfirma, Musterstadt", _eig["namen"])
+        and classify.namens_treffer([{"id": 9, "name": "Eigenfirma e.U."}], lambda c: "", "an Eigenfirma, Musterstadt"))
+_ew = classify.eigene_firma_anweisung({"eigene_kennungen": {"namen": ["Eigenfirma"], "ustid": ["ATU1"]}})
+r.check("Prompt: nennt die eigene Firma samt Kennungen und verlangt das Gegenüber",
+        "Eigenfirma (USt-ID ATU1)" in _ew and "GEGENÜBER" in _ew and "NIE die eigene Firma" in _ew)
+r.check("Prompt: ohne eigene Firmennamen kein Zusatz", classify.eigene_firma_anweisung({}) == ""
+        and not any("Eigene Firma" in (v or "") for _, v in classify.pass1_system_teile({}, {"A": 1}, [], set(), False)))
+r.check("Prompt: der Zusatz steht im gesendeten System-Prompt",
+        any(v and v.startswith("Eigene Firma") for _, v in classify.pass1_system_teile(
+            {"eigene_kennungen": {"namen": ["Eigenfirma"]}}, {"A": 1}, [], set(), False)))
+r.check("Namen: nur im Briefkopf — die Bank in der Fußzeile ist kein Kandidat",
+        not classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "", "Rechnung " + "x " * 600 + "Bank: Raiffeisenbank"))
+r.check("Namen: alle Wörter ohne Rechtsform, auch über Aliase; halber Name trifft nicht",
+        _nt == [1, 3] or _nt == [3, 1], str(_nt))
+
+_q = "KI · 2026-09-27 · Dokument 5"
+_n, _g, _v = classify.stammdaten_nachtragen(
+    {"kontext": "Software", "telefon": "+43 1 234"},
+    {"ustid": "ATU 999 88777", "iban": "at48 3200 0000 1234 5864", "email": "null", "telefon": "+43 660 000000",
+     "adresse": "Musterweg 1, 1010 Wien", "kundennummer": "424242"}, "Rechnung <buchhaltung@software.example>", _eig, _q)
+r.check("Nachtragen: leere Felder gefüllt, IBAN in Vierergruppen",
+        _g.get("ustid") == "ATU99988777" and _g.get("iban") == "AT48 3200 0000 1234 5864"
+        and _g.get("email") == "buchhaltung@software.example" and _g.get("domains") == "software.example", str(_g))
+r.check("Nachtragen: gefülltes Feld wird nie überschrieben", _n["telefon"] == "+43 1 234" and "telefon" not in _g)
+r.check("Nachtragen: Herkunft je Feld vermerkt", _n["erfasst"].get("ustid") == _q and "telefon" not in _n["erfasst"])
+_n2, _g2, _v2 = classify.stammdaten_nachtragen(
+    {"uid": "ATU11111111"}, {"ustid": "ATU11112222", "iban": "AT61 1904 3002 3457 3201"}, "", _eig, _q)
+r.check("Nachtragen: eigene IBAN verworfen, Alt-Schlüssel uid zählt als gefüllt",
+        not _g2 and _v2.get("iban") == "eigene IBAN" and "ustid" not in _n2)
+_n4, _g4, _v4 = classify.stammdaten_nachtragen({}, {"ustid": "ATU 1111 2222"}, "", _eig, _q)
+r.check("Nachtragen: eigene USt-ID wird nie einem Absender zugeschlagen",
+        not _g4 and _v4.get("ustid") == "eigene USt-ID", f"{_g4} {_v4}")
+_n3, _g3, _v3 = classify.stammdaten_nachtragen({}, {"ustid": "12345", "iban": "DE00", "email": "x@gmail.com"},
+                                               "chef@eigenfirma.example", _eig, _q)
+r.check("Nachtragen: kaputte Formate verworfen, Freemail ohne Domain, eigene Mail-Domain nie",
+        _v3.get("ustid") == "kein USt-ID-Format" and _v3.get("iban") == "kein IBAN-Format"
+        and _g3 == {"email": "x@gmail.com"} and "eigene Adresse" in _v3.get("email", ""), f"{_g3} {_v3}")
+
+import json, tempfile as _tf
+with _tf.TemporaryDirectory() as _d:
+    _alt_dir, _alt_meta = classify.SCRIPT_DIR, dict(classify.CORR_META)
+    classify.SCRIPT_DIR = _d
+    try:
+        _pf = os.path.join(_d, "correspondents.json")
+        open(_pf, "w").write(json.dumps({"1": {"kontext": "a"}, "2": {"email": "b@x.example"}}))
+        _gs, _ = classify.stammdaten_schreiben(1, lambda alt: classify.stammdaten_nachtragen(alt, {"ustid": "ATU99988777"}, "", _eig, _q))
+        _st = json.load(open(_pf))
+        r.check("Schreiben: Eintrag ergänzt, andere Einträge und Felder bleiben",
+                _gs == {"ustid": "ATU99988777"} and _st["1"]["kontext"] == "a" and _st["2"] == {"email": "b@x.example"})
+        open(_pf, "w").write("[kaputt")
+        try:
+            classify.stammdaten_schreiben(1, lambda alt: ({"x": 1}, {"x": 1}, {}))
+            _geworfen = False
+        except Exception:
+            _geworfen = True
+        r.check("Schreiben: kaputte Datei wird nicht überschrieben", _geworfen and open(_pf).read() == "[kaputt")
+    finally:
+        classify.SCRIPT_DIR = _alt_dir
+        classify.CORR_META.clear(); classify.CORR_META.update(_alt_meta)
+
+# Verdrahtung: Pass 0 gibt es nicht mehr (2026-09-27) — Pass 1 ist der einzige KI-Aufruf; der
+# Stammdaten-Treffer steht mit Begründung in der Kandidatenliste, und Pass 1 liefert Stammdaten,
+# die nachgetragen würden.
+classify.CORR_META.clear(); classify.CORR_META.update({"7": {"ustid": "ATU99988777"}})
+_s = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "AT48 3200 0000 1234 5864"}}],
+           text=_gut + " UID ATU99988777", korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
+classify.CORR_META.clear()
+r.check("Verdrahtung: nur ein KI-Aufruf (Pass 1), kein Pass 0", len(_s["chat"]) == 1, str(len(_s["chat"])))
+r.check("Verdrahtung: Treffer steht mit Begründung in der Nachricht an Pass 1",
+        "Beispiel Software" in _s["chat"][0] and "gefunden: USt-ID ATU99988777" in _s["chat"][0])
+r.check("Verdrahtung: Trockenlauf zeigt die Stammdaten, schreibt sie nicht",
+        (classify.TRACE.get("stammdaten") or {}).get("geschrieben") == {"iban": "AT48 3200 0000 1234 5864"}
+        and classify.TRACE["stammdaten"].get("trocken") is True, str(classify.TRACE.get("stammdaten")))
+_o = _lauf([_ok], text=_gut + " Absender: Nord Autoteile, Musterstadt",
+           korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Nord Autoteile GmbH"}])
+r.check("Verdrahtung: ohne Kennung findet der Name im Text den Kandidaten (Rechtsform egal)",
+        "- Nord Autoteile GmbH" in _o["chat"][0] and "Name „Nord Autoteile GmbH“ im Briefkopf" in _o["chat"][0]
+        and "Beispiel Software" not in _o["chat"][0].split("METADATEN")[0])
+r.check("Verdrahtung: Pass 1 wird nach den Absender-Stammdaten gefragt", "absender = Objekt" in _b["system"])
+
+# Portal-Fall (PO 2026-09-27): Die Absender-Mail gehört einem Portal, das Dokumente vieler Firmen
+# verschickt. Die Mail ist dann nur ein Kandidat — nennt Pass 1 die Firma aus dem Text, gilt die.
+classify.CORR_META.clear(); classify.CORR_META.update({"20": {"domains": "portal.example"}})
+_alt_mf = classify.CFG["mail_from_field"]; classify.CFG["mail_from_field"] = "Absender-Mail"
+try:
+    _pt = _lauf([{**_ok, "correspondent": "Nord Autoteile GmbH"}], text=_gut + " Nord Autoteile GmbH",
+                korrespondenten=[{"id": 20, "name": "Rechnungsportal"}, {"id": 8, "name": "Nord Autoteile GmbH"}],
+                felder=[{"id": 90, "name": "Absender-Mail", "data_type": "string"}],
+                feldwerte=[{"field": 90, "value": "noreply@portal.example"}])
+finally:
+    classify.CFG["mail_from_field"] = _alt_mf; classify.CORR_META.clear()
+r.check("Portal: Mail-Treffer ist nur Kandidat, beide gehen an Pass 1",
+        "Rechnungsportal" in _pt["chat"][0] and "Absender-Mail" in _pt["chat"][0] and "Nord Autoteile GmbH [" in _pt["chat"][0])
+r.check("Portal: die Portal-Mail wird NICHT bei der Firma nachgetragen",
+        "absender_mail" in (classify.TRACE.get("stammdaten") or {}).get("verworfen", {})
+        and "domains" not in (classify.TRACE.get("stammdaten") or {}).get("geschrieben", {}), str(classify.TRACE.get("stammdaten")))
+_m = {"id": 1, "name": "M"}
+r.check("Mail bestätigt: Domain steht im Dokument, kein anderer Korrespondent hat sie",
+        classify.mail_bestaetigt("a@nord.example", 8, None, "www.nord.example", {})
+        and not classify.mail_bestaetigt("a@nord.example", 8, _m, "www.nord.example", {})
+        and not classify.mail_bestaetigt("a@nord.example", 8, None, "nichts", {})
+        and classify.mail_bestaetigt("a@nord.example", 8, None, "nichts", {"email": "office@nord.example"}))
+r.check("Portal: zugeordnet wird die Firma, die Pass 1 nennt, nicht das Portal",
+        "exakt='Nord Autoteile GmbH'" in (classify.TRACE.get("correspondent") or {}).get("ergebnis", ""),
+        str(classify.TRACE.get("correspondent")))
 
 # ---- is_null(): die vielen Schreibweisen von „leer"
 r.check("is_null: None", classify.is_null(None) is True)

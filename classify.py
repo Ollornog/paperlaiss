@@ -79,6 +79,14 @@ CFG = {
     # Verknuepfungen in ein Fremdsystem, Rechte, hauseigene Sonderregeln. Es bekommt JSON auf
     # stdin und darf scheitern, ohne den Lauf mitzureissen.
     "nachbearbeitung": "",
+    # Stammdaten des Absenders (USt-ID, IBAN, Mail, Telefon, Adresse, Kundennummer), die Pass 1
+    # im Dokument findet, werden beim zugeordneten Korrespondenten nachgetragen — nur in LEERE
+    # Felder, nie überschreibend, mit Herkunft (`erfasst`).
+    "stammdaten_erfassen": True,
+    # Kennungen der eigenen Firma. Sie stehen auf fast jedem eingehenden Dokument (Empfänger-
+    # block, Lastschrift) und dürfen nie einem Absender zugeschlagen werden; eine Mail von einer
+    # eigenen Domain ist eine Weiterleitung und ordnet nichts zu.
+    "eigene_kennungen": {"ustid": [], "iban": [], "domains": [], "email": [], "namen": []},
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
@@ -158,6 +166,232 @@ def cfull_hint(c):  # Kontext + harte Kennungen (Kundennr/UID) fürs KI-Groundin
 
 def calias(c):
     return str(cmeta(c["id"]).get("aliase") or "").strip()
+
+
+# ---- Stammdaten: Mail-Zuordnung, Nachtragen, eigene Kennungen --------------------------------
+# Freemail-Domains ordnen nie über die Domain zu (sonst gehörte jede gmail-Adresse demselben
+# Korrespondenten) — dort zählt nur die volle Adresse.
+FREEMAIL = {"gmail.com", "googlemail.com", "gmx.at", "gmx.de", "gmx.net", "gmx.ch", "web.de", "outlook.com",
+            "outlook.de", "hotmail.com", "hotmail.de", "live.com", "live.at", "yahoo.com", "yahoo.de",
+            "icloud.com", "me.com", "aon.at", "a1.net", "chello.at", "t-online.de", "posteo.de",
+            "proton.me", "protonmail.com", "mail.de", "freenet.de"}
+
+
+def _liste(v):
+    teile = v if isinstance(v, (list, tuple)) else re.split(r"[,;\s]+", str(v or ""))
+    return [str(t).strip().lower().strip("<>") for t in teile if str(t).strip()]
+
+
+def norm_ustid(v):
+    s = re.sub(r"[\s.\-/]", "", str(v or "")).upper()
+    return s if re.fullmatch(r"[A-Z]{2}[0-9A-Z]{8,12}", s) else ""
+
+
+def norm_iban(v):
+    s = re.sub(r"\s", "", str(v or "")).upper()
+    return s if re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", s) else ""
+
+
+def norm_mail(v):
+    m = re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", str(v or ""))
+    return m.group(0).lower() if m else ""
+
+
+def eigene_kennungen(cfg):
+    e = cfg.get("eigene_kennungen") or {}
+    return {"ustid": {norm_ustid(x) for x in _liste(e.get("ustid"))} - {""},
+            "iban": {norm_iban(x) for x in (e.get("iban") or []) if norm_iban(x)},
+            "domains": set(_liste(e.get("domains"))),
+            # Volle Adressen — für eine eigene Freemail-Adresse, deren Domain man nicht sperren kann.
+            "email": {norm_mail(x) for x in _liste(e.get("email"))} - {""},
+            # Namen der eigenen Firma: stehen im Empfängerblock jedes Dokuments. Ein Korrespondent,
+            # dessen Name sie enthält, ist bei der Namenssuche kein Kandidat. Gemessen 2026-09-27 an
+            # 16 Dokumenten: markiert statt ausgeschlossen füllte er fast jede Kandidatenliste, und die
+            # KI griff öfter daneben; ausgeschlossen traf sie so oft wie mit Pass 0.
+            "namen": [set(ctoks(n)) for n in (e.get("namen") or []) if ctoks(n)]}
+
+
+def _domain_passt(dom, domains):
+    return any(dom == d or dom.endswith("." + d) for d in domains)
+
+
+def mail_zuordnung(corrs, meta, mail_from, eigene):
+    """Korrespondent über die Absender-Mail: (korrespondent oder None, Grund).
+
+    Volle Adresse vor Domain; Freemail nur über die volle Adresse; eine eigene Domain ist eine
+    Weiterleitung und ordnet nichts zu; passen mehrere, entscheidet die Mail nicht."""
+    addr = norm_mail(mail_from)
+    if not addr:
+        return None, "keine Absender-Mail"
+    dom = addr.split("@")[1]
+    if _domain_passt(dom, eigene["domains"]) or addr in eigene["email"]:
+        return None, f"eigene Adresse ({addr}) — Weiterleitung, ordnet nichts zu"
+    treffer = [c for c in corrs if addr in _liste(meta(c["id"]).get("email"))]
+    if not treffer and dom not in FREEMAIL:
+        treffer = [c for c in corrs if _domain_passt(dom, _liste(meta(c["id"]).get("domains")))]
+    if len(treffer) == 1:
+        return treffer[0], f"Absender-Mail ({addr})"
+    if treffer:
+        return None, "Mail passt zu mehreren: " + ", ".join(c["name"] for c in treffer[:5])
+    return None, "Mail/Domain in keinen Stammdaten"
+
+
+def stammdaten_treffer(corrs, meta, text, eigene):
+    """Die Stammdaten ALLER Korrespondenten im Dokumenttext suchen: [(korrespondent, [Gründe])].
+
+    Nur harte Kennungen (USt-ID, IBAN, Mail, Domain, Kundennummer), keine Namen — ein Name
+    steht auch im Empfängerblock oder in einer Erwähnung. Eigene Kennungen zählen nie. Die
+    Treffer sind Kandidaten für Pass 1, keine Zuordnung: entscheiden tut die KI."""
+    klein = str(text or "").lower()
+    kompakt = re.sub(r"[\s.\-/]", "", str(text or "")).upper()
+    aus = []
+    for c in corrs:
+        m = meta(c["id"])
+        gruende = []
+        u = norm_ustid(m.get("ustid") or m.get("uid"))
+        if u and u not in eigene["ustid"] and u in kompakt:
+            gruende.append(f"USt-ID {u}")
+        i = norm_iban(m.get("iban"))
+        if i and i not in eigene["iban"] and i in kompakt:
+            gruende.append("IBAN")
+        for e in _liste(m.get("email")):
+            if (norm_mail(e) and e in klein and e not in eigene["email"]
+                    and not _domain_passt(e.split("@")[1], eigene["domains"])):
+                gruende.append(f"Mail {e}")
+        for d in _liste(m.get("domains")):
+            if (d and "." in d and d not in FREEMAIL and not _domain_passt(d, eigene["domains"])
+                    and re.search(r"(?:@|www\.|//)" + re.escape(d) + r"(?![a-z0-9-])", klein)):
+                gruende.append(f"Domain {d}")
+        k = str(m.get("kundennummer") or "").strip()
+        if len(re.sub(r"\W", "", k)) >= 5 and re.search(r"(?<![0-9A-Za-z])" + re.escape(k) + r"(?![0-9A-Za-z])", str(text or "")):
+            gruende.append(f"Kundennummer {k}")
+        if gruende:
+            aus.append((c, list(dict.fromkeys(gruende))))
+    return sorted(aus, key=lambda x: -len(x[1]))
+
+
+def namens_treffer(corrs, alias, text, eigene_namen=()):
+    """Korrespondenten, deren Name oder Alias im Text steht: [(korrespondent, [Grund])].
+
+    Alle Wörter des Namens (ohne Rechtsform, ab 3 Zeichen) müssen im Briefkopf vorkommen (den
+    ersten 1000 Zeichen): unten stehen Bankverbindung und Zahlungsdienste, deren Namen sonst jede
+    Rechnung zur Rechnung der Bank machten (2026-09-27, Stichprobe). Schwächer als eine Kennung,
+    deshalb nur Kandidat für Pass 1. Längere Namen zuerst: „Muster Autoteile" sagt mehr als „Muster"."""
+    woerter = set(ctoks(str(text or "")[:1000]))
+    aus = []
+    for c in corrs:
+        if any(n <= set(ctoks(c["name"])) for n in eigene_namen):
+            continue
+        for nm in [c["name"]] + [a.strip() for a in str(alias(c) or "").split(",") if a.strip()]:
+            t = [w for w in ctoks(nm) if len(w) >= 3]
+            # Ein einzelnes kurzes Wort („Bank", „Privat") steht in fast jedem Text — als Kandidat
+            # verführte es die KI (2026-09-27: Lohnzettel landete bei „Bank"). Einwortnamen erst ab 6 Zeichen.
+            if len(t) == 1 and len(t[0]) < 6:
+                continue
+            if t and all(w in woerter for w in t):
+                aus.append((len(t), c, [f"Name „{nm}“ im Briefkopf"]))
+                break
+    return [(c, g) for _, c, g in sorted(aus, key=lambda x: -x[0])]
+
+
+def mail_bestaetigt(mail_from, corr_id, mail_corr, text, absender):
+    """Gehört die Absender-Mail wirklich zum zugeordneten Korrespondenten? Nur dann wird sie
+    nachgetragen. Ein Portal verschickt Dokumente vieler Firmen von derselben Adresse — ohne
+    diese Prüfung landete die Portal-Domain bei der ersten Firma, und jede spätere Portal-Mail
+    zeigte auf sie. Bestätigt heißt: kein anderer Korrespondent hat die Mail, und Adresse oder
+    Domain stehen im Dokument (oder die KI nennt dieselbe Domain als Absender-Mail)."""
+    addr = norm_mail(mail_from)
+    if not addr or not corr_id or (mail_corr and mail_corr["id"] != corr_id):
+        return False
+    dom = addr.split("@")[1]
+    klein = str(text or "").lower()
+    ki = norm_mail((absender or {}).get("email") if isinstance(absender, dict) else "")
+    return addr in klein or dom in klein or (ki and ki.split("@")[1] == dom)
+
+
+def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle):
+    """Leere Stammdaten eines Korrespondenten aus dem Dokument füllen.
+
+    Rein: bekommt den alten Eintrag, gibt (neuer Eintrag, geschrieben, verworfen) zurück.
+    Überschreibt nie, übernimmt keine eigene Kennung und kein kaputtes Format, und merkt sich
+    in `erfasst`, woher ein Wert stammt."""
+    alt = dict(alt or {})
+    neu, erfasst = dict(alt), dict(alt.get("erfasst") or {})
+    geschrieben, verworfen = {}, {}
+    ab = absender if isinstance(absender, dict) else {}
+    wert = lambda k: "" if is_null(ab.get(k)) else str(ab.get(k)).strip()
+
+    def leer(feld):
+        if feld == "ustid":
+            return not (alt.get("ustid") or alt.get("uid"))
+        return not str(alt.get(feld) or "").strip()
+
+    def setze(feld, w):
+        if w and leer(feld) and feld not in geschrieben:
+            neu[feld] = geschrieben[feld] = w
+            erfasst[feld] = quelle
+
+    roh = wert("ustid")
+    if roh:
+        u = norm_ustid(roh)
+        if not u:
+            verworfen["ustid"] = "kein USt-ID-Format"
+        elif u in eigene["ustid"]:
+            verworfen["ustid"] = "eigene USt-ID"
+        else:
+            setze("ustid", u)
+    roh = wert("iban")
+    if roh:
+        i = norm_iban(roh)
+        if not i:
+            verworfen["iban"] = "kein IBAN-Format"
+        elif i in eigene["iban"]:
+            verworfen["iban"] = "eigene IBAN"
+        else:
+            setze("iban", " ".join(i[k:k + 4] for k in range(0, len(i), 4)))
+    for m in (norm_mail(mail_from), norm_mail(wert("email"))):
+        if not m:
+            continue
+        dom = m.split("@")[1]
+        if _domain_passt(dom, eigene["domains"]) or m in eigene["email"]:
+            verworfen["email"] = f"eigene Adresse ({m})"
+            continue
+        setze("email", m)
+        if dom not in FREEMAIL:
+            setze("domains", dom)
+    tel = wert("telefon")[:60]
+    if tel and len(re.sub(r"\D", "", tel)) >= 6:
+        setze("telefon", tel)
+    setze("adresse", wert("adresse")[:300])
+    setze("kundennummer", wert("kundennummer")[:60])
+    if geschrieben:
+        neu["erfasst"] = erfasst
+    return neu, geschrieben, verworfen
+
+
+def stammdaten_schreiben(cid, aenderung):
+    """correspondents.json unter Sperre neu lesen, ändern, atomar schreiben.
+
+    Das Panel schreibt dieselbe Datei (Korrespondenten-Dialog), und mehrere Läufe können
+    parallel laufen: ohne Sperre gewinnt, wer zuletzt schreibt, und die anderen Änderungen sind
+    weg. Die Sperre ist flock auf einer Nachbardatei — sie gilt auch über Container hinweg,
+    solange beide dasselbe Verzeichnis sehen. Eine kaputte Datei wird NICHT überschrieben."""
+    import fcntl
+    pfad = os.path.join(SCRIPT_DIR, "correspondents.json")
+    with open(pfad + ".lock", "a") as sperre:
+        fcntl.flock(sperre, fcntl.LOCK_EX)
+        try:
+            store = json.load(open(pfad, encoding="utf-8"))
+        except FileNotFoundError:
+            store = {}
+        if not isinstance(store, dict):
+            raise ValueError("correspondents.json hat den falschen Aufbau — nicht überschrieben")
+        neu, geschrieben, verworfen = aenderung(store.get(str(cid)))
+        if geschrieben:
+            store[str(cid)] = neu
+            schreibe_json(pfad, store)
+            CORR_META[str(cid)] = neu
+        return geschrieben, verworfen
 
 
 def log(m):
@@ -310,10 +544,6 @@ def mistral_chat(messages, max_tokens=900):
     r = json.load(urllib.request.urlopen(req, timeout=120))
     raw = r["choices"][0]["message"]["content"]
     return json.loads(raw), raw
-
-
-def mistral(system, user, max_tokens=900):
-    return mistral_chat([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens)[0]
 
 
 def mistral_ocr(did):
@@ -703,10 +933,8 @@ def typ_setzen(dt_id, bisher, ausdruecklich):
     return dt_id
 
 
-# Die kleinen Prompts von Pass 0 und Pass 2 als Konstanten: der Lauf benutzt sie, und die
-# Panel-Seite „Ablauf & Prompt" zeigt genau diese Texte.
-PASS0_SYSTEM = ('Extrahiere NUR den Absender/Aussteller (Firma/Behörde/Person). '
-                'Antworte NUR JSON {"correspondent": <Name|null>}.')
+# Der kleine Prompt von Pass 2 als Konstante: der Lauf benutzt ihn, und die Panel-Seite
+# „Ablauf & Prompt" zeigt genau diesen Text. (Pass 0 entfiel am 2026-09-27.)
 PASS2_SYSTEM = ('Du ordnest einen Absender bestehenden Korrespondenten zu. '
                 'Antworte NUR JSON {"match": <exakter Name aus der Liste> ODER null}.')
 
@@ -738,6 +966,25 @@ FELD_ANWEISUNG = (
     "Dokumentdatum (NICHT nur referenzierte Daten); null wenn unklar. "
     "needs_ocr NUR true, wenn der INHALT wirklich unlesbar ist (Zeichensalat, leer, offensichtlich kaputtes OCR); "
     "bei knappem, aber lesbarem Text (aus dem du Felder extrahieren konntest) IMMER false.")
+ABSENDER_ANWEISUNG = (
+    "\nGib ausserdem absender = Objekt mit den Kontaktdaten des GEGENÜBERS (der Partei, die nicht wir sind), "
+    "so wie sie im Dokument stehen, sonst null je Feld: ustid, iban, email, telefon, adresse (einzeilig), "
+    "kundennummer (die Kundennummer, unter der das Gegenüber UNS führt).")
+
+
+def eigene_firma_anweisung(cfg):
+    """Wer „wir" sind — damit die KI das Gegenüber sucht und nicht die eigene Firma, deren Name,
+    UID und IBAN auf fast jedem Dokument stehen (PO 2026-09-27). Leer ohne eigene Firmennamen."""
+    e = cfg.get("eigene_kennungen") or {}
+    namen = [str(n).strip() for n in (e.get("namen") or []) if str(n).strip()]
+    if not namen:
+        return ""
+    kenn = [f"USt-ID {u}" for u in (e.get("ustid") or [])] + [f"IBAN {i}" for i in (e.get("iban") or [])]
+    kenn += [f"Mail {m}" for m in (e.get("email") or [])] + [f"Domain {d}" for d in (e.get("domains") or [])]
+    return ("\nWICHTIG: Dieses Archiv gehört " + " / ".join(namen)
+            + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. Gesucht ist immer das GEGENÜBER: "
+            "bei eingehenden Dokumenten der Absender, bei unseren eigenen Dokumenten (Ausgangsrechnung, Angebot) "
+            "der Empfänger. correspondent ist NIE die eigene Firma, und absender enthält NIE ihre Stammdaten.")
 SUMMARY_ANWEISUNG = (
     "\nGib ausserdem summary = TLDR, Länge an das Dokument angepasst: Rechnung/Beleg/kurzer Bescheid → 1 knapper Satz; "
     "Vertrag/Brief → 2-3 Sätze; langer Bericht → 4-6 Sätze. Keine Floskeln, direkt zur Sache.")
@@ -765,6 +1012,10 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
     system = "".join(t for t, _ in teile)
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
         teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
+    if eigene_firma_anweisung(cfg):
+        teile.append((eigene_firma_anweisung(cfg), "Eigene Firma (automatisch angehängt, aus „Eigene Firmennamen“)"))
+    if cfg.get("stammdaten_erfassen", True):
+        teile.append((ABSENDER_ANWEISUNG, "Absender-Stammdaten (automatisch angehängt, weil „Stammdaten erfassen“ an ist)"))
     if mit_summary:
         teile.append((SUMMARY_ANWEISUNG, "Zusammenfassung (automatisch angehängt, weil ein Zusammenfassungs-Feld eingestellt ist)"))
     return teile
@@ -775,13 +1026,6 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
 # direkt zugeordnet (Pass 2 prüft nur Namen, die NICHT exakt passen). Jetzt: Angebot, keine Pflicht.
 KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, "
              "übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):")
-
-
-def pass0_nachricht(mail_ktx, title, content):
-    """Die Nachricht an Pass 0: Mail-Kontext (falls da), Titel, Anfang des Textes."""
-    mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):"
-                  "\n" + mail_ktx + "\n\n") if mail_ktx else ""
-    return mail_block + "TITEL: " + title + "\n\nINHALT:\n" + content[:2500]
 
 
 def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, created, dateiname,
@@ -800,8 +1044,8 @@ def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, cr
         T += [("HINWEIS zum Korrespondenten '", None, w), (cname, "bisheriger Korrespondent", w), ("': ", None, w),
               (chint, "Kontext aus seinen Stammdaten", w), ("\n\n", None, w)]
     if kand_lines:
-        w = "nur wenn Pass 0 passende Korrespondenten gefunden hat"
-        T += [(KAND_KOPF + "\n", None, w), (kand_lines, "bis zu 8 Kandidaten, je mit Aliasen und Kontext", w),
+        w = "nur wenn die Suche im Text (oder die Absender-Mail) Korrespondenten gefunden hat"
+        T += [(KAND_KOPF + "\n", None, w), (kand_lines, "bis zu 10 Kandidaten, je mit Aliasen, Kontext und Fundstelle", w),
               ("\n\n", None, w)]
     if mail_ktx:
         w = "nur bei Dokumenten aus einer Mail"
@@ -834,7 +1078,7 @@ def prompt_vorschau():
     nachricht = pass1_nachricht_teile(
         bsp("Hinweis, den jemand beim KI-Knopf eingegeben hat"), bsp("Korrespondent"),
         bsp("Kontext aus den Stammdaten"),
-        "- " + bsp("Name") + " (auch: " + bsp("Aliase") + ") [Kontext: " + bsp("Kontext") + "]\n- …",
+        "- " + bsp("Name") + " (auch: " + bsp("Aliase") + ") [Kontext: " + bsp("Kontext") + "] [gefunden: " + bsp("USt-ID …, Name im Text") + "]\n- …",
         bsp("Text der Mail"), bsp("JJJJ-MM-TT"), bsp("JJJJ-MM-TT"), bsp("Dateiname"),
         "- " + bsp("Feld") + " (" + bsp("Art") + "), aktuell: " + bsp("Wert") + "\n- …",
         bsp("Titel"), bsp(f"Text des Dokuments, bis {CFG['content_max_len']} Zeichen"))
@@ -845,8 +1089,6 @@ def prompt_vorschau():
         "platzhalter": PLATZHALTER,
         "vorlage": cfg.get("system_prompt") or DEFAULT_PROMPT,
         "standard": DEFAULT_PROMPT,
-        "pass0_nachricht": pass0_nachricht(bsp("Text der Mail — nur bei Dokumenten aus einer Mail"), bsp("Titel"),
-                                           bsp("die ersten 2500 Zeichen des Textes")),
         "pass2_frage": pass2_frage(bsp("Absender laut Pass 1"), bsp("ähnliche Korrespondenten, höchstens 20"),
                                    beispiel_text(CFG["korrespondent_beispiele"])),
         "eigener_prompt": bool(CFG.get("system_prompt")),
@@ -861,7 +1103,6 @@ def prompt_vorschau():
             "tagging_enabled", "marker_tag", "unsicher_tag", "summary_field",
             "manual_fields", "nachbearbeitung")},
         "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
-        "pass0_system": PASS0_SYSTEM,
         "pass2_system": PASS2_SYSTEM,
     }
 
@@ -961,44 +1202,34 @@ def main():
     chint = _khint(cname) if cname else ""
     TRACE["corr_hint"] = ({"korrespondent": cname, "hinweis": chint} if chint else None)
 
-    # --- Pass 0: Absender extrahieren → fokussierte Korrespondent-Kandidaten ---
-    set_stage(did, "Absender")
-    p0_name = ""
-    p0_trace = {"quelle": "keine"}
-    if mail_from:   # Absender-Domain → Korrespondent (aus dem Metadaten-Store: email/domains)
-        _dom = mail_from.split("@")[-1].strip().lower().strip(">")
-        for c in corrs:
-            _m = cmeta(c["id"]); _doms = str(_m.get("domains") or _m.get("email") or "").lower()
-            if _doms and _dom and (_dom in _doms or mail_from.lower() in _doms):
-                p0_name = c["name"]; p0_trace = {"quelle": f"Absender-Mail ({_dom})"}; break
-    if not p0_name:
-        _p0_user = pass0_nachricht(mail_ktx, title, content)
-        try:
-            _p0 = mistral(PASS0_SYSTEM, _p0_user, 150)
-        except Exception as e:
-            log(f"pass0-fail {did}: {e!r}")   # ohne Absender weiter, aber sichtbar
-            _p0 = {"fehler": repr(e)}
-        p0_name = (_p0.get("correspondent") or "").strip()
-        p0_trace = {"quelle": "KI", "system": PASS0_SYSTEM, "user": _p0_user[:4000], "response": _p0}
-    kand = []
-    if p0_name:
-        _at = ctoks(p0_name); _ak = " ".join(_at)
-        def _ks(c):
-            names = [c["name"]] + [a.strip() for a in calias(c).split(",") if a.strip()]
-            best = 0.0
-            for nm in names:
-                bt = ctoks(nm)
-                if not _at or not bt:
-                    continue
-                ov = len(set(_at) & set(bt)) / min(len(set(_at)), len(set(bt)))
-                best = max(best, ov, difflib.SequenceMatcher(None, _ak, " ".join(bt)).ratio())
-            return best
-        kand = [c for sc, c in sorted(((_ks(c), c) for c in corrs), key=lambda x: -x[0])[:8] if sc >= 0.3]
+    # --- Vorsuche ohne KI: Kandidaten für Pass 1 (Pass 0 entfiel am 2026-09-27) ---
+    # Pass 0 war ein eigener KI-Aufruf, nur um einen Absendernamen zu raten, aus dem dann
+    # Kandidaten wurden. Die Kandidaten findet jetzt die Suche im Text selbst; den Absender
+    # nennt Pass 1, und Abgleich/Pass 2 danach bleiben.
+    set_stage(did, "Kandidaten")
+    eigene = eigene_kennungen(CFG)
+    # 1. Passt die Absender-Mail zu genau einem Korrespondenten, ist er der stärkste Kandidat —
+    #    aber keine Zuordnung: ein Portal verschickt Dokumente vieler Firmen von derselben Adresse
+    #    (PO 2026-09-27). Entscheiden tut Pass 1 mit allen Funden.
+    mail_corr, mail_grund = mail_zuordnung(corrs, cmeta, mail_from, eigene) if mail_from else (None, None)
+    # 2. Trotzdem immer im Text suchen: Stammdaten (harte Kennungen), dann Namen und Aliase.
+    _text = title + "\n" + content
+    treffer = stammdaten_treffer(corrs, cmeta, _text, eigene)
+    _gefunden = {}
+    if mail_corr:
+        _gefunden[mail_corr["id"]] = ["Absender-Mail"]
+    for c, g in treffer[:6] + namens_treffer(corrs, calias, _text, eigene["namen"])[:8]:
+        _gefunden.setdefault(c["id"], []).extend(x for x in g if x not in _gefunden.get(c["id"], []))
+    _by_id = {c["id"]: c for c in corrs}
+    kand = [_by_id[i] for i in list(_gefunden)[:10]]
     def _kalias_c(c):
         a = calias(c)
         return (" (auch: " + a + ")") if a else ""
-    kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") for c in kand)
-    TRACE["pass0"] = {"vorschlag": p0_name, "kandidaten": [c["name"] for c in kand], **p0_trace}
+    def _im_dok(c):
+        return (" [gefunden: " + ", ".join(_gefunden[c["id"]]) + "]") if c["id"] in _gefunden else ""
+    kand_lines = _NL.join("- " + c["name"] + _kalias_c(c) + ((" [Kontext: " + cfull_hint(c) + "]") if cfull_hint(c) else "") + _im_dok(c) for c in kand)
+    TRACE["vorsuche"] = {"mail": mail_grund, "mail_kandidat": mail_corr["name"] if mail_corr else None,
+                         "kandidaten": {c["name"]: _gefunden[c["id"]] for c in kand} or None}
     TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
                         else "manuell (Panel)" if (FORCE or FORCE_OCR) else "automatisch (Post-Consume)")
@@ -1121,12 +1352,32 @@ def main():
     if new_tags and summary_fid:
         summary = (summary + f"\n\n[KI-Tag-Vorschlag: {', '.join(new_tags)}]").strip()
 
+    # --- Stammdaten nachtragen: nur leere Felder, nur bei belastbarer Zuordnung ---
+    stamm_info = ""
+    if CFG.get("stammdaten_erfassen", True) and not corr_info.startswith("bestehenden behalten"):
+        quelle = f"KI · {datetime.date.today():%Y-%m-%d} · Dokument {did}"
+        _mail = mail_from if mail_bestaetigt(mail_from, corr_id, mail_corr, _text, prop.get("absender")) else ""
+        aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle)
+        try:
+            if corr_id and not DRY:
+                g, v = stammdaten_schreiben(corr_id, aenderung)
+            else:   # Trockenlauf oder neuer Korrespondent im Trockenlauf: nur zeigen
+                _, g, v = aenderung(cmeta(corr_id) if corr_id else {})
+            if mail_from and not _mail:
+                v = {**v, "absender_mail": "nicht übernommen — gehört nicht erkennbar zu diesem Absender (Portal?)"}
+            TRACE["stammdaten"] = {"geschrieben": g, "verworfen": v, "trocken": bool(DRY or not corr_id)}
+            if g:
+                stamm_info = " | stammdaten+" + ",".join(g)
+        except Exception as e:
+            log(f"stammdaten-fail {did}: {e!r}")   # Klassifizierung läuft weiter
+            TRACE["stammdaten"] = {"fehler": repr(e)}
+
     if DRY:
         out = {"id": did, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
                "summary": summary, "fields": prop.get("fields"), "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
-        log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}")
+        log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}")
         return
 
     # --- Zurückschreiben (KEIN owner/Rechte — macht post-consume.sh) ---
@@ -1178,7 +1429,7 @@ def main():
     if not ok:   # nach allen Runden weiter Fehler → wenigstens ohne custom_fields speichern
         patch.pop("custom_fields", None); patch_doc(did, patch)
 
-    log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}" + (f" | {repair_note}" if repair_note else ""))
+    log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}" + (f" | {repair_note}" if repair_note else ""))
     nachbearbeiten(did, patch, ok, TRACE.get("writeback") or {})
     TRACE["_stage"] = "fertig"
     save_trace(did)
@@ -1196,6 +1447,7 @@ if __name__ == "__main__":
             # ein Speichern im Panel die Zahl fest und ocr_min_len wirkte nie wieder.
             regeln.pop("min_zeichen")
         wirksam["ocr_regeln"] = regeln
+        wirksam["eigene_kennungen"] = {"ustid": [], "iban": [], "domains": [], "email": [], "namen": [], **(CFG.get("eigene_kennungen") or {})}
         print(json.dumps(wirksam, ensure_ascii=False))
         sys.exit(0)
     if os.environ.get("CLASSIFY_PROMPT_VORSCHAU") == "1":

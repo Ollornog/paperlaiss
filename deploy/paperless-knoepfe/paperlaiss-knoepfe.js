@@ -216,7 +216,9 @@
     const aus = d.darf_aendern ? "" : " disabled";
     box.innerHTML = '<h6 class="mb-1">paperlaiss — Stammdaten für die KI</h6>' +
       '<div class="small text-muted mb-2">Hilft beim Zuordnen: Kontext und Kennungen gehen in den Prompt, Aliase und Domains in den Abgleich. Gespeichert mit „Save".</div>' +
-      d.felder.map(([name, titel, mehr]) => '<div class="mb-2"><label class="form-label small mb-0">' + esc(titel) + "</label>" +
+      d.felder.map(([name, titel, mehr]) => '<div class="mb-2"><label class="form-label small mb-0">' + esc(titel) +
+        // Von der KI aus einem Dokument nachgetragen: sagen, woher — damit man es prüfen kann.
+        ((d.werte.erfasst || {})[name] ? ' <span class="text-muted">· erfasst: ' + esc(d.werte.erfasst[name]) + "</span>" : "") + "</label>" +
         (mehr ? '<textarea class="form-control form-control-sm" rows="2" data-pl="' + name + '"' + aus + ">" + esc(d.werte[name]) + "</textarea>"
               : '<input class="form-control form-control-sm" data-pl="' + name + '" value="' + esc(d.werte[name]) + '"' + aus + ">") + "</div>").join("");
     if (!d.darf_aendern) return;

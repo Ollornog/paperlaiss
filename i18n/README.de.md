@@ -116,14 +116,29 @@ curl -F "file=@scan.pdf" -H "X-Ingest-Token: geheim-scanner-buero" http://panel:
 Paperless **kann** Korrespondenten nativ nicht um Felder erweitern (Custom Fields hängen nur an
 Dokumenten). paperlaiss löst das mit einem **eigenen Store** (`correspondents.json`, im Panel
 gepflegt), gebunden **per Paperless-Korrespondent-ID**, sodass er eine Umbenennung übersteht. Pro
-Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `uid`, `kontext`, `aliase`.
+Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `ustid`, `iban`, `kontext`, `aliase`.
 
 Gepflegt **in Paperless selbst**: das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten
 einen Abschnitt *paperlaiss* ein (Kontext, Aliase, E-Mail, Mail-Domains, Kundennummer, USt-ID,
 Telefon, Adresse), gespeichert zusammen mit Paperless' *Save* — erlaubt für alle, die den
 Korrespondenten in Paperless ändern dürfen. Die Datei lässt sich auch von außen befüllen (eigenes
-Stammdatensystem, ein Skript). Der Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
-Kennungen im Prompt, `aliase` im Feedback-Loop — präzisere Klassifizierung.
+Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
+
+- **Kandidaten finden, ohne KI-Aufruf.** Vor der Analyse sucht paperlaiss im Text nach den
+  gespeicherten Kennungen *aller* Korrespondenten (USt-ID, IBAN, Mail, Domain, Kundennummer) und im
+  Briefkopf (erste 1000 Zeichen) nach ihren Namen und Aliasen. Kam das Dokument per Mail, zählt auch
+  die Absenderadresse. Alles Gefundene geht mit Kontext und Fundstelle als Kandidat an die Analyse.
+  Die Absender-Mail ist ein starker Kandidat, keine Zuordnung: ein Portal verschickt Dokumente vieler
+  Firmen von einer Adresse. (Bis 2026-09-27 riet ein eigener KI-Aufruf — „Pass 0“ — zuerst einen
+  Absendernamen; die Suche ersetzt ihn.)
+- **Eigene Firma.** `eigene_kennungen` (Namen, USt-IDs, IBANs, Mail-Domains/-Adressen) zählen nie als
+  Absender — sie stehen auf fast jedem eingehenden Dokument. Die Analyse erfährt, wer „wir“ sind, und
+  sucht das *Gegenüber*.
+- **Stammdaten nachtragen.** `stammdaten_erfassen` (Vorgabe an): nach der Zuordnung werden USt-ID,
+  IBAN, Mail/Domain, Telefon, Adresse und Kundennummer des Gegenübers aus dem Dokument **nur in leere
+  Felder** geschrieben, nie überschreibend, mit Herkunft (`erfasst`), die der Paperless-Dialog zeigt.
+  Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem Korrespondenten gehört.
+  Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
 
 ## Deployment (Docker)
 

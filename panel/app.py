@@ -387,7 +387,10 @@ async def korr_schreiben(cid: int, request: Request):
     if not erlaubt:
         raise HTTPException(403, "Diesen Korrespondenten darfst du in Paperless nicht ändern")
     eingabe = await request.json()
-    with _KORR_LOCK:
+    import fcntl
+    # Dieselbe Sperre wie classify.py (stammdaten_schreiben): beide schreiben correspondents.json.
+    with _KORR_LOCK, open(CORR_STORE + ".lock", "a") as sperre:
+        fcntl.flock(sperre, fcntl.LOCK_EX)
         store = _korr_store()
         eintrag = korr_eintrag(store.get(str(cid)), eingabe)
         if eintrag:
