@@ -129,10 +129,15 @@ curl -F "file=@scan.pdf" -H "X-Ingest-Token: secret-office-scanner" http://panel
 Paperless **cannot** natively extend correspondents with fields (custom fields hang off documents
 only). paperlaiss solves this with its **own store** (`correspondents.json`, edited in the panel),
 keyed **by Paperless correspondent ID** so it survives a rename. Per correspondent: `email`,
-`domains`, `telefon`, `adresse`, `kundennummer`, `ustid`, `iban`, `kontext`, `aliase`.
+`domains`, `telefon`, `adresse`, `kundennummer`, `ustid`, `iban`, `kontext`, `aliase`; the identifiers
+(e-mail, domains, phone, customer number, VAT ID, IBAN, aliases) can hold several values each. Phone
+numbers are stored without spaces and without guessing a country: `+49 (0) 30 …` and `0049 30 …`
+become `+4930…`, a national `030 …` stays `030…`. The search matches both forms via the number
+without country code and trunk zero; two international numbers must match completely.
 
 Edited **in Paperless itself**: the buttons script adds a section *paperlaiss* to the correspondent
-edit dialog (context, aliases, e-mail, mail domains, customer number, VAT ID, phone, address),
+edit dialog (context, aliases, e-mail, mail domains, customer number, VAT ID, phone, address; each
+value of a list field as a line with edit and delete, a new one via the input with „+“),
 saved together with Paperless' *Save* — allowed for whoever may change that correspondent in
 Paperless. The file can also be filled from outside (your master data system, a script). The
 classifier uses it in three ways:
@@ -211,10 +216,22 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   links; unset: the address of the Paperless page that called, same origin only). Times follow
   `PAPERLESS_TIME_ZONE`, otherwise `TZ`. The panel must run as a single process (jobs live in memory).
 
-### Mails as documents with header and large images (optional)
+### Pre-consume steps: blank pages, mails as documents (optional)
 
-`deploy/mail-pdf/mailbilder.py` is a pre-consume script (`PAPERLESS_PRE_CONSUME_SCRIPT`, stdlib only)
-for mail rules that consume the **whole mail** (`.eml`, PDF layout "HTML only"). Before Paperless
+`deploy/vorab/vorab.py` is the entry for `PAPERLESS_PRE_CONSUME_SCRIPT` (Paperless takes only one
+script). It runs the steps lying next to it, one after the other; each decides itself whether the
+file concerns it, replaces the working copy only at the end and atomically, and everything always
+exits 0 — no step ever blocks an import. Stdlib only, plus `gs` and `qpdf` from the Paperless image.
+
+**Blank pages** (`leerseiten.py`, switch `leerseiten_entfernen`, on by default): every page of a PDF
+is rendered in greyscale; a page goes only if it is *completely* white — nothing on it but dust
+specks under 1 mm. A page number, a tiny counter, a barcode or a line keeps the page. Measured
+against a real archive (604 PDFs, 1962 pages): exactly the 11 blank backs go, no page with content.
+Never touched: single-page PDFs, encrypted or signed ones, PDFs with embedded files (e-invoices),
+and a document whose pages would all go. The result is deterministic, so Paperless still detects a
+duplicate by its checksum.
+
+**Mails as documents with header and large images** (`mailbilder.py`) for mail rules that consume the **whole mail** (`.eml`, PDF layout "HTML only"). Before Paperless
 renders the mail it adds a small header (from, to, date, subject) and one full-size page per image
 in the mail — photos and scans, not logos, banners or social icons (judged by size, aspect ratio and
 name; measured against a real mailbox: 2 of 37 inline images kept, all logos dropped). Images in
@@ -231,6 +248,8 @@ an earlier rule consumed it in the same run.
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | classifier on/off |
+| `titel_setzen` | `true` | title "Correspondent – document type identifier"; overwritten like the document type (import, AI button, panel — never in a bulk run) |
+| `leerseiten_entfernen` | `true` | remove completely white pages at import (pre-consume step `leerseiten.py`) |
 | `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral models |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour |
 | `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |

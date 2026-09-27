@@ -88,10 +88,17 @@ CFG = {
     # im Dokument findet, werden beim zugeordneten Korrespondenten nachgetragen — nur in LEERE
     # Felder, nie überschreibend, mit Herkunft (`erfasst`).
     "stammdaten_erfassen": True,
+    # Titel aus dem Muster „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27). Überschrieben wird
+    # wie beim Dokumenttyp: beim Import, beim KI-Knopf und im Panel, nie beim Bestands-Durchlauf.
+    "titel_setzen": True,
+    # Komplett weiße Seiten beim Import entfernen — liest nicht classify.py, sondern das Pre-Consume-
+    # Skript deploy/vorab/leerseiten.py aus derselben Config. Hier steht der Schlüssel, damit das
+    # Panel ihn zeigt und speichert.
+    "leerseiten_entfernen": True,
     # Kennungen der eigenen Firma. Sie stehen auf fast jedem eingehenden Dokument (Empfänger-
     # block, Lastschrift) und dürfen nie einem Absender zugeschlagen werden; eine Mail von einer
     # eigenen Domain ist eine Weiterleitung und ordnet nichts zu.
-    "eigene_kennungen": {"ustid": [], "iban": [], "domains": [], "email": [], "namen": []},
+    "eigene_kennungen": {"ustid": [], "iban": [], "domains": [], "email": [], "namen": [], "telefon": []},
     # Wie Pass 1 das Gegenüber bestimmt, wenn eigene Namen gesetzt sind — der Satz nach
     # „… das sind WIR.“. Leer = die eingebaute Regel, geschrieben für eine Firma (Kunden,
     # Ausgangsrechnung, Lohnabrechnung). Ein Haushalt braucht andere Beispiele (eigener Brief,
@@ -158,6 +165,74 @@ CORR_META = _load_json("correspondents.json", {})
 # NameError — Exit 1, und Paperless 3 meldet damit den ganzen Import als gescheitert.
 
 
+# Stammdaten-Felder mit mehreren Werten (seit 2026-09-27 als Liste gespeichert; ältere Einträge
+# haben einen Einzelwert oder eine Kommaliste — beides wird weiter gelesen).
+LISTENFELDER = ("aliase", "email", "domains", "kundennummer", "ustid", "iban", "telefon")
+
+
+def werte(m, feld):
+    """Die Werte eines Stammdaten-Felds als Liste — aus Liste, Einzelwert oder Kommaliste."""
+    v = (m or {}).get(feld)
+    if feld == "ustid" and not v:
+        v = (m or {}).get("uid")                   # Altname vor 2026-09-21
+    teile = v if isinstance(v, (list, tuple)) else re.split(r"[,;\n]", str(v or ""))
+    return [str(t).strip() for t in teile if str(t).strip()]
+
+
+def norm_telefon(v):
+    """Telefonnummer bereinigt, ohne Annahme über das Land: international bleibt international, national
+    bleibt national (PO 2026-09-27: Deutschland und Österreich kommen beide vor — „0“ → „+49“ wäre falsch).
+
+    „+49 (0) 30 123 45“ und „0049 30 12345“ → „+493012345“; „030 12345“ → „03012345“. Buchstaben,
+    Leerzeichen, / - . ( ) fallen weg; eine nach der Landesvorwahl stehen gebliebene 0 („+43 0662 …“)
+    bei AT/DE/CH ebenso. Unter 6 Ziffern: „“ (keine Nummer). Verglichen wird über telefon_kern()."""
+    s = re.sub(r"\(\s*0\s*\)", "", str(v or ""))
+    erstes = re.search(r"[+\d]", s)                  # „Tel. +43 …“: das + vor der ersten Ziffer zählt
+    plus = bool(erstes and erstes.group() == "+")
+    s = re.sub(r"\D", "", s)
+    if plus:
+        s = "+" + s
+    elif s.startswith("00"):
+        s = "+" + s[2:]
+    s = re.sub(r"^\+(43|49|41)0(?=\d)", r"+\1", s)
+    return s if len(re.sub(r"\D", "", s)) >= 6 else ""
+
+
+# Landesvorwahlen mit 1 und 2 Ziffern (ITU E.164); alle anderen haben 3.
+_LAND_1 = {"1", "7"}
+_LAND_2 = {"20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45", "46", "47", "48", "49",
+           "51", "52", "53", "54", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "66", "81", "82",
+           "84", "86", "90", "91", "92", "93", "94", "95", "98"}
+
+
+def telefon_kern(v):
+    """Die Nummer ohne Landesvorwahl und ohne führende 0 — gleich für „+43 662 12345“ und „0662 12345“.
+    So findet die Suche eine Nummer in beiden Schreibweisen, ohne das Land raten zu müssen."""
+    n = norm_telefon(v)
+    if n.startswith("+"):
+        z = n[1:]
+        cc = z[:1] if z[:1] in _LAND_1 else z[:2] if z[:2] in _LAND_2 else z[:3]
+        return z[len(cc):]
+    return n.lstrip("0")
+
+
+def telefon_gleich(a, b):
+    """Dieselbe Nummer? Zwei internationale müssen ganz gleich sein (+43 662 … ist nicht +49 662 …);
+    sonst entscheidet der Kern — „0662 12345“ und „+43 662 12345“ sind gleich. Kern ab 7 Ziffern, damit
+    eine kurze Durchwahl nicht zufällig in einer fremden Nummer steckt."""
+    a, b = norm_telefon(a), norm_telefon(b)
+    if not a or not b:
+        return False
+    if a.startswith("+") and b.startswith("+"):
+        return a == b
+    ka = telefon_kern(a)
+    return len(ka) >= 7 and ka == telefon_kern(b)
+
+
+# Kandidaten für Telefonnummern im Text: optional + oder 00, dann Ziffern mit üblichen Trennern.
+TELEFON_IM_TEXT = re.compile(r"(?<![\w+])(?:\+|00)?\(?\d[\d \t/().\-]{5,22}\d(?!\w)")
+
+
 def cmeta(cid):
     m = CORR_META.get(str(cid))
     return m if isinstance(m, dict) else {}
@@ -167,16 +242,15 @@ def cfull_hint(c):  # Kontext + harte Kennungen (Kundennr/UID) fürs KI-Groundin
     m = cmeta(c["id"]); parts = []
     if m.get("kontext"):
         parts.append(str(m["kontext"]).strip())
-    if m.get("kundennummer"):
-        parts.append("Kundennr " + str(m["kundennummer"]).strip())
-    ustid = m.get("ustid") or m.get("uid")     # uid = Altname vor 2026-09-21
-    if ustid:
-        parts.append("UID " + str(ustid).strip())
+    if werte(m, "kundennummer"):
+        parts.append("Kundennr " + ", ".join(werte(m, "kundennummer")))
+    if werte(m, "ustid"):                       # uid = Altname vor 2026-09-21
+        parts.append("UID " + ", ".join(werte(m, "ustid")))
     return "; ".join(p for p in parts if p)
 
 
 def calias(c):
-    return str(cmeta(c["id"]).get("aliase") or "").strip()
+    return ", ".join(werte(cmeta(c["id"]), "aliase"))
 
 
 # ---- Stammdaten: Mail-Zuordnung, Nachtragen, eigene Kennungen --------------------------------
@@ -219,7 +293,8 @@ def eigene_kennungen(cfg):
             # dessen Name sie enthält, ist bei der Namenssuche kein Kandidat. Gemessen 2026-09-27 an
             # 16 Dokumenten: markiert statt ausgeschlossen füllte er fast jede Kandidatenliste, und die
             # KI griff öfter daneben; ausgeschlossen traf sie so oft wie mit Pass 0.
-            "namen": [set(ctoks(n)) for n in (e.get("namen") or []) if ctoks(n)]}
+            "namen": [set(ctoks(n)) for n in (e.get("namen") or []) if ctoks(n)],
+            "telefon": {norm_telefon(x) for x in werte(e, "telefon")} - {""}}
 
 
 def _domain_passt(dom, domains):
@@ -255,16 +330,21 @@ def stammdaten_treffer(corrs, meta, text, eigene):
     Treffer sind Kandidaten für Pass 1, keine Zuordnung: entscheiden tut die KI."""
     klein = str(text or "").lower()
     kompakt = re.sub(r"[\s.\-/]", "", str(text or "")).upper()
+    tel_im_text = {norm_telefon(t) for t in TELEFON_IM_TEXT.findall(str(text or ""))} - {""}
     aus = []
     for c in corrs:
         m = meta(c["id"])
         gruende = []
-        u = norm_ustid(m.get("ustid") or m.get("uid"))
-        if u and u not in eigene["ustid"] and u in kompakt:
-            gruende.append(f"USt-ID {u}")
-        i = norm_iban(m.get("iban"))
-        if i and i not in eigene["iban"] and i in kompakt:
-            gruende.append("IBAN")
+        for u in {norm_ustid(x) for x in werte(m, "ustid")} - {""}:
+            if u not in eigene["ustid"] and u in kompakt:
+                gruende.append(f"USt-ID {u}")
+        for i in {norm_iban(x) for x in werte(m, "iban")} - {""}:
+            if i not in eigene["iban"] and i in kompakt:
+                gruende.append("IBAN")
+        for t in {norm_telefon(x) for x in werte(m, "telefon")} - {""}:
+            if (not any(telefon_gleich(t, x) for x in eigene.get("telefon", ()))
+                    and any(telefon_gleich(t, x) for x in tel_im_text)):
+                gruende.append(f"Telefon {t}")
         for e in _liste(m.get("email")):
             if (norm_mail(e) and e in klein and e not in eigene["email"]
                     and not _domain_passt(e.split("@")[1], eigene["domains"])):
@@ -273,9 +353,9 @@ def stammdaten_treffer(corrs, meta, text, eigene):
             if (d and "." in d and d not in FREEMAIL and not _domain_passt(d, eigene["domains"])
                     and re.search(r"(?:@|www\.|//)" + re.escape(d) + r"(?![a-z0-9-])", klein)):
                 gruende.append(f"Domain {d}")
-        k = str(m.get("kundennummer") or "").strip()
-        if len(re.sub(r"\W", "", k)) >= 5 and re.search(r"(?<![0-9A-Za-z])" + re.escape(k) + r"(?![0-9A-Za-z])", str(text or "")):
-            gruende.append(f"Kundennummer {k}")
+        for k in werte(m, "kundennummer"):
+            if len(re.sub(r"\W", "", k)) >= 5 and re.search(r"(?<![0-9A-Za-z])" + re.escape(k) + r"(?![0-9A-Za-z])", str(text or "")):
+                gruende.append(f"Kundennummer {k}")
         if gruende:
             aus.append((c, list(dict.fromkeys(gruende))))
     return sorted(aus, key=lambda x: -len(x[1]))
@@ -337,13 +417,12 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle):
     wert = lambda k: "" if is_null(ab.get(k)) else str(ab.get(k)).strip()
 
     def leer(feld):
-        if feld == "ustid":
-            return not (alt.get("ustid") or alt.get("uid"))
-        return not str(alt.get(feld) or "").strip()
+        return not werte(alt, feld)
 
     def setze(feld, w):
         if w and leer(feld) and feld not in geschrieben:
-            neu[feld] = geschrieben[feld] = w
+            geschrieben[feld] = w
+            neu[feld] = [w] if feld in LISTENFELDER else w       # Listenfelder als Liste speichern
             erfasst[feld] = quelle
 
     roh = wert("ustid")
@@ -374,14 +453,29 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle):
         setze("email", m)
         if dom not in FREEMAIL:
             setze("domains", dom)
-    tel = wert("telefon")[:60]
-    if tel and len(re.sub(r"\D", "", tel)) >= 6:
-        setze("telefon", tel)
+    roh = wert("telefon")[:60]
+    if roh:
+        t = norm_telefon(roh)
+        if not t:
+            verworfen["telefon"] = "keine Telefonnummer"
+        elif any(telefon_gleich(t, x) for x in eigene.get("telefon", ())):
+            verworfen["telefon"] = "eigene Telefonnummer"
+        else:
+            setze("telefon", t)
     setze("adresse", wert("adresse")[:300])
     setze("kundennummer", wert("kundennummer")[:60])
     if geschrieben:
         neu["erfasst"] = erfasst
     return neu, geschrieben, verworfen
+
+
+def sperre_oeffnen(pfad):
+    """Die Sperrdatei für flock öffnen — nur lesend (flock braucht kein Schreibrecht), angelegt mit 0666.
+
+    Panel (root) und Klassifizierer (uid 1000) sperren dieselbe Datei. Bis 2026-09-27 öffneten beide
+    mit "a": legte das Panel die Datei zuerst an (root, 0644), scheiterte danach jede Stammdaten-
+    Erfassung des Klassifizierers mit PermissionError — still, nur als Zeile im Log."""
+    return os.fdopen(os.open(pfad, os.O_RDONLY | os.O_CREAT, 0o666), "rb")
 
 
 def stammdaten_schreiben(cid, aenderung):
@@ -393,7 +487,7 @@ def stammdaten_schreiben(cid, aenderung):
     solange beide dasselbe Verzeichnis sehen. Eine kaputte Datei wird NICHT überschrieben."""
     import fcntl
     pfad = os.path.join(SCRIPT_DIR, "correspondents.json")
-    with open(pfad + ".lock", "a") as sperre:
+    with sperre_oeffnen(pfad + ".lock") as sperre:
         fcntl.flock(sperre, fcntl.LOCK_EX)
         try:
             store = json.load(open(pfad, encoding="utf-8"))
@@ -601,7 +695,7 @@ def mistral_chat(messages, max_tokens=900, schema=None, name="antwort"):
 _NULLBAR = lambda t: {"type": [t, "null"]}
 
 
-def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary):
+def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary, mit_titel=False):
     """JSON-Schema der Pass-1-Antwort. Dokumenttyp als Auswahlliste (plus null), Felder als
     bekannte Schlüssel. `additionalProperties` bleibt offen: eigene Prompts verlangen teils
     weitere Schlüssel (summary_long, korrespondent_kontext), die sonst wegfielen. Ein gültiges
@@ -629,6 +723,9 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary):
         props["absender"] = {"type": "object", "additionalProperties": False, "properties": {
             k: _NULLBAR("string") for k in ("ustid", "iban", "email", "telefon", "adresse", "kundennummer")}}
         pflicht.append("absender")
+    if mit_titel:
+        props["titel_kennung"] = _NULLBAR("string")
+        pflicht.append("titel_kennung")
     props["document_type"] = {"type": ["string", "null"], "enum": sorted(typen) + [None]}
     pflicht.insert(0, "document_type")
     return {"type": "object", "properties": props, "required": pflicht, "additionalProperties": True}
@@ -1062,6 +1159,29 @@ def typ_setzen(dt_id, bisher, darf_ueberschreiben):
     return dt_id
 
 
+def titel_bilden(korrespondent, typ, kennung):
+    """Der Titel aus dem Muster „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27), etwa
+    „Beispiel GmbH – Rechnung 12/2026“. Fehlt ein Teil, fällt er weg; ohne Dokumentart UND Kennung
+    gibt es keinen Titel (None) — nur der Name wäre schlechter als der bisherige Titel.
+
+    Die Kennung kommt von der KI; wiederholt sie Absender oder Dokumentart, fällt das weg (auch ein
+    zusammengesetztes Wort wie „Ersatzteilrechnung“ bei einer Rechnung).
+    Paperless erlaubt 128 Zeichen."""
+    k = re.sub(r"\s+", " ", str(kennung or "")).strip(" -–—:·|")
+    for vorn in (typ, korrespondent):
+        if vorn and k.lower().startswith(str(vorn).lower()):
+            k = k[len(vorn):].strip(" -–—:·|")
+    # Wörter, die nur die Dokumentart wiederholen („Kaufvertrag“, „Ersatzteilrechnung“ bei Rechnung).
+    t = str(typ or "").strip().lower()
+    if t:
+        k = " ".join(w for w in k.split() if not w.strip(",.;:").lower().endswith(t)).strip(" -–—:·|")
+    rest = " ".join(x for x in (str(typ or "").strip(), k) if x)
+    if not rest:
+        return None
+    t = f"{str(korrespondent).strip()} – {rest}" if str(korrespondent or "").strip() else rest
+    return t[:128].rstrip()
+
+
 # Der kleine Prompt von Pass 2 als Konstante: der Lauf benutzt ihn, und die Panel-Seite
 # „Ablauf & Prompt" zeigt genau diesen Text. (Pass 0 entfiel am 2026-09-27.)
 PASS2_SYSTEM = ('Du ordnest einen Absender bestehenden Korrespondenten zu. '
@@ -1173,6 +1293,12 @@ def eigene_firma_anweisung(cfg):
             + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. "
             + regel.replace("{ERSTER}", namen[0])
             + " absender enthält NIE unsere eigenen Stammdaten.")
+TITEL_ANWEISUNG = (
+    "\nGib ausserdem titel_kennung = was DIESES Dokument von anderen desselben Absenders und derselben Art "
+    "unterscheidet, 1 bis 5 Wörter, OHNE Absender und OHNE Dokumentart (auch kein Wort, das nur die Art umschreibt, "
+    "wie Ersatzteilrechnung oder Zahlungserinnerung). Bevorzugt die Nummer (Rechnungs-, Vertrags-, Aktenzeichen) "
+    "oder den Zeitraum („12/2026“, „Mai 2026“); Gegenstand oder Betreff nur, wenn es beides nicht gibt. "
+    "null, wenn das Dokument nichts Eindeutiges hergibt.")
 SUMMARY_ANWEISUNG = (
     "\nGib ausserdem summary = TLDR, Länge an das Dokument angepasst: Rechnung/Beleg/kurzer Bescheid → 1 knapper Satz; "
     "Vertrag/Brief → 2-3 Sätze; langer Bericht → 4-6 Sätze. Keine Floskeln, direkt zur Sache.")
@@ -1205,6 +1331,8 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
                       + (" und „Regel zum Gegenüber“" if str(cfg.get("eigene_regel") or "").strip() else "") + ")"))
     if cfg.get("stammdaten_erfassen", True):
         teile.append((ABSENDER_ANWEISUNG, "Absender-Stammdaten (automatisch angehängt, weil „Stammdaten erfassen“ an ist)"))
+    if cfg.get("titel_setzen", True):
+        teile.append((TITEL_ANWEISUNG, "Titel (automatisch angehängt, weil „Titel setzen“ an ist)"))
     if mit_summary:
         teile.append((SUMMARY_ANWEISUNG, "Zusammenfassung (automatisch angehängt, weil ein Zusammenfassungs-Feld eingestellt ist)"))
     return teile
@@ -1450,7 +1578,7 @@ def main():
     NUTZUNG.clear()
     TRACE["ki_nutzung"] = NUTZUNG
     schema1 = pass1_schema(types, [f["name"] for f in ai_flds], CFG["tagging_enabled"],
-                           CFG.get("stammdaten_erfassen", True), bool(summary_fid))
+                           CFG.get("stammdaten_erfassen", True), bool(summary_fid), CFG.get("titel_setzen", True))
     user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
         (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
@@ -1586,8 +1714,24 @@ def main():
             log(f"stammdaten-fail {did}: {e!r}")   # Klassifizierung läuft weiter
             TRACE["stammdaten"] = {"fehler": repr(e)}
 
+    # --- Titel: „Korrespondent – Dokumentart Kennung“, mit dem Korrespondenten und Typ, die tatsächlich
+    # am Dokument stehen werden; überschrieben nur, wo auch der Typ überschrieben werden darf.
+    titel_neu = None
+    if CFG.get("titel_setzen", True) and typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR):
+        _typ_id = typ_setzen(dt_id, doc.get("document_type"), True) or doc.get("document_type")
+        if corr_id in _c_by_id:
+            _kname = _c_by_id[corr_id]["name"]
+        elif corr_id or corr_info.startswith("NEU"):
+            _kname = corr_name
+        else:
+            _kname = cname
+        titel_neu = titel_bilden(_kname, next((n for n, i in types.items() if i == _typ_id), None), prop.get("titel_kennung"))
+        if titel_neu == doc.get("title"):
+            titel_neu = None
+        TRACE["titel"] = {"kennung": prop.get("titel_kennung"), "bisher": doc.get("title"), "neu": titel_neu}
+
     if DRY:
-        out = {"id": did, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
+        out = {"id": did, "title": titel_neu, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
                "summary": summary, "fields": prop.get("fields"), "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -1603,6 +1747,8 @@ def main():
     neuer_typ = typ_setzen(dt_id, doc.get("document_type"), typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR))
     if neuer_typ:
         patch["document_type"] = neuer_typ
+    if titel_neu:
+        patch["title"] = titel_neu
 
     flds = prop.get("fields") or {}
     date_note = None
@@ -1613,7 +1759,7 @@ def main():
     code_flds = {}
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
-    TRACE["writeback"] = {"document_type": dt, "tags": [tagname_by_id.get(i) for i in tag_ids],
+    TRACE["writeback"] = {"document_type": dt, "title": patch.get("title"), "tags": [tagname_by_id.get(i) for i in tag_ids],
                           "new_tags": new_tags, "correspondent": corr_info,
                           "fields_ki": field_log, "summary": summary,
                           "document_date": patch.get("created"), "date_change": date_note}

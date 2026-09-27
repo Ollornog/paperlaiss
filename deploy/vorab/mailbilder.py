@@ -203,7 +203,7 @@ def main():
             with open(tmp, "wb") as f:
                 f.write(neu)
             os.replace(tmp, pfad)
-        print("mailbilder: " + " | ".join(log), file=sys.stderr)
+        print("mailbilder: " + " | ".join(log), flush=True)        # stdout: Paperless loggt es als INFO
     except Exception as e:      # nie den Import aufhalten
         print(f"mailbilder: Fehler, Mail bleibt unverändert: {e!r}", file=sys.stderr)
     return 0

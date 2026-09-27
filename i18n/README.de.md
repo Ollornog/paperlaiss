@@ -127,11 +127,16 @@ curl -F "file=@scan.pdf" -H "X-Ingest-Token: geheim-scanner-buero" http://panel:
 Paperless **kann** Korrespondenten nativ nicht um Felder erweitern (Custom Fields hängen nur an
 Dokumenten). paperlaiss löst das mit einem **eigenen Store** (`correspondents.json`, im Panel
 gepflegt), gebunden **per Paperless-Korrespondent-ID**, sodass er eine Umbenennung übersteht. Pro
-Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `ustid`, `iban`, `kontext`, `aliase`.
+Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `ustid`, `iban`, `kontext`, `aliase`;
+die Kennungen (Mail, Domains, Telefon, Kundennummer, USt-ID, IBAN, Aliase) fassen je mehrere Werte.
+Telefonnummern werden ohne Leerzeichen gespeichert und ohne ein Land zu raten: `+49 (0) 30 …` und
+`0049 30 …` werden `+4930…`, eine nationale `030 …` bleibt `030…`. Die Suche findet beide Formen über
+die Nummer ohne Landesvorwahl und Verkehrsausscheidungsziffer; zwei internationale müssen ganz gleich sein.
 
 Gepflegt **in Paperless selbst**: das Knopf-Skript blendet im Bearbeiten-Dialog eines Korrespondenten
 einen Abschnitt *paperlaiss* ein (Kontext, Aliase, E-Mail, Mail-Domains, Kundennummer, USt-ID,
-Telefon, Adresse), gespeichert zusammen mit Paperless' *Save* — erlaubt für alle, die den
+Telefon, Adresse; bei Listenfeldern jeder Wert als Zeile mit Bearbeiten und Löschen, ein neuer über
+das Eingabefeld mit „+“), gespeichert zusammen mit Paperless' *Save* — erlaubt für alle, die den
 Korrespondenten in Paperless ändern dürfen. Die Datei lässt sich auch von außen befüllen (eigenes
 Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
 
@@ -209,10 +214,22 @@ Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog b
   folgen `PAPERLESS_TIME_ZONE`, sonst `TZ`. Das Panel muss als ein Prozess laufen (Aufträge liegen im
   Speicher).
 
-### Mails als Dokument mit Kopf und großen Bildern (optional)
+### Vorab-Schritte: leere Seiten, Mails als Dokument (optional)
 
-`deploy/mail-pdf/mailbilder.py` ist ein Pre-Consume-Skript (`PAPERLESS_PRE_CONSUME_SCRIPT`, nur
-Standardbibliothek) für Mail-Regeln, die die **ganze Mail** übernehmen (`.eml`, PDF-Layout „nur HTML“).
+`deploy/vorab/vorab.py` ist der Einstieg für `PAPERLESS_PRE_CONSUME_SCRIPT` (Paperless nimmt nur ein
+Skript). Er ruft die Schritte daneben nacheinander auf; jeder entscheidet selbst, ob die Datei ihn
+betrifft, ersetzt die Arbeitskopie nur am Ende und atomar, und alles endet immer mit 0 — kein Schritt
+hält je einen Import auf. Nur Standardbibliothek, dazu `gs` und `qpdf` aus dem Paperless-Abbild.
+
+**Leere Seiten** (`leerseiten.py`, Schalter `leerseiten_entfernen`, Vorgabe an): jede Seite eines PDFs
+wird in Graustufen gerendert; eine Seite fällt nur, wenn sie *komplett* weiß ist — darauf nichts als
+Staub unter 1 mm. Eine Seitenzahl, eine winzige Zählnummer, ein Barcode oder ein Strich lassen sie
+stehen. Gemessen an einem echten Archiv (604 PDFs, 1962 Seiten): genau die 11 leeren Rückseiten
+fallen, keine Seite mit Inhalt. Nie angefasst: PDFs mit einer Seite, verschlüsselte oder signierte,
+PDFs mit eingebetteten Dateien (E-Rechnung) und ein Dokument, dessen Seiten alle fallen würden. Das
+Ergebnis ist deterministisch, Paperless erkennt eine Dublette also weiter an der Prüfsumme.
+
+**Mails als Dokument mit Kopf und großen Bildern** (`mailbilder.py`) für Mail-Regeln, die die **ganze Mail** übernehmen (`.eml`, PDF-Layout „nur HTML“).
 Bevor Paperless die Mail rendert, setzt es einen kleinen Kopf (Von, An, Datum, Betreff) und je Bild der
 Mail eine eigene Seite in voller Größe — Fotos und Scans, keine Logos, Banner oder Social-Symbole
 (geurteilt nach Größe, Seitenverhältnis und Name; gemessen an einem echten Postfach: 2 von 37
@@ -230,6 +247,8 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | Key | Default | Bedeutung |
 |---|---|---|
 | `enabled` | `true` | Klassifizierer an/aus |
+| `titel_setzen` | `true` | Titel „Korrespondent – Dokumentart Kennung“; überschrieben wie der Dokumenttyp (Import, KI-Knopf, Panel — nie im Bestands-Durchlauf) |
+| `leerseiten_entfernen` | `true` | komplett weiße Seiten beim Import entfernen (Vorab-Schritt `leerseiten.py`) |
 | `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral-Modelle |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR-Rescue-Verhalten |
 | `ocr_regeln` | siehe unten | wann ein Text als zu schwach gilt und per OCR neu gelesen wird |

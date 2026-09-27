@@ -6,6 +6,67 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — komplett weiße Seiten beim Import entfernen
+
+- **`deploy/vorab/leerseiten.py`:** Vorab-Schritt (Pre-Consume) für PDFs. Ghostscript rendert jede
+  Seite in Graustufen (150 dpi); eine Seite fällt nur, wenn darauf nichts ist außer Staub — kein
+  zusammenhängender dunkler Fleck ab 1 mm, höchstens 400 dunkle Punkte, Rand 2 % ausgelassen.
+  Seitenzahl, Zählnummer, Barcode oder Strich lassen die Seite stehen. qpdf entfernt die Seiten mit
+  `--deterministic-id` (gleiche Eingabe, gleiche Datei — die Dublettenprüfung bleibt wirksam).
+  Nie angefasst: eine Seite, verschlüsselt, signiert, eingebettete Dateien (E-Rechnung), alle Seiten
+  leer. Schalter `leerseiten_entfernen` (Vorgabe an), im Panel unter „Allgemein“.
+- **Kalibriert an einem echten Archiv:** leere Rückseiten hatten höchstens 35 dunkle Punkte, der
+  größte Fleck 0,85 mm; die knappsten Seiten mit Inhalt (6-stellige Zählnummer in 6 Punkt,
+  Seitenzahl allein) Zeichen ab 1,5 mm. Lauf über alle 604 PDFs (1962 Seiten), nur lesend: genau die
+  11 leeren Seiten wären gefallen, keine mit Inhalt; 44 verschlüsselte und 18 signierte blieben außen vor.
+- **`deploy/vorab/vorab.py`:** Einstieg für `PAPERLESS_PRE_CONSUME_SCRIPT` — Paperless nimmt nur ein
+  Skript. Ruft `mailbilder.py` und `leerseiten.py` nacheinander, endet immer mit 0, Frist je Schritt.
+  **`deploy/mail-pdf/` heißt jetzt `deploy/vorab/`**; wer `mailbilder.py` direkt eingebunden hat,
+  stellt auf `vorab.py` um.
+- Tests: `tests/test_leerseiten.py` (Entscheidung an gebauten Rastern, Schalter, nie den Import
+  aufhalten) und `tests/abbild_leerseiten.py` im Paperless-Abbild (neuer CI-Job `vorab`: Rendern,
+  Entfernen, Stapelgrenzen, deterministisch, alle Ausschlüsse). Acht Mutationen, alle rot.
+
+### Behoben — Stammdaten-Erfassung scheiterte an der Sperrdatei des Panels
+
+- Panel (root) und Klassifizierer (uid 1000) sperren `correspondents.json` über dieselbe Nachbardatei.
+  Beide öffneten sie mit `"a"`; legte das Panel sie zuerst an (root, 0644), scheiterte danach jede
+  Erfassung mit `PermissionError` — nur als `stammdaten-fail` im Log, die Klassifizierung lief weiter.
+  Im Testbett so gefunden. Jetzt öffnen beide die Sperre nur lesend (`flock` braucht kein
+  Schreibrecht) und legen sie für alle lesbar an. Test mit nur lesbarer Sperre, Mutation rot.
+
+### Hinzugefügt — die KI setzt den Titel
+
+- Muster „Korrespondent – Dokumentart Kennung“, etwa „Beispiel GmbH – Rechnung RE-4711“. Die
+  Kennung (Nummer, Zeitraum, sonst Betreff) liefert Pass 1 als `titel_kennung`; Korrespondent und
+  Dokumenttyp sind die, die tatsächlich am Dokument stehen werden. Wörter, die nur die Dokumentart
+  wiederholen („Ersatzteilrechnung“ bei Rechnung), fallen weg; höchstens 128 Zeichen.
+- Überschrieben wie der Dokumenttyp: beim Import, beim KI-Knopf und im Panel, nie im
+  Bestands-Durchlauf. Schalter `titel_setzen` (Vorgabe an). Trace und Trockenlauf zeigen den Titel.
+
+### Geändert — Korrespondenten-Dialog: mehrere Werte je Kennung, Telefonnummern einheitlich
+
+- **Listenfelder:** Aliase, Mail, Domains, Kundennummer, USt-ID, IBAN und Telefon fassen je mehrere
+  Werte. Im Dialog steht jeder Wert als Zeile mit Stift (bearbeiten, Enter übernimmt, Escape bricht
+  ab) und Mülleimer; darunter ein Eingabefeld mit „+“ (auch Enter). Ein doppelter Wert wird nicht
+  angelegt; was eingetippt, aber nicht bestätigt ist, geht beim Speichern mit. Alte Einzelwerte und
+  Kommalisten werden beim Lesen zur Liste. Die Suche im Dokument prüft jeden Wert.
+- **Telefon:** gespeichert ohne Leerzeichen und Buchstaben, `0049`/`+49 (0)` werden `+49`. Eine
+  nationale Nummer bleibt national — kein geratenes Land (Deutschland und Österreich kommen beide
+  vor). Die Suche vergleicht über die Nummer ohne Landesvorwahl und führende Null (ab 7 Ziffern);
+  zwei internationale Nummern müssen ganz gleich sein. Eigene Nummern (`eigene_kennungen.telefon`)
+  zählen nie und werden nicht erfasst.
+
+### Hinzugefügt — Link zum Panel im Profilmenü von Paperless
+
+- „paperlaiss-Panel“ über „Settings“, öffnet einen neuen Tab; nur für Superuser sichtbar (das Panel
+  lässt ohnehin nur die Admin-Gruppe hinein).
+
+### Geändert — TinySesam 0.22.0
+
+- Nur Methoden umbenannt, keine Konfigurationsfelder; paperlaiss ist nicht betroffen. Die Datenbank
+  wird beim Start umgestellt (Schema 12) — vor dem Update sichern, zurück nur per SQL.
+
 ### Behoben — Namensabgleich (Pass 2) ordnete fremden Korrespondenten zu und verteilte deren Stammdaten
 
 - **Sperre hinter der KI-Antwort:** Pass 2 ordnete „Anna Berger“ dem Korrespondenten „Anna Zeller“

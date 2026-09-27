@@ -16,6 +16,9 @@ services:
       - ./paperless-knoepfe/paperlaiss-knoepfe.js:/paperlaiss-knoepfe/paperlaiss-knoepfe.js:ro
     environment:
       PAPERLESS_POST_CONSUME_SCRIPT: /scripts/classify.py
+      # Optional: Vorab-Schritte vor dem Import (leere Seiten, Mails als Dokument). vorab.py,
+      # leerseiten.py und mailbilder.py aus deploy/vorab/ neben classify.py nach ./scripts legen.
+      PAPERLESS_PRE_CONSUME_SCRIPT: /scripts/vorab.py
       # Knöpfe: wo der Browser das Panel erreicht (hinter demselben Proxy genügt ein Pfad).
       PAPERLAISS_URL: /paperlaiss
       CLASSIFY_CONFIG: /scripts/classify-config.json
