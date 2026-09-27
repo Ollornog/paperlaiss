@@ -262,4 +262,36 @@ r.check("Aktivität: Trockenlauf ist eine eigene Art, keine Info",
 r.check("Aktivität: unbekannte Zeile ist ein Hinweis",
         kern.eintrag_lesen("2026-09-20 19:52:14 nachbearbeitung 5: ok")["art"] == "hinweis")
 
+# ---- KI-Knopf: kein Doppelstart, Fortschritt je Schritt
+_j = {5: {"status": "laeuft"}, 6: {"status": "wartet"}, 7: {"status": "fertig"}, 8: {"status": "fehler"}}
+r.check("Knopf: wartende/laufende Dokumente werden nicht noch einmal gestartet, fertige und neue schon",
+        kern.knopf_annehmen(_j, [5, 6, 7, 8, 9]) == ([7, 8, 9], [5, 6]))
+r.check("Knopf: Fortschritt steigt mit den Schritten",
+        kern.knopf_fortschritt("wartet")["prozent"] < kern.knopf_fortschritt("laeuft", "Kandidaten")["prozent"]
+        < kern.knopf_fortschritt("laeuft", "Pass 1")["prozent"] < kern.knopf_fortschritt("laeuft", "Tags & Schreiben")["prozent"]
+        < kern.knopf_fortschritt("fertig")["prozent"] == 100)
+r.check("Knopf: nummerierte Schritte (Feld-Korrektur 2) werden erkannt",
+        kern.knopf_fortschritt("laeuft", "Feld-Korrektur 2")["schritt"] == "Felder korrigieren")
+# Wächter: jeder Schritt, den classify.py meldet, ist der Anzeige bekannt — sonst stünde nach einer
+# Umbenennung still „startet" da.
+import ast as _ast2
+_cl = _ast2.parse((ROOT / "classify.py").read_text(encoding="utf-8"))
+_stufen = []
+for _n in _ast2.walk(_cl):
+    if isinstance(_n, _ast2.Call) and getattr(_n.func, "id", None) == "set_stage" and len(_n.args) == 2:
+        _a = _n.args[1]
+        if isinstance(_a, _ast2.Constant):
+            _stufen.append(_a.value)
+        elif isinstance(_a, _ast2.JoinedStr) and _a.values and isinstance(_a.values[0], _ast2.Constant):
+            _stufen.append(_a.values[0].value.strip())
+_unbekannt = [x for x in _stufen if not any(x.startswith(n) for n, _, _ in kern.KNOPF_SCHRITTE)]
+r.check(f"Knopf: jeder Schritt aus classify.py ist der Anzeige bekannt ({len(_stufen)} gefunden)",
+        len(_stufen) >= 6 and not _unbekannt, str(_unbekannt))
+
+_app = _ast2.parse((ROOT / "panel" / "app.py").read_text(encoding="utf-8"))
+_knopf = next((f for f in _ast2.walk(_app) if isinstance(f, _ast2.AsyncFunctionDef) and f.name == "knopf"), None)
+r.check("Knopf-Endpunkt: nimmt Dokumente nur über die Sperre an (knopf_annehmen unter _JOBS_LOCK)",
+        _knopf is not None and any(isinstance(w, _ast2.With) and "_JOBS_LOCK" in _ast2.unparse(w.items[0].context_expr)
+                                   and "knopf_annehmen" in _ast2.unparse(w) for w in _ast2.walk(_knopf)))
+
 sys.exit(r.done())

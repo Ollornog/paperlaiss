@@ -27,7 +27,7 @@ from fastapi import BackgroundTasks, Body, FastAPI, Request, UploadFile, File, F
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from kern import (KORR_FELDER, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
+from kern import (KORR_FELDER, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
 import exportlogik
 import exportpdf
@@ -375,10 +375,14 @@ async def knopf(request: Request, hintergrund: BackgroundTasks):
     ids = _ids(body.get("docs") or [])
     hinweis = str(body.get("hinweis") or "").strip()[:2000]
     erlaubt, verweigert = knopf_nutzer_rechte(request, ids)
-    for doc in erlaubt:
-        _job(doc, status="wartet", seit=datetime.datetime.now().isoformat(timespec="seconds"))
+    # Prüfen und Belegen unter derselben Sperre: zwei gleichzeitige Klicks starten sonst beide.
+    with _JOBS_LOCK:
+        starten, schon = knopf_annehmen(JOBS, erlaubt)
+        for doc in starten:
+            JOBS.setdefault(doc, {}).update(status="wartet", seit=datetime.datetime.now().isoformat(timespec="seconds"))
+    for doc in starten:
         hintergrund.add_task(knopf_lauf, doc, hinweis)
-    return {"gestartet": erlaubt, "verweigert": verweigert}
+    return {"gestartet": starten, "laeuft_schon": schon, "verweigert": verweigert}
 
 
 _KORR_LOCK = threading.Lock()
@@ -425,7 +429,17 @@ def knopf_status(request: Request, docs: str = ""):
     ids = _ids(docs.split(","))
     erlaubt, _ = knopf_nutzer_rechte(request, ids)
     with _JOBS_LOCK:
-        return {str(d): JOBS.get(d, {}).get("status", "unbekannt") for d in erlaubt}
+        status = {d: JOBS.get(d, {}).get("status", "unbekannt") for d in erlaubt}
+    aus = {}
+    for d, st in status.items():
+        stufe = None
+        if st == "laeuft":
+            try:
+                stufe = json.load(open(os.path.join(RUN_DIR, f"{d}.json"))).get("stage")
+            except (OSError, ValueError):
+                pass
+        aus[str(d)] = knopf_fortschritt(st, stufe)
+    return aus
 
 
 # ---------- Export-Knopf: ein PDF oder einzeln (optional ZIP), mit Inhaltsverzeichnis ----------

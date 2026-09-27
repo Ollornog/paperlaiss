@@ -89,10 +89,11 @@ import contextlib as _ctx, io as _io
 
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
-          dry=True, source="", force=False):
+          dry=True, source="", force=False, korr=None):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
-                                "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ},
+                                "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
+                                "correspondent": korr},
               "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}]},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
@@ -373,6 +374,26 @@ r.check("Schreibstelle: Handaufruf mit FORCE oder FORCE_OCR und Bestands-Durchla
 _tv = _lauf([_ok], typ=1)
 r.check("Verdrahtung: der von Paperless vorbelegte Typ geht als Vorschlag an Pass 1",
         "vorbelegt (nur ein Vorschlag, kann falsch sein): Rechnung" in _tv["chat"][0])
+
+# Neuer Absender auf kurzem, lesbarem Beleg (2026-09-27): die KI erkennt „Beispielportal",
+# kein bestehender passt → neu anlegen. Die alte Faustregel (Text kurz = unsicher) behielt stattdessen
+# den bisherigen Korrespondenten, selbst mit Hinweis.
+_kurz = "Beispielportal Rechnung Nr. 4711 Betrag 29,99 EUR"
+# Wie in Produktion: Pass 2 läuft (ein bestehender ist entfernt ähnlich) und antwortet „keiner".
+_nk = _lauf([{**_ok, "correspondent": "Beispielportal"}, {"match": None}], text=_kurz, dry=False, korr=98,
+            korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}])
+_nk_unl = _lauf([{**_ok, "correspondent": "Beispielportal", "needs_ocr": True},
+                 {**_ok, "correspondent": "Beispielportal", "needs_ocr": True}, {"match": None}], text=_kurz, dry=False, korr=98,
+                korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}])
+r.check("Korrespondent: kurzer, von der KI lesbar gemeldeter Beleg → neuer Absender wird angelegt",
+        ("/correspondents/", {"name": "Beispielportal"}) in _nk.get("send", []), str(_nk.get("send")))
+r.check("Korrespondent: meldet die KI auch nach OCR unlesbar, bleibt der bisherige (kein Anlegen)",
+        not any(p == "/correspondents/" for p, _ in _nk_unl.get("send", []))
+        and all(x.get("correspondent") == 98 for x in _nk_unl.get("patch", [])), str(_nk_unl.get("send")))
+r.check("Korrespondent behalten nur bei KI-Meldung „unlesbar“ und ohne Hinweis",
+        classify.korrespondent_behalten(98, True, "") and not classify.korrespondent_behalten(98, False, "")
+        and not classify.korrespondent_behalten(98, True, "das ist Beispielportal")
+        and not classify.korrespondent_behalten(None, True, ""))
 
 # Portal-Fall (PO 2026-09-27): Die Absender-Mail gehört einem Portal, das Dokumente vieler Firmen
 # verschickt. Die Mail ist dann nur ein Kandidat — nennt Pass 1 die Firma aus dem Text, gilt die.
