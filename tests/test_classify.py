@@ -245,12 +245,20 @@ r.check("Namen: eigene Firma ist bei der Namenssuche kein Kandidat",
         and classify.namens_treffer([{"id": 9, "name": "Eigenfirma e.U."}], lambda c: "", "an Eigenfirma, Musterstadt"))
 _ew = classify.eigene_firma_anweisung({"eigene_kennungen": {"namen": ["Eigenfirma"], "ustid": ["ATU1"]}})
 r.check("Prompt: nennt die eigene Firma samt Kennungen und verlangt das Gegenüber",
-        "Eigenfirma (USt-ID ATU1)" in _ew and "GEGENÜBER" in _ew and "NIE die eigene Firma" in _ew)
+        "Eigenfirma (USt-ID ATU1)" in _ew and "GEGENÜBER" in _ew)
+r.check("Prompt: interne Dokumente dürfen zur eigenen Firma, eine Bank nur als Ausstellerin",
+        "NUR bei internen Dokumenten" in _ew and "unter dem Namen Eigenfirma" in _ew
+        and "nicht weil ihre Bankverbindung" in _ew and "NIE die eigene Firma" not in _ew)
 r.check("Prompt: ohne eigene Firmennamen kein Zusatz", classify.eigene_firma_anweisung({}) == ""
         and not any("Eigene Firma" in (v or "") for _, v in classify.pass1_system_teile({}, {"A": 1}, [], set(), False)))
 r.check("Prompt: der Zusatz steht im gesendeten System-Prompt",
         any(v and v.startswith("Eigene Firma") for _, v in classify.pass1_system_teile(
             {"eigene_kennungen": {"namen": ["Eigenfirma"]}}, {"A": 1}, [], set(), False)))
+r.check("Namen: Zeilen mit Bankdaten zählen nicht, auch wenn sie im Briefkopf stehen",
+        not classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "",
+                                    "Eigenfirma - Testweg 1\nRechnung\nBank Raiffeisenbank IBAN AT00")
+        and classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "",
+                                    "Raiffeisenbank Musterstadt\nKontoauszug Nr. 3"))
 r.check("Namen: nur im Briefkopf — die Bank in der Fußzeile ist kein Kandidat",
         not classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "", "Rechnung " + "x " * 600 + "Bank: Raiffeisenbank"))
 r.check("Namen: alle Wörter ohne Rechtsform, auch über Aliase; halber Name trifft nicht",

@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Gegenüber-Regel aufgeweicht, Bankdaten keine Kandidaten
+
+- „correspondent ist nie die eigene Firma" war zu hart: Bei internen Dokumenten (Lohnabrechnung,
+  Überweisungsliste) wich die KI auf die Bank aus, deren Bankverbindung darauf steht. Jetzt:
+  Absender bei eingehenden, Empfänger bei eigenen Dokumenten an Kunden, die eigene Firma (unter dem
+  ersten Namen aus `eigene_kennungen.namen`) nur bei internen Dokumenten ohne externes Gegenüber, eine
+  Bank nur als Ausstellerin.
+- Die Namenssuche überspringt Zeilen mit Bankdaten (IBAN, BIC, Bank, Konto) — bei kurzen Dokumenten
+  lag die Fusszeile im Briefkopf-Fenster, und die Bank wurde zum einzigen Kandidaten.
+- Stichprobe Testbett (13 Dokumente): interne Dokumente → eigene Firma, eigene Rechnungen/Verträge →
+  Kunde, Lieferanten unverändert; ein Barverkauf ohne Kundennamen landet bei der eigenen Firma.
+
 ### Geändert — TinySesam 0.21.0
 
 - Panel auf TinySesam **0.21.0** (Unterpfad-Montage T-15: Weiterleitungen, `next=` und Logout tragen
