@@ -342,6 +342,30 @@ with _tf.TemporaryDirectory() as _d:
         except Exception:
             _geworfen = True
         r.check("Schreiben: kaputte Datei wird nicht überschrieben", _geworfen and open(_pf).read() == "[kaputt")
+        # Sperrdatei, die das Panel (root) angelegt hat: nur lesbar. flock braucht kein Schreibrecht —
+        # die Erfassung darf daran nicht scheitern (bis 2026-09-27: PermissionError, still im Log).
+        open(_pf, "w").write("{}")
+        os.chmod(_pf + ".lock", 0o444)
+        _flags = []
+        _os_open = os.open
+        def _merken(pfad, flags, *a):
+            if not str(pfad).endswith(".lock"):
+                return _os_open(pfad, flags, *a)
+            _flags.append(flags)
+            if os.geteuid() == 0 and flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND):
+                raise PermissionError(13, "Permission denied (als root nachgestellt)")
+            return _os_open(pfad, flags, *a)
+        os.open = _merken
+        try:
+            _gs2, _ = classify.stammdaten_schreiben(3, lambda alt: ({"ustid": "ATU1"}, {"ustid": "ATU1"}, {}))
+            _fehler = None
+        except Exception as e:
+            _gs2, _fehler = None, e
+        finally:
+            os.open = _os_open
+        r.check("Schreiben: fremde, nur lesbare Sperrdatei — gesperrt und geschrieben, ohne Schreibrecht auf die Sperre",
+                _gs2 == {"ustid": "ATU1"} and _fehler is None
+                and bool(_flags) and not any(f & (os.O_WRONLY | os.O_RDWR | os.O_APPEND) for f in _flags), f"{_fehler!r} {_flags}")
     finally:
         classify.SCRIPT_DIR = _alt_dir
         classify.CORR_META.clear(); classify.CORR_META.update(_alt_meta)
@@ -929,5 +953,82 @@ _sp_korr = [p.get("correspondent") for p in _sp.get("patch", [])]
 r.check("Pass-2-Sperre im Lauf: die KI-Wahl „Anna Zeller“ wird verworfen, der Beleg geht nicht an 192",
         192 not in _sp_korr and (classify.TRACE.get("correspondent") or {}).get("pass2", {}).get("sperre", {}).get("zugelassen") is False,
         f"{_sp_korr} {(classify.TRACE.get('correspondent') or {}).get('pass2', {}).get('sperre')}")
+
+# ---- Telefon: einheitlich speichern und in allen Schreibweisen finden (2026-09-27)
+# Ohne Annahme über das Land (PO: Deutschland und Österreich kommen beide vor — „0“ → „+49“ wäre falsch).
+_tel = [("+49 (0) 30 123 45", "+493012345"), ("0049 30 12345", "+493012345"), ("030 12345", "03012345"),
+        ("+43 0662 12345", "+4366212345"), ("Tel. 0662/12 34 5", "066212345"), ("0043-662-12345", "+4366212345"),
+        ("Tel. +43 662 12345", "+4366212345"), ("12345", ""), ("", "")]
+_telf = [(n, classify.norm_telefon(n), soll) for n, soll in _tel if classify.norm_telefon(n) != soll]
+r.check("Telefon: +49/0049/(0) werden eins, national bleibt national, Buchstaben/Trenner fallen weg", not _telf, str(_telf))
+_gl = [("0662 123456", "+43 662 123456", True), ("0662 123456", "+49 662 123456", True),
+       ("+43 662 123456", "+49 662 123456", False), ("0043 662 123456", "+43 (0) 662 123456", True),
+       ("0123 45", "+43 12345", False), ("0662 123456", "0662 123457", False)]
+_glf = [(a, b, soll) for a, b, soll in _gl if classify.telefon_gleich(a, b) != soll]
+r.check("Telefon gleich: national passt zu jeder Landesvorwahl, zwei internationale nur ganz, kurzer Kern nie",
+        not _glf, str(_glf))
+_meta = {7: {"telefon": ["+43 662 123456"], "iban": ["AT61 1904 3002 3457 3201", "AT48 3200 0000 1234 5864"],
+             "kundennummer": ["K-99881", "7766554"], "ustid": ["ATU99988777"]},
+         8: {"telefon": "0662 999888"},
+         9: {"telefon": ["+49 30 7654321"]}}
+_kd = [{"id": 7, "name": "Beispiel Werkstatt"}, {"id": 8, "name": "Eigenes Büro"}, {"id": 9, "name": "Andere Firma"}]
+_eig_tel = classify.eigene_kennungen({"eigene_kennungen": {"telefon": ["+43 662 999888"]}})
+_tt = classify.stammdaten_treffer(_kd, lambda i: _meta.get(i, {}),
+                                  "Rechnung\nTel.: 0662 / 12 34 56\nFax 0662 999888\nZentrale +43 30 7654321\n"
+                                  "Kd-Nr 7766554\nAT48 3200 0000 1234 5864", _eig_tel)
+_g = dict((c["id"], g) for c, g in _tt)
+r.check("Suche: gespeicherte +43-Nummer wird als „0662 / 12 34 56“ im Text gefunden",
+        "Telefon +43662123456" in _g.get(7, []), str(_tt))
+r.check("Suche: +49-Nummer passt nicht auf dieselben Ziffern mit +43", 9 not in _g, str(_g.get(9)))
+r.check("Suche: mehrere Werte je Feld (zweite IBAN, zweite Kundennummer) werden gefunden",
+        "IBAN" in _g.get(7, []) and "Kundennummer 7766554" in _g.get(7, []), str(_g.get(7)))
+r.check("Suche: eine eigene Telefonnummer zählt nie (auch national und als alter Einzelwert gespeichert)", 8 not in _g, str(_g))
+_nt, _gs, _vw = classify.stammdaten_nachtragen({}, {"telefon": "Tel. +43 (0)662 55 44 33"}, "", _eig_tel, "KI")
+r.check("Erfassen: Telefon einheitlich und als Liste gespeichert", _nt.get("telefon") == ["+43662554433"], str(_nt))
+_nt3, _, _ = classify.stammdaten_nachtragen({}, {"telefon": "0662 55 44 33"}, "", _eig_tel, "KI")
+r.check("Erfassen: nationale Nummer bleibt national (keine geratene Landesvorwahl)", _nt3.get("telefon") == ["0662554433"], str(_nt3))
+_nt2, _, _vw2 = classify.stammdaten_nachtragen({}, {"telefon": "0662 999 888"}, "", _eig_tel, "KI")
+r.check("Erfassen: eigene Telefonnummer wird verworfen", "telefon" not in _nt2 and _vw2.get("telefon") == "eigene Telefonnummer", str(_vw2))
+r.check("Erfassen: ein Listenfeld mit Altwert (Text) gilt als gefüllt",
+        "telefon" not in classify.stammdaten_nachtragen({"telefon": "0662 1"}, {"telefon": "0662 123456"}, "", _eig_tel, "KI")[1])
+
+
+# ---- Titel „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27)
+_tb = [(("Beispiel GmbH", "Rechnung", "12/2026"), "Beispiel GmbH – Rechnung 12/2026"),
+       (("Beispiel GmbH", "Rechnung", "Rechnung RE-4711"), "Beispiel GmbH – Rechnung RE-4711"),
+       (("Beispiel GmbH", "Rechnung", "Beispiel GmbH: Zahlungserinnerung"), "Beispiel GmbH – Rechnung Zahlungserinnerung"),
+       (("Beispiel GmbH", None, "Hagelschaden  Golf"), "Beispiel GmbH – Hagelschaden Golf"),
+       (("", "Bescheid", "Kfz-Steuer 2026"), "Bescheid Kfz-Steuer 2026"),
+       (("Beispiel GmbH", "Brief", None), "Beispiel GmbH – Brief"),
+       (("Beispiel GmbH", "Rechnung", "Ersatzteilrechnung 60565557"), "Beispiel GmbH – Rechnung 60565557"),
+       (("Beispiel GmbH", "Kaufvertrag", "VW Golf Kaufvertrag"), "Beispiel GmbH – Kaufvertrag VW Golf"),
+       (("Beispiel GmbH", None, None), None), (("Beispiel GmbH", None, "  – "), None)]
+_tbf = [(e, classify.titel_bilden(*e), soll) for e, soll in _tb if classify.titel_bilden(*e) != soll]
+r.check("Titel: Muster, doppelte Dokumentart/Absender in der Kennung fallen weg, ohne Typ und Kennung kein Titel",
+        not _tbf, str(_tbf))
+r.check("Titel: höchstens 128 Zeichen (Paperless-Grenze)", len(classify.titel_bilden("A" * 100, "Rechnung", "x" * 100)) == 128)
+_st = classify.pass1_schema({"Rechnung": 1}, ["Betrag"], False, True, True, True)
+r.check("Titel: Schema verlangt titel_kennung, vor dem Dokumenttyp, ohne doppelte Pflichtangabe",
+        "titel_kennung" in _st["required"] and list(_st["properties"])[-1] == "document_type"
+        and len(_st["required"]) == len(set(_st["required"])), str(_st["required"]))
+r.check("Titel: Anweisung im Prompt nur bei eingeschaltetem „Titel setzen“",
+        "titel_kennung" in classify.pass1_system({"titel_setzen": True}, {"Rechnung": 1}, [], set(), False)
+        and "titel_kennung" not in classify.pass1_system({"titel_setzen": False}, {"Rechnung": 1}, [], set(), False))
+_tk = {**_ok, "correspondent": "Beispiel GmbH", "titel_kennung": "RE-4711"}
+_t1 = _lauf([_tk], dry=False, source="knopf", korrespondenten=[{"id": 7, "name": "Beispiel GmbH"}])
+r.check("Titel im Lauf: KI-Knopf schreibt „Beispiel GmbH – Rechnung RE-4711“",
+        (_t1.get("patch") or [{}])[0].get("title") == "Beispiel GmbH – Rechnung RE-4711", str(_t1.get("patch")))
+_t2 = _lauf([_tk], dry=False, source="bulk", force=True, korrespondenten=[{"id": 7, "name": "Beispiel GmbH"}])
+r.check("Titel im Lauf: Bestands-Durchlauf lässt den Titel stehen", "title" not in (_t2.get("patch") or [{}])[0], str(_t2.get("patch")))
+_t3 = _lauf([{**_tk, "correspondent": "Neue Firma"}], dry=False, source="knopf", korrespondenten=[{"id": 7, "name": "Beispiel GmbH"}])
+r.check("Titel im Lauf: neuer Korrespondent steht mit seinem Namen im Titel",
+        (_t3.get("patch") or [{}])[0].get("title") == "Neue Firma – Rechnung RE-4711", str(_t3.get("patch")))
+_alt_ts = classify.CFG.get("titel_setzen")
+classify.CFG["titel_setzen"] = False
+try:
+    _t4 = _lauf([_tk], dry=False, source="knopf", korrespondenten=[{"id": 7, "name": "Beispiel GmbH"}])
+finally:
+    classify.CFG["titel_setzen"] = _alt_ts
+r.check("Titel im Lauf: „Titel setzen“ aus → kein Titel", "title" not in (_t4.get("patch") or [{}])[0], str(_t4.get("patch")))
 
 sys.exit(r.done())

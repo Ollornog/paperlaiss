@@ -7,6 +7,7 @@ geprüft. Bis 2026-09-21 war am Panel nichts getestet.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -244,10 +245,54 @@ r.check("Adressbuch: unbekannte Eingaben werden nicht übernommen", "unbekannt" 
 _ki = {"ustid": "ATU1", "iban": "AT11", "erfasst": {"ustid": "KI · Dok 5", "iban": "KI · Dok 5"}}
 _hand = kern.korr_eintrag(_ki, {"ustid": "ATU1", "iban": "AT22"})
 r.check("Adressbuch: von Hand geänderter Wert verliert den KI-Vermerk, unveränderter behält ihn",
-        _hand["erfasst"] == {"ustid": "KI · Dok 5"} and _hand["iban"] == "AT22", str(_hand))
+        _hand["erfasst"] == {"ustid": "KI · Dok 5"} and _hand["iban"] == ["AT22"], str(_hand))
 _leer = kern.korr_eintrag(_ki, {})
 r.check("Adressbuch: alles geleert → kein verwaister Vermerk", "erfasst" not in _leer, str(_leer))
 r.check("Adressbuch: IBAN ist ein Feld im Dialog", any(f == "iban" for f, _, _ in kern.KORR_FELDER))
+# ---- Mehrere Werte je Feld („+“ im Dialog) und einheitliche Telefonnummern (2026-09-27)
+_mw = kern.korr_eintrag({}, {"telefon": ["+49 (0) 30 123 45", "0049 30 12345", "+49 030 12345", "030 12345", " "],
+                             "iban": ["de89 3704 0044 0532 0130 00"], "ustid": ["atu 123.456.78"],
+                             "email": ["Info@Example.COM"], "domains": ["www.example.com"]})
+r.check("Listenfelder: drei internationale Schreibweisen werden eine, die nationale bleibt national (kein geratenes Land)",
+        _mw.get("telefon") == ["+493012345", "03012345"], str(_mw.get("telefon")))
+r.check("Listenfelder: IBAN in Vierergruppen, USt-ID ohne Trenner, Mail/Domain klein",
+        _mw.get("iban") == ["DE89 3704 0044 0532 0130 00"] and _mw.get("ustid") == ["ATU12345678"]
+        and _mw.get("email") == ["info@example.com"] and _mw.get("domains") == ["example.com"], str(_mw))
+r.check("Listenfelder: alter Einzelwert/Kommaliste wird für den Dialog zur Liste (auch uid → ustid)",
+        kern.korr_anzeige({"email": "a@x.de, b@y.de", "uid": "ATU1"}) == {"email": ["a@x.de", "b@y.de"], "uid": "ATU1", "ustid": ["ATU1"]},
+        str(kern.korr_anzeige({"email": "a@x.de, b@y.de", "uid": "ATU1"})))
+r.check("Listenfelder: ein zweiter Wert zu einem KI-Wert ist eine Handänderung (Vermerk weg)",
+        "erfasst" not in kern.korr_eintrag({"telefon": ["+4366212345"], "erfasst": {"telefon": "KI"}},
+                                           {"telefon": ["+4366212345", "0662 99999"]}))
+r.check("Listenfelder: unveränderte Liste behält den KI-Vermerk (auch in anderer Schreibweise)",
+        kern.korr_eintrag({"telefon": ["+4366212345"], "erfasst": {"telefon": "KI"}},
+                          {"telefon": ["0043 (0) 662 123 45"]}).get("erfasst") == {"telefon": "KI"})
+# Beide Seiten vereinheitlichen gleich: Dialog (kern) und Suche/Erfassung (classify)
+import importlib.util as _ilu
+os.environ.setdefault("CLASSIFY_CONFIG", "/nicht/da.json")
+_cs = _ilu.spec_from_file_location("classify_fuer_panel", Path(__file__).resolve().parent.parent / "classify.py")
+_cl = _ilu.module_from_spec(_cs); _alt_argv = sys.argv; sys.argv = ["x"]; _cs.loader.exec_module(_cl); sys.argv = _alt_argv
+_nummern = ["+49 (0) 30 123 45", "0049 30 12345", "030 12345", "+43 0662 12345", "Tel. 0662/12 34 5", "0043-662-12345",
+            "12345", "", "+41 (0)44 123 45 67", "0170 1234567"]
+r.check("Telefon: Dialog und Klassifizierer vereinheitlichen identisch",
+        all(kern.norm_telefon(n) == _cl.norm_telefon(n) for n in _nummern))
+
+# ---- Sperrdatei nur lesend öffnen (2026-09-27): das Panel läuft als root; legte es die Sperre mit "a"
+# an (root, 0644), scheiterte danach jede Stammdaten-Erfassung des Klassifizierers (uid 1000).
+import fcntl as _fcntl, tempfile as _tfs
+with _tfs.TemporaryDirectory() as _sd:
+    _sp = os.path.join(_sd, "correspondents.json.lock")
+    _mit = []
+    _oo = os.open
+    os.open = lambda p, f, *a: (_mit.append(f), _oo(p, f, *a))[1]
+    try:
+        with kern.sperre_oeffnen(_sp) as _f:
+            _fcntl.flock(_f, _fcntl.LOCK_EX)
+    finally:
+        os.open = _oo
+    r.check("Sperre: angelegt für alle lesbar, geöffnet ohne Schreibrecht, flock klappt",
+            bool(_mit) and not any(f & (os.O_WRONLY | os.O_RDWR | os.O_APPEND) for f in _mit)
+            and (os.stat(_sp).st_mode & 0o044) == 0o044, f"{_mit} {oct(os.stat(_sp).st_mode)}")
 
 # ---- PANEL_PFAD: das Panel unter einem Unterpfad derselben Domain (etwa /paperlaiss hinter Paperless).
 r.check("Pfad: normalisiert, ungültige Werte zählen als leer",

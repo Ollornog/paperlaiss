@@ -356,7 +356,8 @@ KNOTEN_FELDER = {
                                                  ("eigene_kennungen.iban", "Eigene IBANs"),
                                                  ("eigene_kennungen.domains", "Eigene Mail-Domains"),
                                                  ("eigene_kennungen.email", "Eigene Mail-Adressen"),
-                                                 ("eigene_kennungen.namen", "Eigene Namen")]),
+                                                 ("eigene_kennungen.namen", "Eigene Namen"),
+                                                 ("eigene_kennungen.telefon", "Eigene Telefonnummern")]),
     "abgleich": ("Abgleich mit den Korrespondenten", [("korrespondent_beispiele", "Beispielpaare für den Abgleich")]),
     "stammdaten": ("Stammdaten nachtragen", [("stammdaten_erfassen", "Stammdaten erfassen"),
                                              ("eigene_kennungen.ustid", "Eigene USt-IDs"),
@@ -371,7 +372,8 @@ KNOTEN_FELDER = {
     "nachlauf": ("Text lesbar laut KI?", [("ocr_regeln.nach_ki_meldung", "Wenn die KI unlesbaren Text meldet"),
                                           ("ocr_regeln.wenn_kein_typ", "Wenn kein Dokumenttyp erkannt"),
                                           ("ocr_regeln.wenn_kein_korrespondent", "Wenn kein Korrespondent erkannt")]),
-    "schreiben": ("Nach Paperless schreiben", [("manual_fields", "Felder, die die KI nie anfasst"),
+    "schreiben": ("Nach Paperless schreiben", [("titel_setzen", "Titel setzen"),
+                                               ("manual_fields", "Felder, die die KI nie anfasst"),
                                                ("tagging_enabled", "KI vergibt Tags"),
                                                ("reserved_tags", "Reservierte Tags"),
                                                ("summary_field", "Feld für die Zusammenfassung"),
@@ -436,7 +438,7 @@ function zeichnen(){
                ['Eingabe — Nachricht je Dokument',teileHtml(V.nachricht_teile)],
                ['Ausgabe',tabelle({document_type:'Dokumenttyp aus der Liste, oder leer',correspondent:'Name des Absenders, oder leer',
                   fields:'je Feld: Wert · leer (löschen) · „BEHALTEN“',document_date:'tatsächliches Dokumentdatum (JJJJ-MM-TT)',
-                  summary:'kurze Zusammenfassung',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
+                  summary:'kurze Zusammenfassung',titel_kennung:'was dieses Dokument unterscheidet (Nummer, Zeitraum, Betreff) — für den Titel',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
     {phase:'Analysieren',art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),
       was:'Meldet die KI unlesbaren Text, wird die OCR nachgeholt und Pass 1 mit dem neuen Text wiederholt — in derselben Unterhaltung.',
       regeln:[['in diesem Lauf lief die OCR schon','weiter — kein zweites Mal'],
@@ -458,7 +460,7 @@ function zeichnen(){
       stand:[['Stammdaten erfassen',an(CFG.stammdaten_erfassen!==false)]]},
     {phase:'Schreiben',art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       was:'Schreibt das Ergebnis über die API zurück nach Paperless. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
-      text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.'},
+      text:(CFG.titel_setzen!==false?'Titel („Korrespondent – Dokumentart Kennung“), ':'')+'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.'},
     {phase:'Schreiben',art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
       was:'Optional: Ein eigenes Skript bekommt das Ergebnis, etwa für eine Verknüpfung in ein anderes System.',
       text:CFG.nachbearbeitung?'Eingerichtet: <b>'+txt(CFG.nachbearbeitung)+'</b>':'Nicht eingerichtet.'},
@@ -643,6 +645,14 @@ EINSTELLUNGEN = {
     "unsicher_tag": ("Tags", "Tag bei Unsicherheit", "Wird gesetzt, wenn die KI einen neuen Tag vorschlägt. Leer = aus."),
     "manual_fields": ("Felder", "Felder, die die KI nie anfasst",
                       "Namen von Custom Fields, die nur von Hand gepflegt werden (z. B. Bezahlt-Am). Ein Eintrag je Zeile."),
+    "leerseiten_entfernen": ("Allgemein", "Leere Seiten entfernen",
+                             "An: beim Import fallen komplett weiße Seiten aus einem PDF (nur Staub unter 1 mm zählt als "
+                             "weiß; Seitenzahl, Nummer oder Strich bleiben). Nie bei signierten, verschlüsselten PDFs, "
+                             "E-Rechnungen oder wenn alle Seiten leer wären. Wirkt über das Pre-Consume-Skript vorab.py."),
+    "titel_setzen": ("Allgemein", "Titel setzen",
+                     "An: der Titel wird „Korrespondent – Dokumentart Kennung“, z. B. „Beispiel GmbH – Rechnung 12/2026“; "
+                     "die Kennung (Nummer, Zeitraum, Betreff) bestimmt die KI. Überschrieben wie der Dokumenttyp: beim Import, "
+                     "beim KI-Knopf und im Panel, nie beim Bestands-Durchlauf."),
     "summary_field": ("Felder", "Feld für die Zusammenfassung",
                       "Name eines Custom Fields (Langtext), in das die KI eine kurze Zusammenfassung schreibt. Leer = keine."),
     "mail_context_field": ("Felder", "Feld mit Mail-Kontext",
@@ -668,6 +678,8 @@ EINSTELLUNGEN = {
                      "Wie Pass 1 den Korrespondenten wählt, wenn eigene Namen gesetzt sind (der Satz nach „… das sind WIR.“). "
                      "Leer = eingebaute Regel für eine Firma (Kunden, Ausgangsrechnung, Lohnabrechnung). {ERSTER} = erster "
                      "eigener Name. Ein Haushalt nennt hier seine eigenen Fälle (eigener Brief, Lebenslauf, Vollmacht)."),
+    "eigene_kennungen.telefon": ("Korrespondenten", "Eigene Telefonnummern",
+                                 "Stehen auf Dokumenten an uns und zählen nie als Absender (Suche, Erfassung). Eine je Zeile."),
     "eigene_kennungen.email": ("Korrespondenten", "Eigene Mail-Adressen",
                                "Wie die Domains, aber als volle Adresse — für eine eigene Freemail-Adresse (gmail, gmx …), "
                                "deren Domain man nicht sperren kann. Eine je Zeile."),

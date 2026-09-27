@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fachtest: deploy/mail-pdf/mailbilder.py — Mail als Dokument mit Kopf und großen Bildern.
+"""Fachtest: deploy/vorab/mailbilder.py — Mail als Dokument mit Kopf und großen Bildern.
 
 Bildmaße aus Dateiköpfen, das Deko-Urteil (mit den am echten Postfach gemessenen Fällen), die
 Aufbereitung der .eml (Kopf, Bildseiten, Content-IDs, reine Textmail) und dass das Skript nie
@@ -23,12 +23,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 from _kit.report import Report  # noqa: E402
 
-SKRIPT = ROOT / "deploy" / "mail-pdf" / "mailbilder.py"
+SKRIPT = ROOT / "deploy" / "vorab" / "mailbilder.py"
 spec = importlib.util.spec_from_file_location("mailbilder", SKRIPT)
 mb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mb)
 
-r = Report("Fachtest — deploy/mail-pdf/mailbilder.py (Mail-PDF mit Bildern)")
+r = Report("Fachtest — deploy/vorab/mailbilder.py (Mail-PDF mit Bildern)")
 
 
 def png(w, h, auffuellen=0):

@@ -25,6 +25,11 @@
   const MARKE = "paperlaiss-knoepfe";
   const ICON = {
     ki: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.5 2.672a.5.5 0 1 0 1 0V.843a.5.5 0 0 0-1 0zm4.5.035A.5.5 0 0 0 13.293 2L12 3.293a.5.5 0 1 0 .707.707zM7.293 4A.5.5 0 1 0 8 3.293L6.707 2A.5.5 0 0 0 6 2.707zm-.621 2.5a.5.5 0 1 0 0-1H4.843a.5.5 0 1 0 0 1zm8.485 0a.5.5 0 1 0 0-1h-1.829a.5.5 0 0 0 0 1zM13.293 10A.5.5 0 1 0 14 9.293L12.707 8a.5.5 0 1 0-.707.707zM9.5 11.157a.5.5 0 0 0 1 0V9.328a.5.5 0 0 0-1 0zm1.854-5.097a.5.5 0 0 0 0-.706l-.708-.708a.5.5 0 0 0-.707 0L8.646 5.94a.5.5 0 0 0 0 .707l.708.708a.5.5 0 0 0 .707 0l1.293-1.293Zm-3 3a.5.5 0 0 0 0-.706l-.708-.708a.5.5 0 0 0-.707 0L.646 13.94a.5.5 0 0 0 0 .707l.708.708a.5.5 0 0 0 .707 0z"/></svg>',
+    panel: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5"/><path d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0z"/></svg>',
+    plus: '<svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/></svg>',
+    stift: '<svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/></svg>',
+    muell: '<svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>',
+    haken: '<svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.733.733 0 0 1 .01-1.05.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425z"/></svg>',
     export: '<svg width="1.2em" height="1.2em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg>',
   };
 
@@ -441,26 +446,124 @@
     try { d = await panel("/knopf/korrespondent/" + cid); }
     catch (e) { box.innerHTML = '<div class="small text-danger">paperlaiss: ' + esc(e.message) + "</div>"; return; }
     const aus = d.darf_aendern ? "" : " disabled";
+    // Listenfelder (Telefon, Mail, IBAN …): oben die Werte als Text mit Stift und Mülleimer, darunter
+    // ein Eingabefeld mit „+“ für einen neuen Wert (PO 2026-09-27). Der Stift macht aus der Zeile ein
+    // Eingabefeld mit Haken; leer bestätigt heisst löschen.
+    const knopfKlein = (attr, icon, titel) => '<button type="button" class="btn btn-sm btn-link text-secondary p-1" ' +
+      attr + ' title="' + titel + '" aria-label="' + titel + '">' + icon + "</button>";
+    const wertZeile = (wert) => '<div class="d-flex align-items-center border-bottom py-1" data-pl-wert="' + esc(wert) + '">' +
+      '<span class="flex-grow-1 small text-break">' + esc(wert) + "</span>" +
+      (aus ? "" : knopfKlein("data-pl-bearb", ICON.stift, "Bearbeiten") + knopfKlein("data-pl-weg", ICON.muell, "Löschen")) + "</div>";
+    const feld = (name, art) => {
+      const w = d.werte[name];
+      if (art === "liste") {
+        const liste = (Array.isArray(w) ? w : String(w || "").split(/[,;\n]/)).map((x) => String(x).trim()).filter(Boolean);
+        return '<div data-pl-feld="' + name + '">' + [...new Set(liste)].map(wertZeile).join("") + "</div>" +
+          (aus ? (liste.length ? "" : '<div class="small text-muted">—</div>')
+               : '<div class="input-group input-group-sm mt-1"><input class="form-control" data-pl-neu="' + name +
+                 '" placeholder="Hinzufügen …">' + '<button type="button" class="btn btn-outline-primary" data-pl-plus="' + name +
+                 '" title="Hinzufügen" aria-label="Hinzufügen">' + ICON.plus + "</button></div>");
+      }
+      return art === "lang" ? '<textarea class="form-control form-control-sm" rows="2" data-pl="' + name + '"' + aus + ">" + esc(w) + "</textarea>"
+                            : '<input class="form-control form-control-sm" data-pl="' + name + '" value="' + esc(w) + '"' + aus + ">";
+    };
     box.innerHTML = '<h6 class="mb-1">paperlaiss — Stammdaten für die KI</h6>' +
-      '<div class="small text-muted mb-2">Hilft beim Zuordnen: Kontext und Kennungen gehen in den Prompt, Aliase und Domains in den Abgleich. Gespeichert mit „Save".</div>' +
-      d.felder.map(([name, titel, mehr]) => '<div class="mb-2"><label class="form-label small mb-0">' + esc(titel) +
+      '<div class="small text-muted mb-2">Hilft beim Zuordnen: Kontext und Kennungen gehen in den Prompt, Aliase und Domains in den Abgleich. Telefonnummern ohne Leerzeichen, mit Landesvorwahl (+43…) oder national (0…) — gefunden wird beides. Gespeichert mit „Save".</div>' +
+      d.felder.map(([name, titel, art]) => '<div class="mb-2"><label class="form-label small mb-0">' + esc(titel) +
         // Von der KI aus einem Dokument nachgetragen: sagen, woher — damit man es prüfen kann.
         ((d.werte.erfasst || {})[name] ? ' <span class="text-muted">· erfasst: ' + esc(d.werte.erfasst[name]) + "</span>" : "") + "</label>" +
-        (mehr ? '<textarea class="form-control form-control-sm" rows="2" data-pl="' + name + '"' + aus + ">" + esc(d.werte[name]) + "</textarea>"
-              : '<input class="form-control form-control-sm" data-pl="' + name + '" value="' + esc(d.werte[name]) + '"' + aus + ">") + "</div>").join("");
+        feld(name, art) + "</div>").join("");
     if (!d.darf_aendern) return;
+    const liste = (name) => box.querySelector('[data-pl-feld="' + name + '"]');
+    const vorhanden = (name, wert, ausser) => [...liste(name).querySelectorAll("[data-pl-wert]")]
+      .some((z) => z !== ausser && z.dataset.plWert === wert);
+    const hinzu = (name) => {
+      const eing = box.querySelector('[data-pl-neu="' + name + '"]');
+      const wert = eing.value.trim();
+      if (wert && !vorhanden(name, wert)) liste(name).insertAdjacentHTML("beforeend", wertZeile(wert));
+      eing.value = "";
+      eing.focus();
+    };
+    const bearbeiten = (z) => {
+      z.dataset.plAlt = z.dataset.plWert;
+      z.innerHTML = '<div class="input-group input-group-sm"><input class="form-control" data-pl-edit value="' + esc(z.dataset.plWert) + '">' +
+        '<button type="button" class="btn btn-outline-primary" data-pl-ok title="Übernehmen" aria-label="Übernehmen">' + ICON.haken + "</button></div>";
+      z.querySelector("input").focus();
+    };
+    const uebernehmen = (z, abbrechen) => {
+      const name = z.parentElement.dataset.plFeld;
+      const wert = abbrechen ? z.dataset.plAlt : z.querySelector("[data-pl-edit]").value.trim();
+      if (!wert || vorhanden(name, wert, z)) { z.remove(); return; }
+      z.outerHTML = wertZeile(wert);
+    };
+    box.addEventListener("click", (ev) => {
+      const t = ev.target.closest("[data-pl-plus], [data-pl-weg], [data-pl-bearb], [data-pl-ok]");
+      if (!t) return;
+      const z = t.closest("[data-pl-wert]");
+      if (t.dataset.plPlus) hinzu(t.dataset.plPlus);
+      else if (t.hasAttribute("data-pl-weg")) z.remove();
+      else if (t.hasAttribute("data-pl-bearb")) bearbeiten(z);
+      else uebernehmen(z, false);
+    });
+    // Enter im Feld fügt hinzu bzw. übernimmt — und darf nicht Paperless' Formular absenden.
+    box.addEventListener("keydown", (ev) => {
+      const neu = ev.target.closest("[data-pl-neu]"), edit = ev.target.closest("[data-pl-edit]");
+      if (!neu && !edit) return;
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (neu) hinzu(neu.dataset.plNeu); else uebernehmen(edit.closest("[data-pl-wert]"), false);
+      } else if (ev.key === "Escape" && edit) {
+        ev.preventDefault(); ev.stopPropagation();
+        uebernehmen(edit.closest("[data-pl-wert]"), true);
+      }
+    });
     const form = dlg.querySelector("form");
     // Fangphase: vor Paperless' eigenem Speichern, das den Dialog danach schliesst.
     form.addEventListener("submit", () => {
       const daten = {};
       box.querySelectorAll("[data-pl]").forEach((el) => { daten[el.dataset.pl] = el.value; });
+      // Je Listenfeld: die Werte, dazu ein offenes Bearbeiten und was im Eingabefeld steht, aber noch
+      // nicht mit „+“ bestätigt ist — „Save“ soll nichts verwerfen, was sichtbar eingetippt wurde.
+      box.querySelectorAll("[data-pl-feld]").forEach((l) => {
+        daten[l.dataset.plFeld] = [...l.querySelectorAll("[data-pl-wert]")].map((z) => {
+          const e = z.querySelector("[data-pl-edit]");
+          return e ? e.value : z.dataset.plWert;
+        });
+        const neu = box.querySelector('[data-pl-neu="' + l.dataset.plFeld + '"]');
+        if (neu && neu.value.trim()) daten[l.dataset.plFeld].push(neu.value);
+      });
       panel("/knopf/korrespondent/" + cid, daten)
         .then(() => meldung("paperlaiss: Stammdaten gespeichert.", "success"))
         .catch((e) => meldung("paperlaiss: Stammdaten NICHT gespeichert — " + e.message, "danger"));
     }, true);
   }
 
-  function alles() { einfuegenDetail(); einfuegenListe(); einfuegenKorr(); }
+  // ---------- Profil-Menü oben rechts: Link zum paperlaiss-Panel (neuer Tab), nur für Superuser ----------
+  // Das Panel lässt ohnehin nur die Admin-Gruppe hinein — anderen Nutzern zeigte der Link nur eine Absage.
+  let superuser = null;
+  async function einfuegenProfil() {
+    const menu = document.querySelector('[aria-labelledby="userDropdown"]');
+    if (!menu || menu.querySelector("." + MARKE)) return;
+    const einstellungen = [...menu.querySelectorAll("a")].find((a) => /(^|\/)settings$/.test(a.getAttribute("href") || ""));
+    if (!einstellungen) return;
+    if (superuser === null) {
+      superuser = false;
+      try {
+        const r = await fetch(new URL("api/ui_settings/", document.baseURI), { credentials: "include", headers: { Accept: "application/json" } });
+        superuser = r.ok && !!((await r.json()).user || {}).is_superuser;
+      } catch (e) { /* kein Link */ }
+    }
+    if (!superuser || menu.querySelector("." + MARKE)) return;
+    const a = document.createElement("a");
+    a.className = einstellungen.className + " " + MARKE;
+    a.href = PANEL + "/";
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.innerHTML = '<span class="me-2">' + ICON.panel + "</span>paperlaiss-Panel";
+    einstellungen.parentNode.insertBefore(a, einstellungen);
+  }
+
+  function alles() { einfuegenDetail(); einfuegenListe(); einfuegenKorr(); einfuegenProfil(); }
   new MutationObserver(alles).observe(document.documentElement, { childList: true, subtree: true });
   alles();
 })();

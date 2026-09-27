@@ -27,7 +27,7 @@ from fastapi import BackgroundTasks, Body, FastAPI, Request, UploadFile, File, F
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from kern import (KORR_FELDER, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
+from kern import (KORR_FELDER, sperre_oeffnen, korr_anzeige, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
 import exportlogik
 import exportpdf
@@ -413,7 +413,7 @@ def _korr_store():
 def korr_lesen(cid: int, request: Request):
     """Adressbuch-Eintrag für den paperlaiss-Abschnitt im Korrespondenten-Dialog von Paperless."""
     erlaubt, _ = knopf_nutzer_rechte(request, [cid], art="correspondents")
-    return {"felder": [list(f) for f in KORR_FELDER], "werte": _korr_store().get(str(cid), {}),
+    return {"felder": [list(f) for f in KORR_FELDER], "werte": korr_anzeige(_korr_store().get(str(cid), {})),
             "darf_aendern": bool(erlaubt)}
 
 
@@ -425,7 +425,7 @@ async def korr_schreiben(cid: int, request: Request):
     eingabe = await request.json()
     import fcntl
     # Dieselbe Sperre wie classify.py (stammdaten_schreiben): beide schreiben correspondents.json.
-    with _KORR_LOCK, open(CORR_STORE + ".lock", "a") as sperre:
+    with _KORR_LOCK, sperre_oeffnen(CORR_STORE + ".lock") as sperre:
         fcntl.flock(sperre, fcntl.LOCK_EX)
         store = _korr_store()
         eintrag = korr_eintrag(store.get(str(cid)), eingabe)

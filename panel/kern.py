@@ -7,6 +7,7 @@ steht deshalb hier und wird von `app.py` importiert. So ist es testbar, statt un
 bleiben — dieselbe Lehre wie bei `build_cfs` im Klassifizierer.
 """
 import json
+import os
 import re
 
 # Die ID steckt je nach Webhook-Einstellung im Pfad (`{{doc_url}}`) oder als Feld.
@@ -429,35 +430,107 @@ def knopf_rechte(antwort, gewuenscht):
 # Die Felder des Adressbuchs (correspondents.json), die der Korrespondenten-Dialog in Paperless
 # zeigt — Name, Beschriftung, mehrzeilig. Mehrere Werte (Domains, Aliase) stehen kommagetrennt,
 # so liest sie classify.py (calias, Domain-Abgleich).
+# (Feld, Titel, Art) — Art: "text" eine Zeile, "lang" mehrzeilig, "liste" mehrere Werte mit „+“ im Dialog.
+# Listenfelder werden seit 2026-09-27 als Liste gespeichert; ältere Einträge (Einzelwert oder
+# Kommaliste) liest korr_anzeige() weiter.
 KORR_FELDER = (
-    ("kontext", "Kontext für die KI", True),
-    ("aliase", "Andere Schreibweisen (kommagetrennt)", False),
-    ("email", "E-Mail", False),
-    ("domains", "Mail-Domains (kommagetrennt)", False),
-    ("kundennummer", "Unsere Kundennummer dort", False),
-    ("ustid", "USt-ID", False),
-    ("iban", "IBAN", False),
-    ("telefon", "Telefon", False),
-    ("adresse", "Adresse", True),
+    ("kontext", "Kontext für die KI", "lang"),
+    ("aliase", "Andere Schreibweisen", "liste"),
+    ("email", "E-Mail", "liste"),
+    ("domains", "Mail-Domains", "liste"),
+    ("kundennummer", "Unsere Kundennummer dort", "liste"),
+    ("ustid", "USt-ID", "liste"),
+    ("iban", "IBAN", "liste"),
+    ("telefon", "Telefon", "liste"),
+    ("adresse", "Adresse", "lang"),
 )
+_LISTE = {f for f, _, art in KORR_FELDER if art == "liste"}
+
+
+def sperre_oeffnen(pfad):
+    """Die Sperrdatei für flock öffnen — nur lesend (flock braucht kein Schreibrecht), angelegt mit 0666.
+
+    Panel (root) und Klassifizierer (uid 1000) sperren dieselbe Datei. Bis 2026-09-27 öffneten beide
+    mit "a": legte das Panel die Datei zuerst an (root, 0644), scheiterte danach jede Stammdaten-
+    Erfassung des Klassifizierers mit PermissionError — still, nur als Zeile im Log."""
+    return os.fdopen(os.open(pfad, os.O_RDONLY | os.O_CREAT, 0o666), "rb")
+
+
+def norm_telefon(v):
+    """Telefonnummer bereinigt, ohne Annahme über das Land: international bleibt international, national
+    bleibt national (PO 2026-09-27: Deutschland und Österreich kommen beide vor — „0“ → „+49“ wäre falsch).
+
+    „+49 (0) 30 123 45“ und „0049 30 12345“ → „+493012345“; „030 12345“ → „03012345“. Buchstaben,
+    Leerzeichen, / - . ( ) fallen weg; eine nach der Landesvorwahl stehen gebliebene 0 („+43 0662 …“)
+    bei AT/DE/CH ebenso. Unter 6 Ziffern: „“ (keine Nummer). Gleiche Regel wie classify.norm_telefon."""
+    s = re.sub(r"\(\s*0\s*\)", "", str(v or ""))
+    erstes = re.search(r"[+\d]", s)                  # „Tel. +43 …“: das + vor der ersten Ziffer zählt
+    plus = bool(erstes and erstes.group() == "+")
+    s = re.sub(r"\D", "", s)
+    if plus:
+        s = "+" + s
+    elif s.startswith("00"):
+        s = "+" + s[2:]
+    s = re.sub(r"^\+(43|49|41)0(?=\d)", r"+\1", s)
+    return s if len(re.sub(r"\D", "", s)) >= 6 else ""
+
+
+def _liste_von(v):
+    teile = v if isinstance(v, (list, tuple)) else re.split(r"[,;\n]", str(v or ""))
+    return [str(t).strip() for t in teile if str(t).strip()]
+
+
+def _einheitlich(feld, w):
+    """Ein Wert eines Listenfelds in der Form, in der er gespeichert und gesucht wird."""
+    if feld == "telefon":
+        return norm_telefon(w) or w
+    if feld == "email":
+        return w.lower()
+    if feld == "domains":
+        return re.sub(r"^(www\.|@)", "", w.lower())
+    if feld == "ustid":
+        return re.sub(r"[\s.\-/]", "", w).upper()
+    if feld == "iban":
+        i = re.sub(r"\s", "", w).upper()
+        return " ".join(i[k:k + 4] for k in range(0, len(i), 4))
+    return w
+
+
+def korr_anzeige(eintrag):
+    """Ein Eintrag für den Dialog: Listenfelder als Liste, auch aus alten Einzelwerten/Kommalisten."""
+    e = dict(eintrag or {})
+    if not e.get("ustid") and e.get("uid"):
+        e["ustid"] = e["uid"]
+    for f in _LISTE:
+        if f in e:
+            e[f] = _liste_von(e[f])
+    return e
 
 
 def korr_eintrag(alt, eingabe):
     """Einen Adressbuch-Eintrag aus der Formulareingabe bilden.
 
-    Nur bekannte Felder, Werte als getrimmter Text, leere Felder fallen weg. Was der Dialog nicht
-    kennt (`quelle`, `extern_id` aus einem Import), bleibt erhalten — sonst löschte jedes
-    Speichern im Dialog die Herkunft eines importierten Eintrags.
+    Nur bekannte Felder; Text getrimmt; Listenfelder als Liste, je Wert vereinheitlicht (Telefon ohne
+    Leerzeichen, IBAN in Vierergruppen …), doppelte fallen weg; leere Felder fallen weg. Was der
+    Dialog nicht kennt (`quelle`, `extern_id` aus einem Import), bleibt erhalten — sonst löschte
+    jedes Speichern im Dialog die Herkunft eines importierten Eintrags.
     """
     alt = alt or {}
-    neu = {k: v for k, v in alt.items() if k not in {f for f, _, _ in KORR_FELDER}}
+    alt_anz = korr_anzeige(alt)
+    neu = {k: v for k, v in alt.items() if k not in {f for f, _, _ in KORR_FELDER} and k != "uid"}
     erfasst = dict(alt.get("erfasst") or {})
-    for feld, _, _ in KORR_FELDER:
-        wert = str((eingabe or {}).get(feld) or "").strip()
+    for feld, _, art in KORR_FELDER:
+        roh = (eingabe or {}).get(feld)
+        if art == "liste":
+            wert = list(dict.fromkeys(_einheitlich(feld, w[:400]) for w in _liste_von(roh)))
+            vorher = list(dict.fromkeys(_einheitlich(feld, w) for w in alt_anz.get(feld, [])))
+        else:
+            wert = str(roh or "").strip()[:4000]
+            vorher = str(alt.get(feld) or "").strip()
         if wert:
-            neu[feld] = wert[:4000]
+            neu[feld] = wert
         # Von Hand geändert oder geleert: der Wert stammt nicht mehr von der KI.
-        if wert != str(alt.get(feld) or "").strip():
+        if wert != vorher:
             erfasst.pop(feld, None)
     if erfasst:
         neu["erfasst"] = erfasst

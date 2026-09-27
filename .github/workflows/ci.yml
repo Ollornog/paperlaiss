@@ -76,3 +76,18 @@ jobs:
       # Abbild, nicht die stdlib-only-Suite. Geprüft wird deshalb dort, wo er auch läuft.
       - name: Export-Knopf — PDF-Bau im Abbild prüfen
         run: docker run --rm -v "$PWD/tests:/tests:ro" paperlaiss-panel:ci python /tests/abbild_export.py
+
+  vorab:
+    # Die Vorab-Schritte (Pre-Consume) laufen im Paperless-Abbild und brauchen dessen gs und qpdf —
+    # die stdlib-Suite hat beides nicht. Geprüft wird deshalb im Abbild, in derselben Version wie in
+    # den Installationen; beim Paperless-Update hier mitziehen.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Leerseiten — Rendern und Entfernen im Paperless-Abbild prüfen
+        run: >-
+          docker run --rm --entrypoint python3
+          -v "$PWD/tests:/tests:ro" -v "$PWD/deploy:/deploy:ro"
+          ghcr.io/paperless-ngx/paperless-ngx:3.2.1 /tests/abbild_leerseiten.py
