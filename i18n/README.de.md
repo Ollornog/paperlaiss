@@ -203,7 +203,7 @@ Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog b
   wegzulassen. Status und Download prüfen bei jedem Abruf erneut. Auch die Namen (Korrespondent, Typ,
   Felder) kommen über die Sitzung des Nutzers; die PDFs lädt das Panel mit seinem Token.
 - Einstellungen am Panel: `EXPORT_MAX_DOKUMENTE` (Vorgabe 1000), `EXPORT_MAX_MB` (2000, Summe der
-  PDFs), `EXPORT_PARALLEL` (1), `EXPORT_SPEICHER_MB` (10000 — alle fertigen Exporte zusammen; die ältesten fallen zuerst), `EXPORT_AUFBEWAHRUNG_MIN` (1440 = 24 h — danach sind Ergebnis und Dateien
+  PDFs), `EXPORT_PARALLEL` (1), `EXPORT_SPEICHER_MB` (10000 — alle fertigen Exporte zusammen; die ältesten fallen zuerst), `EXPORT_AUFBEWAHRUNG_MIN` (20 Minuten — danach sind Ergebnis und Dateien
   gelöscht), `EXPORT_TMP` (Ordner für Zwischendateien), `PAPERLESS_PUBLIC_URL` (Adresse von Paperless
   für die Links; leer: die Adresse der aufrufenden Paperless-Seite, nur vom selben Ursprung). Uhrzeiten
   folgen `PAPERLESS_TIME_ZONE`, sonst `TZ`. Das Panel muss als ein Prozess laufen (Aufträge liegen im

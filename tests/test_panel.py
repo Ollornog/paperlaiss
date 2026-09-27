@@ -152,6 +152,8 @@ r.check("Anmeldung: über http kein Secure-Cookie", _pw["tinysesam"]["cookie_sec
 r.check("Anmeldung: Origin und rp_id aus der Basisadresse",
         _pw["tinysesam"]["origin"] == "http://192.0.2.10:8400" and _pw["tinysesam"]["rp_id"] == "192.0.2.10")
 r.check("Anmeldung: keine Selbstregistrierung", _pw["tinysesam"]["allow_signup"] is False)
+r.check("Anmeldung: kein Einmal-Token für den TinySesam-Admin (sonst steht er im Container-Log)",
+        _pw["tinysesam"].get("admin_claim_ttl_min") == 0)
 r.check("Anmeldung: Seite trägt den Projektnamen", _pw["tinysesam"]["rp_name"] == "paperlaiss")
 r.check("Anmeldung: Erst-Admin wird übergeben", _pw["admin"] == ("admin", "x"))
 _oidc = _ae({"PANEL_AUTH": "tinysesam", "PANEL_BASE_URL": "https://panel.example.com/",
