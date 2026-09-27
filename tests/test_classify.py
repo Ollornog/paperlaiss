@@ -57,6 +57,8 @@ r.check("OCR-Regel: Schwelle aus der Config", classify.ocr_gruende(
 r.check("OCR-Regel: eigene Schlüsselwörter", classify.ocr_gruende(
     "Lorem ipsum dolor sit amet consectetur " * 12,
     {"ocr_min_len": 300, "ocr_regeln": {"schluesselwoerter": ["lorem", "dolor"]}}) == [])
+r.check("OCR-Regel: Schlüsselwörter als ganze Wörter (' der ' trifft nicht in 'oder')",
+        classify.ocr_regeln({})["schluesselwoerter"][0] == " der ")
 r.check("OCR-Regel: altes ocr_min_len gilt weiter, wenn min_zeichen fehlt",
         classify.ocr_regeln({"ocr_min_len": 123})["min_zeichen"] == 123)
 

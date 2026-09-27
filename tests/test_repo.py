@@ -79,11 +79,14 @@ r.check(f"keine private Infrastruktur ({len(POLICY['private_muster'])} Muster"
 
 # ---- Nur neutrale Beispieladressen
 # api.mistral.ai ist der echte LLM-Endpunkt, img.shields.io liefert die README-Badges,
-# flaticon.com trägt den lizenzpflichtigen Bildnachweis fürs Logo —
-# alles gehört zum Werkzeug, nicht zur privaten Infrastruktur.
+# flaticon.com trägt den lizenzpflichtigen Bildnachweis fürs Logo,
+# tailwindcss.com steht im Lizenzkopf des vendorten C22-Stylesheets und scripts.sil.org im
+# OFL-Lizenztext der Schrift Inter (panel/static/c22/) — beides Pflichthinweise fremder Lizenzen.
+# Alles gehört zum Werkzeug, nicht zur privaten Infrastruktur.
 adressen = hygiene.pruefe_adressen(str(ROOT), DATEIEN, POLICY,
                                    zusaetzliche_hosts=[r"mistral\.ai", r"img\.shields\.io",
-                                                       r"(?:www\.)?flaticon\.com"])
+                                                       r"(?:www\.)?flaticon\.com",
+                                                       r"tailwindcss\.com", r"scripts\.sil\.org"])
 r.check("nur neutrale Beispieladressen", not adressen, " | ".join(sorted(set(adressen))[:4]))
 
 # ---- ... und auch keine BLANKEN Hostnamen ohne `https://` davor (Kit 0.14.0)

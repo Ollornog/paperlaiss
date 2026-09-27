@@ -6,6 +6,29 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Panel neu auf C22: Aktivität mit Filtern, Lauf als Entscheidungsbaum, Ablauf-Editor
+
+- **Aussehen aus C22** (vendort unter `panel/static/c22/`, `scripts/vendor-c22.sh`, mit Herkunft
+  und dem OFL-Lizenztext der Schrift Inter). Gleiche Navigation auf jeder Seite, die aktive
+  hinterlegt. Wächter `tests/test_c22_klassen.py`: jede Klasse und Variante muss im Pack stehen.
+- **Aktivität:** Kennzahlen und Verlauf filtern die Liste (Filter in der Adresse, Zurück hebt ihn
+  auf), 100 Einträge je Seite (`/api/aktivitaet`, Logik `kern.aktivitaet()`); eine Zeile öffnet den
+  Lauf mit Entscheidungsbaum, Prompt, Ausgabe und OCR-Text als Markdown.
+- **Ablauf & Prompt:** Entscheidungsbaum mit großen Pfeilen; ein Klick auf einen Knoten bearbeitet
+  seine Einstellungen, auch den Prompt.
+- **Einstellungen/Config:** das Panel zeigt die wirksame Config (Datei + Vorgaben,
+  `CLASSIFY_DUMP_CONFIG=1`) und schreibt beim Speichern nur geänderte Schlüssel.
+- **Entfernt:** Korrespondenten-Seite samt Zusammenführen (Stammdaten gehören nach Paperless bzw.
+  ins eigene System), `/api/stats`, `/api/feed`, `/api/correspondents*`; `/trace/{id}` leitet in
+  die Aktivität um.
+
+### Behoben — Läufe mit OCR fehlten bei „klassifiziert"
+
+- `log_art()` suchte Teiltexte der Reihe nach; die Erfolgszeile eines Laufs mit OCR
+  („OK 913 | … | OCR-rescue(340)") traf zuerst „OCR-rescue". Jetzt entscheidet das erste Wort.
+- Die OCR-Schlüsselwörter verloren in PR #58 ihre Leerzeichen (`' der '` → `der`, traf dann auch
+  „oder"); wieder wörtlich.
+
 ### Geändert — Knöpfe auch in der Mehrfachauswahl, „Suggest" ausgeblendet
 
 - KI/OCR stehen jetzt auch in der Leiste der Mehrfachauswahl und gelten für alle markierten

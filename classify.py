@@ -31,6 +31,7 @@ Env-Schalter:
   CLASSIFY_SOURCE=redo|manual|bulk   nur fürs Trace/Log
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
+  CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
 """
 import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile, subprocess
 
@@ -348,7 +349,9 @@ def ctoks(s):
 OCR_REGELN_VORGABE = {
     "min_zeichen": None,              # None = ocr_min_len (aeltere Configs)
     "min_schluesselwoerter": 2,       # so viele Allerweltswoerter muessen vorkommen …
-    "schluesselwoerter": [t.strip() for t in TOKENS],
+    # Wörtlich, MIT Leerzeichen: ' der ' soll „der" als Wort treffen, nicht „oder" oder „Kinder".
+    # (PR #58 hatte sie per strip() gekürzt — die Regel wurde dadurch unbemerkt lockerer.)
+    "schluesselwoerter": list(TOKENS),
     "max_zeichen_je_wort": 40,        # … und auf so viele Zeichen mindestens ein echtes Wort
     "max_muell_anteil": 0.25,         # Anteil von Zeichen, die in keinem Text vorkommen (Zeichensalat)
     # Nach Pass 1 (die KI hat den Text gesehen):
@@ -378,7 +381,7 @@ def ocr_gruende(content, cfg):
         return [f"zu kurz ({len(c)} < {r['min_zeichen']} Zeichen)"]
     gruende = []
     cl = c.lower()
-    treffer = sum(1 for t in r["schluesselwoerter"] if t and t.lower() in cl)
+    treffer = sum(1 for t in r["schluesselwoerter"] if t.strip() and t.lower() in cl)
     if treffer < r["min_schluesselwoerter"]:
         gruende.append(f"zu wenig bekannte Wörter ({treffer} < {r['min_schluesselwoerter']})")
     woerter = re.findall(r"[a-zA-ZäöüÄÖÜß]{3,}", c)
@@ -687,7 +690,7 @@ def nur_ocr(did, doc):
     if len(new) > 40:
         patch["content"] = new
         TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen", "chars": len(new),
-                        "vorher": len(content), "excerpt": new[:600]}
+                        "vorher": len(content), "excerpt": new[:8000]}
         log(f"OCR-neu {did}: {len(content)} → {len(new)} Zeichen")
     elif "ocr" not in TRACE:
         TRACE["ocr"] = {"triggered": True, "grund": "nur Text neu lesen",
@@ -840,7 +843,7 @@ def main():
                 if not DRY:
                     send(f"/documents/{did}/", {"content": new}, "PATCH")
                 content = new; ocr_note = f"OCR-rescue({len(new)})"
-                TRACE["ocr"] = {"triggered": True, "grund": grund, "chars": len(new), "excerpt": new[:600]}
+                TRACE["ocr"] = {"triggered": True, "grund": grund, "chars": len(new), "excerpt": new[:8000]}
                 log(f"OCR-rescue {did}: {len(new)} Zeichen")
             else:
                 TRACE["ocr"] = {"triggered": True, "grund": grund, "verworfen": "neuer Text nicht besser", "chars": len(new)}
@@ -974,7 +977,7 @@ def main():
                 content = new
                 ocr_note = (ocr_note + " " if ocr_note else "") + f"OCR-nachgeholt({len(new)})"
                 TRACE["ocr"].update({"triggered": True, "grund": "nach Pass 1: " + "; ".join(nachher),
-                                     "chars": len(new), "excerpt": new[:600]})
+                                     "chars": len(new), "excerpt": new[:8000]})
                 log(f"OCR-nachgeholt {did}: {'; '.join(nachher)} → {len(new)} Zeichen")
                 messages.append({"role": "assistant", "content": assistant_raw})
                 messages.append({"role": "user", "content":
@@ -1119,6 +1122,16 @@ def main():
 # Nur beim direkten Aufruf ausführen (Post-Consume / manuell / Panel). So bleibt das Modul
 # importierbar — die Tests prüfen die reinen Hilfsfunktionen, ohne main() oder sys.exit auszulösen.
 if __name__ == "__main__":
+    if os.environ.get("CLASSIFY_DUMP_CONFIG") == "1":
+        wirksam = {k: v for k, v in CFG.items() if not k.startswith("api_key")}
+        regeln = ocr_regeln(CFG)
+        if (CFG.get("ocr_regeln") or {}).get("min_zeichen") is None:
+            # Nicht eigens gesetzt: dann gilt ocr_min_len. Nicht als Wert ausgeben, sonst schriebe
+            # ein Speichern im Panel die Zahl fest und ocr_min_len wirkte nie wieder.
+            regeln.pop("min_zeichen")
+        wirksam["ocr_regeln"] = regeln
+        print(json.dumps(wirksam, ensure_ascii=False))
+        sys.exit(0)
     if os.environ.get("CLASSIFY_PROMPT_VORSCHAU") == "1":
         print(json.dumps(prompt_vorschau(), ensure_ascii=False))
         sys.exit(0)

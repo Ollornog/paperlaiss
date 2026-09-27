@@ -20,7 +20,7 @@ back through the Paperless REST API.
 
 The classifier is **stdlib-only** — no packages to install — and **tenant-agnostic**: every field
 and tag is resolved by *name* against the API, and every behaviour is a switch in the config. An
-optional FastAPI panel adds a dashboard and an ingest endpoint.
+optional FastAPI panel adds an admin view and an ingest endpoint.
 
 ---
 
@@ -69,16 +69,23 @@ CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # force Mistral OCR
 
 ## Panel
 
-A lean **FastAPI dashboard** (a standalone building block, not a fork), meant to run as its own
-container in the same Docker network, sharing the `scripts/` volume:
+An admin panel for when something hangs or needs adjusting — paperlaiss is middleware, master data
+(tags, correspondents) stays in Paperless or your own system. A FastAPI container in the same
+Docker network, sharing the `scripts/` volume. Its look comes from the
+[C22](https://github.com/Ollornog/C22) design system, vendored under `panel/static/c22/`
+(`scripts/vendor-c22.sh`); `tests/test_c22_klassen.py` checks every class against it.
 
-- **Dashboard** (`/`) — live status ("running now"), counters (classified / OCR rescues / repaired
-  / errors / skipped), an activity feed where every document ID opens a **trace inspector**.
+- **Activity** (`/`) — five counters and a 30-day chart that **filter** the list (the filter lives in
+  the address, so *Back* undoes it), 100 entries per page. A row opens the **run**: decision tree,
+  prompt, AI output, and the OCR text rendered as Markdown.
+- **Flow & prompt** (`/ablauf`) — the path of a document as a decision tree; clicking a node edits
+  the settings behind it (like a node in n8n), including the Pass-1 prompt, shown exactly as it is
+  sent (`CLASSIFY_PROMPT_VORSCHAU=1`).
+- **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
+  saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
-- **Flow & prompt** (`/ablauf`) — every step of a run with the current settings, and the Pass-1 system
-  prompt exactly as it is sent (built by `classify.py` itself: `CLASSIFY_PROMPT_VORSCHAU=1`).
-- **JSON API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
-  `/api/config` (GET/POST). A higher-level platform can consume the same endpoints.
+- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
+  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau`.
 - **Sign-in** (`PANEL_AUTH`):
   - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.
   - `none` — no sign-in of its own, because one sits in front of it (reverse proxy with forward-auth).
@@ -109,8 +116,8 @@ only). paperlaiss solves this with its **own store** (`correspondents.json`, edi
 keyed **by Paperless correspondent ID** so it survives a rename. Per correspondent: `email`,
 `domains`, `phone`, `address`, `customer_number`, `vat_id`, `context`, `aliases`.
 
-Edited in the panel under **`/korrespondenten`** (all correspondents plus an edit dialog). The
-classifier uses it for grounding: `domains` to match senders, `context` and the identifiers in the
+The file is filled from outside (your master data system, a script); the panel no longer edits it.
+The classifier uses it for grounding: `domains` to match senders, `context` and the identifiers in the
 prompt, `aliases` in the feedback loop — sharper classification.
 
 ## Deployment (Docker)

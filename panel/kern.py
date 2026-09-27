@@ -45,46 +45,6 @@ def doc_id_aus_webhook(rohtext):
     return None
 
 
-# Felder des Korrespondent-Stores, die beim Zusammenführen als Liste behandelt werden:
-# hier gehen Werte nicht verloren, sondern werden vereinigt.
-LISTENFELDER = ("domains", "aliase")
-
-
-def merge_metadaten(ziel, quellen, listenfelder=LISTENFELDER):
-    """Mehrere Store-Einträge zu einem verschmelzen.
-
-    Regeln, in dieser Reihenfolge:
-      1. Was im ZIEL steht, bleibt. Wer zwei Kundennummern hat, will die des Ziels behalten —
-         alles andere wäre eine stille Entscheidung über Kundendaten.
-      2. Leere Zielfelder werden aus der ersten Quelle gefüllt, die etwas hat.
-      3. Listenfelder (Domains, Aliase) werden VEREINIGT statt überschrieben. Genau dafür sind
-         sie da: Ein zusammengeführter Korrespondent soll unter allen bisherigen Namen und
-         Absenderdomains wiedergefunden werden, sonst legt der Feedback-Loop ihn neu an.
-
-    Die Reihenfolge der Listeneinträge bleibt stabil (Ziel zuerst, dann Quellen), Dubletten
-    fallen raus — ohne Rücksicht auf Groß-/Kleinschreibung, aber mit der zuerst gesehenen
-    Schreibweise.
-    """
-    ergebnis = dict(ziel or {})
-    for feld in listenfelder:
-        gesehen, werte = set(), []
-        for eintrag in [ziel or {}] + list(quellen or []):
-            for teil in str((eintrag or {}).get(feld) or "").split(","):
-                teil = teil.strip()
-                if teil and teil.lower() not in gesehen:
-                    gesehen.add(teil.lower())
-                    werte.append(teil)
-        if werte:
-            ergebnis[feld] = ", ".join(werte)
-    for quelle in (quellen or []):
-        for feld, wert in (quelle or {}).items():
-            if feld in listenfelder:
-                continue
-            if not str(ergebnis.get(feld) or "").strip() and str(wert or "").strip():
-                ergebnis[feld] = wert
-    return {k: v for k, v in ergebnis.items() if str(v or "").strip()}
-
-
 def feld_typ(wert):
     """Welches Eingabeelement passt zu diesem Konfigurationswert?
 
@@ -167,7 +127,28 @@ LOG_ARTEN = (
 
 
 def log_art(zeile):
-    """Welche Art von Ereignis beschreibt diese Logzeile?"""
+    """Welche Art von Ereignis beschreibt diese Logzeile?
+
+    Entscheidend ist das ERSTE Wort — es nennt das Ereignis. Bis 2026-09-27 wurde nur nach
+    Teiltexten gesucht, und die Erfolgszeile eines Laufs mit OCR („OK 913 | … | OCR-rescue(340)")
+    traf zuerst auf „OCR-rescue": jeder Lauf mit OCR fehlte bei „klassifiziert" und zählte doppelt
+    als OCR. Die Teiltextsuche bleibt als Rückfall für Zeilen ohne bekanntes erstes Wort.
+    """
+    erstes = (zeile or "").split(maxsplit=1)[0] if (zeile or "").strip() else ""
+    if erstes == "OK":
+        return "klassifiziert"
+    if erstes == "VORSCHLAG":
+        return "vorschlag"
+    if erstes == "skip":
+        return "uebersprungen"
+    if erstes == "repariert":
+        return "repariert"
+    if erstes.startswith("FEHLER") or erstes.endswith("-fail") or erstes.endswith("fehlgeschlagen"):
+        return "fehler"
+    if erstes.startswith("OCR-"):
+        return "ocr"
+    if erstes == "DRY":
+        return None
     for muster, art in LOG_ARTEN:
         if muster in zeile:
             return art
@@ -374,3 +355,61 @@ def ausloeser_auswerten(tags, custom_fields, redo_id, ocr_id, hinweis_fid, marke
         patch["custom_fields"] = [c for c in cfs if c.get("field") != hinweis_fid]
     modus = "neu" if (neu or hinweis) else "nur_ocr" if ocr else None
     return modus, hinweis, patch
+
+
+# Die fünf Arten, die das Panel oben als Kennzahl zeigt und nach denen es filtert — dieselbe
+# Einordnung wie log_art(), damit Zahl und gefilterte Liste nie auseinanderlaufen.
+KENNZAHL_ARTEN = ("klassifiziert", "ocr", "repariert", "fehler", "uebersprungen")
+_DOC = None
+
+
+def eintrag_lesen(zeile):
+    """Eine Protokollzeile als Eintrag für die Aktivitätsliste — oder None ohne Zeitstempel.
+
+    Die Rohzeile ist für den Klassifizierer geschrieben („OK 913 | exakt='X' id=13 | typ=21 | …").
+    Für die Liste werden die Teile herausgelöst, die man beim Überfliegen braucht; die Rohzeile
+    bleibt als `text` erhalten, damit nichts verloren geht.
+    """
+    import re
+    global _DOC
+    if _DOC is None:
+        _DOC = re.compile(r"^\S+(?:\s+\S+)?\s+(\d+)\b")
+    if len(zeile) < 20 or zeile[4] != "-" or zeile[7] != "-" or zeile[13] != ":":
+        return None
+    rest = zeile[20:].strip()
+    art = log_art(rest) or "info"
+    m = re.match(r"^(?:DRY\s+)?[A-Za-z-]+\s+(\d+)\b", rest)
+    doc = int(m.group(1)) if m else None
+    korr = re.search(r"(exakt|NEU|kandidat\w*)='([^']*)'", rest)
+    typ = re.search(r"\btyp=(\d+|[^|\s][^|]*?)\s*(?:\||$)", rest)
+    ocr = re.search(r"(OCR-[a-z]+\((\d+)\))", rest)
+    return {"ts": zeile[:19], "tag": zeile[:10], "art": art, "doc": doc,
+            "korrespondent": korr.group(2) if korr else None,
+            "korrespondent_neu": bool(korr and korr.group(1) == "NEU"),
+            "typ": typ.group(1).strip() if typ else None,
+            "ocr": ocr.group(1) if ocr else None,
+            "text": rest[:400]}
+
+
+def aktivitaet(zeilen, art=None, tag=None, doc=None, seite=1, je=100):
+    """Die Aktivitätsliste, neueste zuerst, gefiltert und in Seiten zu `je` Einträgen.
+
+    Filter lassen sich kombinieren (Art UND Tag UND Dokument). `seite` wird in den gültigen
+    Bereich gezogen, damit ein veralteter Link auf „Seite 9" nach einem Filter nicht ins Leere
+    zeigt. `kennzahlen` zählt über ALLE Zeilen, nicht über die gefilterten — die Kästen oben
+    sind die Einstiege in die Filter und dürfen nicht mitschrumpfen.
+    """
+    alle = [e for e in (eintrag_lesen(z) for z in (zeilen or [])) if e]
+    kennzahlen = {a: 0 for a in KENNZAHL_ARTEN}
+    for e in alle:
+        if e["art"] in kennzahlen:
+            kennzahlen[e["art"]] += 1
+    treffer = [e for e in reversed(alle)
+               if (not art or e["art"] == art) and (not tag or e["tag"] == tag)
+               and (doc is None or e["doc"] == doc)]
+    je = max(1, int(je))
+    seiten = max(1, -(-len(treffer) // je))
+    seite = min(max(1, int(seite)), seiten)
+    return {"eintraege": treffer[(seite - 1) * je: seite * je], "gesamt": len(treffer),
+            "seite": seite, "seiten": seiten, "je": je, "kennzahlen": kennzahlen,
+            "filter": {"art": art, "tag": tag, "doc": doc}}

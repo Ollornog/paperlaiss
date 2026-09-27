@@ -20,7 +20,7 @@ Paperless-REST-API zurück.
 
 Der Klassifizierer ist **stdlib-only** — keine Pakete zu installieren — und **mandantenunabhängig**:
 jedes Feld und jeder Tag wird per *Name* gegen die API aufgelöst, jedes Verhalten ist ein Schalter
-in der Config. Ein optionales FastAPI-Panel bringt Dashboard und Ingest-Endpunkt dazu.
+in der Config. Ein optionales FastAPI-Panel bringt eine Admin-Ansicht und einen Ingest-Endpunkt dazu.
 
 ---
 
@@ -68,18 +68,23 @@ CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # Mistral-OCR erzwing
 
 ## Panel
 
-Ein schlankes **FastAPI-Dashboard** (ein eigenständiger Baustein, kein Fork), gedacht als eigener
-Container im selben Docker-Netz, das sich das `scripts/`-Volume teilt:
+Ein Admin-Panel für den Fall, dass etwas hängt oder eingestellt werden muss — paperlaiss ist
+Middleware, Stammdaten (Tags, Korrespondenten) bleiben in Paperless bzw. im eigenen System. Ein
+FastAPI-Container im selben Docker-Netz, der sich das `scripts/`-Volume teilt. Das Aussehen kommt
+aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `panel/static/c22/`
+(`scripts/vendor-c22.sh`); `tests/test_c22_klassen.py` prüft jede Klasse dagegen.
 
-- **Dashboard** (`/`) — Live-Status („läuft gerade"), Kennzahlen (klassifiziert / OCR-Rescues /
-  repariert / Fehler / übersprungen), ein Aktivitäts-Feed, in dem jede Doc-ID einen
-  **Trace-Inspektor** öffnet.
+- **Aktivität** (`/`) — fünf Kennzahlen und ein 30-Tage-Verlauf **filtern** die Liste (der Filter
+  steht in der Adresse, *Zurück* hebt ihn auf), 100 Einträge je Seite. Eine Zeile öffnet den
+  **Lauf**: Entscheidungsbaum, Prompt, Ausgabe der KI und den OCR-Text als Markdown.
+- **Ablauf & Prompt** (`/ablauf`) — der Weg eines Dokuments als Entscheidungsbaum; ein Klick auf einen
+  Knoten bearbeitet die Einstellungen dahinter (wie ein Knoten in n8n), auch den Prompt von Pass 1,
+  gezeigt genau so, wie er gesendet wird (`CLASSIFY_PROMPT_VORSCHAU=1`).
+- **Einstellungen** (`/einstellungen`) — jeder Wert der wirksamen Konfiguration (Datei plus
+  Vorgaben; gespeichert werden nur geänderte Schlüssel).
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
-- **Ablauf & Prompt** (`/ablauf`) — jeder Schritt eines Laufs mit den aktuellen Einstellungen und der
-  System-Prompt von Pass 1 genau so, wie er gesendet wird (gebaut von `classify.py` selbst:
-  `CLASSIFY_PROMPT_VORSCHAU=1`).
-- **JSON-API**: `/api/stats`, `/api/feed`, `/api/running`, `/api/trace/{id}`, `/api/reclassify`,
-  `/api/config` (GET/POST). Eine übergeordnete Plattform kann dieselben Endpunkte konsumieren.
+- **JSON-API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
+  `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau`.
 - **Anmeldung** (`PANEL_AUTH`):
   - leer (Vorgabe) — Bearer-Token bzw. Cookie `PANEL_TOKEN`; ohne Token antwortet das Panel mit 503.
   - `none` — keine eigene Anmeldung, weil eine davorhängt (Reverse-Proxy mit Forward-Auth).
@@ -111,8 +116,8 @@ Dokumenten). paperlaiss löst das mit einem **eigenen Store** (`correspondents.j
 gepflegt), gebunden **per Paperless-Korrespondent-ID**, sodass er eine Umbenennung übersteht. Pro
 Korrespondent: `email`, `domains`, `telefon`, `adresse`, `kundennummer`, `uid`, `kontext`, `aliase`.
 
-Gepflegt im Panel unter **`/korrespondenten`** (alle Korrespondenten plus Edit-Modal). Der
-Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
+Befüllt wird die Datei von außen (eigenes Stammdatensystem, ein Skript); das Panel bearbeitet sie
+nicht mehr. Der Klassifizierer nutzt das fürs Grounding: `domains` zur Absender-Zuordnung, `kontext` und die
 Kennungen im Prompt, `aliase` im Feedback-Loop — präzisere Klassifizierung.
 
 ## Deployment (Docker)

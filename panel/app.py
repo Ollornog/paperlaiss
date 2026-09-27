@@ -21,10 +21,13 @@ ENV:
 """
 import os, sys, json, re, glob, html, hmac, subprocess, datetime, tempfile, threading, urllib.request, urllib.error
 from fastapi import BackgroundTasks, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from kern import (auffaelligkeiten, auth_einstellungen, ausloeser_auswerten, config_uebernehmen,
-                  doc_id_aus_webhook, feld_typ, merge_metadaten, verlauf)
+from kern import (aktivitaet, auffaelligkeiten, auth_einstellungen, ausloeser_auswerten,
+                  config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
+import huelle
+import seiten
 
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
 CLASSIFY_PY = os.path.join(CLASSIFY_DIR, "classify.py")
@@ -51,6 +54,11 @@ except Exception:
 GEHEIM_FELDER = ("api_key_text", "api_key_ocr")
 
 app = FastAPI(title="paperlaiss")
+# Aussehen: vendortes C22 (scripts/vendor-c22.sh). Ohne Anmeldung, wie das Logo — die
+# Anmeldeseite braucht es, bevor jemand angemeldet ist, und es enthält nichts Schützenswertes.
+_STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.isdir(_STATIC):
+    app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 AUTH = auth_einstellungen(os.environ)
 if AUTH["fehler"]:
@@ -139,8 +147,19 @@ def raeume_ausloeser(doc_id, doc=None):
 
 
 def _cfg_oeffentlich():
-    """Config ohne Geheimnisfelder — das, was eine Oberflaeche sehen darf."""
-    return {k: v for k, v in _cfg().items() if k not in GEHEIM_FELDER}
+    """Die WIRKSAME Config ohne Geheimnisfelder — Datei plus Vorgaben des Klassifizierers.
+
+    Nur die Datei zu zeigen hiesse: jeder Wert, der noch auf seiner Vorgabe steht (ocr_regeln,
+    ocr_tag …), fehlte in der Oberflaeche und liesse sich nicht einstellen. Die Vorgaben kennt
+    nur classify.py selbst, also fragt das Panel dort (CLASSIFY_DUMP_CONFIG=1).
+    """
+    env = dict(os.environ, CLASSIFY_DUMP_CONFIG="1", CLASSIFY_CONFIG=CONFIG, CLASSIFY_LOG=LOG)
+    try:
+        r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=30)
+        wirksam = json.loads(r.stdout)
+    except Exception:
+        wirksam = _cfg()          # Rückfall: wenigstens die Datei
+    return {k: v for k, v in wirksam.items() if k not in GEHEIM_FELDER}
 
 
 def guard(request: Request):
@@ -167,11 +186,9 @@ def guard(request: Request):
     raise HTTPException(401, "Panel-Token nötig")
 
 
-def seite(html):
-    """Eine Panel-Seite ausliefern — mit Abmelde-Link, wenn das Panel selbst anmeldet."""
-    if SESAM is None:
-        return html
-    return html.replace("</header>", '<a class=abmelden href="/auth/logout">Abmelden</a></header>', 1)
+def seite(titel, aktiv, inhalt):
+    """Eine Panel-Seite in der C22-Hülle — gleiche Navigation überall, die aktive hinterlegt."""
+    return HTMLResponse(huelle.seite(titel, aktiv, inhalt, abmelden=SESAM is not None))
 
 
 def _token_passt(request: Request) -> bool:
@@ -197,53 +214,6 @@ def api_send(path, data, method="POST"):
 
 
 # ---------- Log-Parser ----------
-LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (?:DRY )?(.*)$")
-DOCRE = re.compile(r"\b(?:OK|DRY|skip|FEHLER|OCR-rescue|OCR-rescue-fail|patch-fail|repariert|repair-fehlgeschlagen|KI-OCR-fail)\s+(\d+)")
-
-
-def parse_log(limit=400):
-    events = []
-    try:
-        lines = open(LOG, encoding="utf-8", errors="replace").read().splitlines()
-    except Exception:
-        return events
-    for ln in lines[-4000:]:
-        m = LINE.match(ln)
-        if not m:
-            continue
-        ts, rest = m.group(1), m.group(2)
-        dm = DOCRE.search(rest)
-        doc = dm.group(1) if dm else None
-        if rest.startswith("OK "):
-            kind = "ok"
-        elif rest.startswith("FEHLER"):
-            kind = "fehler"
-        elif rest.startswith("repariert"):
-            kind = "repariert"
-        elif rest.startswith("OCR-rescue-fail") or "fehlgeschlagen" in rest or rest.startswith("patch-fail") or "fail" in rest:
-            kind = "warn"
-        elif rest.startswith("OCR-rescue"):
-            kind = "ocr"
-        elif rest.startswith("skip"):
-            kind = "skip"
-        else:
-            kind = "info"
-        events.append({"ts": ts, "kind": kind, "doc": doc, "msg": rest})
-    return events[-limit:]
-
-
-def compute_stats():
-    ev = parse_log(4000)
-    docs_ok = {e["doc"] for e in ev if e["kind"] == "ok" and e["doc"]}
-    return {
-        "klassifiziert": len(docs_ok),
-        "ocr_rescues": sum(1 for e in ev if e["kind"] == "ocr"),
-        "repariert": sum(1 for e in ev if e["kind"] == "repariert"),
-        "fehler": sum(1 for e in ev if e["kind"] == "fehler"),
-        "skips": sum(1 for e in ev if e["kind"] == "skip"),
-    }
-
-
 def running_jobs():
     jobs = []
     now = datetime.datetime.now()
@@ -294,17 +264,31 @@ def health():
     return {"ok": True, "config": os.path.exists(CONFIG), "classify": os.path.exists(CLASSIFY_PY)}
 
 
-@app.get("/api/stats")
-def stats(request: Request):
-    guard(request)
-    return compute_stats()
+_TYPEN = {"zeit": 0.0, "namen": {}}
 
 
-@app.get("/api/feed")
-def feed(request: Request, limit: int = 120):
+def typ_namen():
+    """Dokumenttyp-ID → Name für die Aktivitätsliste; fünf Minuten zwischengespeichert."""
+    import time
+    if time.time() - _TYPEN["zeit"] > 300:
+        try:
+            _TYPEN["namen"] = {str(t["id"]): t["name"]
+                               for t in api_get("/document_types/?page_size=1000")["results"]}
+            _TYPEN["zeit"] = time.time()
+        except Exception:
+            pass
+    return _TYPEN["namen"]
+
+
+@app.get("/api/aktivitaet")
+def api_aktivitaet(request: Request, art: str = "", tag: str = "", doc: str = "",
+                   seite: int = 1, je: int = 100):
+    """Aktivitätsliste, gefiltert und in Seiten (Vorgabe 100). Logik: kern.aktivitaet()."""
     guard(request)
-    ev = parse_log(limit)
-    return list(reversed(ev))
+    d = aktivitaet(_log_zeilen(), art=art or None, tag=tag or None,
+                   doc=int(doc) if doc.strip().isdigit() else None, seite=seite, je=min(max(je, 10), 500))
+    d["typen"] = typ_namen()
+    return d
 
 
 @app.get("/api/running")
@@ -430,239 +414,23 @@ def config_schema(request: Request):
             "geheim": list(GEHEIM_FELDER)}
 
 
-EINST_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Einstellungen</title><link rel=icon href="/logo.png">
-<style>
-:root{color-scheme:dark}
-body{background:#0f1115;color:#e6e6e6;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0}
-header{display:flex;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #20252f}
-h1{font-size:16px;margin:0}a{color:#60a5fa;text-decoration:none}
-h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
-.abmelden{margin-left:auto;font-size:13px}
-.wrap{max-width:860px;margin:20px auto;padding:0 16px}
-.f{background:#161a22;border:1px solid #303643;border-radius:10px;padding:12px 14px;margin-bottom:10px}
-.f label{display:block;font-size:13px;color:#e6e6e6;margin-bottom:6px;font-weight:600}
-.f .hilfe{font-size:12px;color:#6b7280;margin-bottom:6px}
-input[type=text],textarea{background:#0f1115;color:#e6e6e6;border:1px solid #303643;border-radius:6px;
-  padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box}
-textarea{min-height:90px;resize:vertical}
-input[type=checkbox]{width:16px;height:16px;vertical-align:-2px}
-button{cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:9px 16px;font-size:13px}
-.leiste{position:sticky;bottom:0;background:#0f1115;border-top:1px solid #20252f;padding:12px 0;
-  display:flex;gap:12px;align-items:center}
-.muted{color:#6b7280}.warn{color:#fcd34d}
-</style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Einstellungen</h1><a href="/">← Dashboard</a><a href="/ablauf">Ablauf & Prompt</a>
-  <span class=muted style="margin-left:auto;font-size:12px">classify-config.json</span></header>
-<div class=wrap><div id=z>lädt…</div>
-  <div class=leiste><button onclick="sichern()">Speichern</button><span id=meld class=muted></span></div>
-</div>
-<script>
-let FELDER=[];
-function txt(v){return String(v==null?'':v).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}
-const HILFE={
-  system_prompt:'Leer = eingebauter Standardprompt. Hier gehört der installationseigene Kontext hin — NICHT in den Code.',
-  korrespondent_beispiele:'Beispielpaare für den Abgleich, z.B. [["Mustrmann GmbH","Mustermann"]]. Hilft bei OCR-Fehlern mehr als jede Beschreibung.',
-  manual_fields:'Felder, die die KI NIE anfasst — rein manuell gepflegt.',
-  reserved_tags:'Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben.',
-  nachbearbeitung:'Pfad zu einem Skript, das nach dem Schreiben läuft. Die Naht für alles, was nur diese Installation braucht.',
-  tagging_enabled:'Aus: die KI vergibt keine inhaltlichen Tags.',
-  ocr_always:'OCR bei JEDEM Dokument — kostet, auch wenn der Text gut ist.',
-};
-fetch('/api/config/schema').then(r=>r.json()).then(d=>{
-  FELDER=d.felder;
-  document.getElementById('z').innerHTML=FELDER.map(f=>{
-    const h=HILFE[f.name]?`<div class=hilfe>${txt(HILFE[f.name])}</div>`:'';
-    let e;
-    if(f.typ==='bool') e=`<input type=checkbox id="f_${f.name}" ${f.wert?'checked':''}>`;
-    else if(f.typ==='text') e=`<textarea id="f_${f.name}">${txt(f.wert)}</textarea>`;
-    else if(f.typ==='json') e=`<textarea id="f_${f.name}">${txt(JSON.stringify(f.wert,null,1))}</textarea>`;
-    else e=`<input type=text id="f_${f.name}" value="${txt(f.wert)}">`;
-    return `<div class=f><label for="f_${f.name}">${txt(f.name)} <span class=muted>(${f.typ})</span></label>${h}${e}</div>`;
-  }).join('')+
-  `<p class=muted style="font-size:12px">Nicht hier: ${d.geheim.join(', ')} — Schlüssel gehören in die Umgebung, nicht in eine Datei, die eine Weboberfläche lesen kann.</p>`;
-});
-async function sichern(){
-  const meld=document.getElementById('meld'); meld.className='muted'; meld.textContent='speichere…';
-  const body={};
-  FELDER.forEach(f=>{
-    const el=document.getElementById('f_'+f.name);
-    body[f.name] = f.typ==='bool' ? el.checked : el.value;
-  });
-  try{
-    const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)});
-    if(!r.ok) throw new Error(await r.text());
-    const d=await r.json();
-    if((d.uebergangen||[]).length){
-      meld.className='warn';
-      meld.textContent='gespeichert, aber übergangen: '+d.uebergangen.join(', ');
-    } else { meld.textContent='✓ gespeichert'; }
-  }catch(e){ meld.className='warn'; meld.textContent=String(e.message||e).slice(0,160); }
-}
-</script></body></html>"""
-
-
-ABLAUF_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Ablauf & Prompt</title><link rel=icon href="/logo.png">
-<style>
-:root{color-scheme:dark}
-body{background:#0f1115;color:#e6e6e6;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0}
-header{display:flex;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #20252f}
-h1{font-size:16px;margin:0}a{color:#60a5fa;text-decoration:none}
-h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
-.abmelden{margin-left:auto;font-size:13px}
-.wrap{max-width:900px;margin:20px auto;padding:0 16px}
-.schritt{background:#161a22;border:1px solid #303643;border-radius:10px;padding:12px 14px}
-.schritt .t{font-weight:600;margin-bottom:4px}.schritt .d{font-size:13px;color:#c9ced6}
-.pfeil{text-align:center;color:#6b7280;margin:4px 0}
-.zweig{color:#fcd34d}.aus{color:#6b7280}
-pre{background:#0b0d11;border:1px solid #303643;border-radius:8px;padding:10px 12px;white-space:pre-wrap;
-  word-break:break-word;font-size:12px;max-height:520px;overflow:auto}
-h2{font-size:14px;margin:26px 0 8px;color:#9aa4b2;text-transform:uppercase;letter-spacing:.04em}
-.muted{color:#6b7280}
-</style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Ablauf & Prompt</h1><a href="/">← Dashboard</a><a href="/einstellungen">Einstellungen</a></header>
-<div class=wrap><div id=z>lädt…</div></div>
-<script>
-function txt(v){return String(v==null?'':v).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}
-function an(b){return b?'an':'<span class=aus>aus</span>'}
-function schritt(t,d){return `<div class=schritt><div class=t>${t}</div><div class=d>${d}</div></div><div class=pfeil>↓</div>`}
-fetch('/api/prompt-vorschau').then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(v=>{
-  const e=v.einstellungen||{}, o=v.ocr_regeln||{};
-  let h='';
-  h+=schritt('1 · Auslöser',
-    '<b>Automatisch:</b> Paperless ruft nach dem Import <b>classify.py</b> auf (Post-Consume).<br>'+
-    '<b>Manuell:</b> im Dashboard „Neu klassifizieren" bzw. „mit OCR erzwingen".<br>'+
-    `<b>Aus Paperless:</b> Tag <b>${txt(e.redo_tag)||'—'}</b> setzen oder Feld <b>${txt(e.hinweis_field)||'—'}</b> befüllen `+
-    '→ Webhook → <span class=zweig>immer mit Mistral-OCR</span>, der Hinweis geht in den Prompt.');
-  h+=schritt('2 · Vorprüfung & Schleifenschutz',
-    `Klassifizierer aktiv? · trägt das Dokument schon <b>${txt(e.marker_tag)}</b>? → überspringen. `+
-    '<span class=zweig>Manuelle und Paperless-Auslöser umgehen das.</span>');
-  h+=schritt('3 · OCR vor der Analyse — Regeln',
-    `OCR ${an(e.ocr_enabled)}, immer-OCR ${an(e.ocr_always)}. Neu gelesen (${txt(e.ocr_model)}), wenn der Text `+
-    `kürzer als <b>${txt(o.min_zeichen)}</b> Zeichen ist, weniger als <b>${txt(o.min_schluesselwoerter)}</b> bekannte Wörter hat, `+
-    `weniger als ein Wort je <b>${txt(o.max_zeichen_je_wort)}</b> Zeichen oder mehr als <b>${Math.round((o.max_muell_anteil||0)*100)} %</b> Zeichensalat.`);
-  h+=schritt('4 · Pass 0 — Absender & Kandidaten',
-    'Ein kurzer Aufruf zieht nur den Absender aus Titel und Textanfang; per Namensabgleich gegen alle Korrespondenten '+
-    'werden die wahrscheinlichsten Kandidaten samt Kontext an Pass 1 übergeben.');
-  h+=schritt('5 · Pass 1 — Analyse',
-    `Modell <b>${txt(e.model)}</b> (Temperatur ${txt(e.temperature)}), Text bis ${txt(e.content_max_len)} Zeichen. `+
-    `Ein Aufruf entscheidet Korrespondent, Dokumenttyp${e.tagging_enabled?', Tags':''}, Datum`+
-    `${e.summary_field?', Zusammenfassung':''} und je Feld: Wert / leeren / behalten. `+
-    `Prompt ${v.eigener_prompt?'aus der Konfiguration':'eingebaut'} — ${v.typen} Typen, ${v.tags} Tags, ${v.felder} Felder, unten vollständig.`);
-  h+=schritt('6 · OCR-Nachlauf',
-    `Meldet die KI unlesbaren Text (${an(o.nach_ki_meldung)}), fehlt der Typ (${an(o.wenn_kein_typ)}) `+
-    `oder der Korrespondent (${an(o.wenn_kein_korrespondent)}) → OCR und Pass 1 erneut, `+
-    '<span class=zweig>nur wenn in Schritt 3 noch kein OCR lief</span>.');
-  h+=schritt('7 · Zurückschreiben',
-    `Typ, Korrespondent, ${e.tagging_enabled?'Tags, ':''}Datum und Felder nach Paperless; `+
-    `nie angefasst: ${(e.manual_fields||[]).map(txt).join(', ')||'—'}. Marker <b>${txt(e.marker_tag)}</b>`+
-    `${e.redo_tag?`, Auslöser <b>${txt(e.redo_tag)}</b> entfernt`:''}. `+
-    'Lehnt Paperless einen Wert ab, korrigiert die KI in derselben Unterhaltung (mehrere Runden).');
-  h+=`<div class=schritt><div class=t>8 · Nachbearbeitung</div><div class=d>${e.nachbearbeitung?`Skript <b>${txt(e.nachbearbeitung)}</b> bekommt das Ergebnis.`:'<span class=aus>keine eingerichtet</span>'}</div></div>`;
-  h+='<h2>System-Prompt (Pass 1), wie er gesendet wird</h2><pre>'+txt(v.system)+'</pre>';
-  h+='<h2>Nachricht je Dokument (Aufbau)</h2><pre>'+txt(
-    '[NUTZER-HINWEIS — nur beim Auslöser aus Paperless mit Text]\\n'+
-    '[MÖGLICHE KORRESPONDENTEN — Kandidaten aus Pass 0, je mit Kontext]\\n'+
-    '[Mail-Kontext / Absender-Mail — wenn vorhanden]\\n'+
-    'METADATEN: Hinzugefügt am · aktuelles Dokumentdatum · Originaldateiname\\n'+
-    'VERFÜGBARE FELDER: '+(v.ki_felder||[]).join(', ')+'\\n'+
-    'TITEL: …\\n\\nINHALT:\\n… (bis '+e.content_max_len+' Zeichen)')+'</pre>';
-  document.getElementById('z').innerHTML=h;
-}).catch(e=>{document.getElementById('z').textContent='Vorschau nicht verfügbar: '+e.message});
-</script></body></html>"""
-
-
 @app.get("/einstellungen", response_class=HTMLResponse)
 def einstellungen(request: Request):
     guard(request)
-    return seite(EINST_PAGE)
+    return seite("Einstellungen", "/einstellungen", seiten.einstellungen())
 
 
-TRACE_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Lauf __ID__</title><link rel=icon href="/logo.png">
-<style>
-:root{color-scheme:dark}
-body{background:#0f1115;color:#e6e6e6;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0}
-header{display:flex;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #20252f}
-h1{font-size:16px;margin:0}a{color:#60a5fa;text-decoration:none}
-h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
-.abmelden{margin-left:auto;font-size:13px}
-.wrap{max-width:1000px;margin:20px auto;padding:0 16px}
-.schritt{background:#161a22;border:1px solid #303643;border-radius:10px;margin-bottom:12px;overflow:hidden}
-.schritt>summary{padding:12px 14px;cursor:pointer;font-weight:600;list-style:none;display:flex;gap:10px;align-items:center}
-.schritt>summary::-webkit-details-marker{display:none}
-.schritt>summary::before{content:'▸';color:#6b7280}
-.schritt[open]>summary::before{content:'▾'}
-.inhalt{padding:0 14px 14px}
-pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115;padding:10px;
-    border-radius:8px;max-height:44vh;overflow:auto;margin:6px 0}
-.muted{color:#6b7280;font-weight:400}
-.marke{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 9px;font-size:11px;font-weight:400}
-.marke.ok{background:#064e3b;color:#6ee7b7}.marke.warn{background:#78350f;color:#fcd34d}
-dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:8px 0;font-size:13px}
-dt{color:#9aa4b2}dd{margin:0}
-</style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>Lauf __ID__</h1><a href="/">← Dashboard</a><span class=muted id=ts></span></header>
-<div class=wrap id=z>lädt…</div>
-<script>
-const ID=__ID__;
-function txt(v){return String(v==null?'':v).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
-function pre(o){return '<pre>'+txt(typeof o==='string'?o:JSON.stringify(o,null,2))+'</pre>'}
-function schritt(titel,marke,inhalt,offen){
-  return `<details class=schritt ${offen?'open':''}><summary>${txt(titel)}`+
-         (marke?` <span class="marke ${marke[1]||''}">${txt(marke[0])}</span>`:'')+
-         `</summary><div class=inhalt>${inhalt}</div></details>`;
-}
-fetch('/api/trace/'+ID).then(r=>r.json()).then(d=>{
-  if(d.error){document.getElementById('z').innerHTML='<p class=muted>Kein Trace zu diesem Dokument.</p>';return}
-  document.getElementById('ts').textContent=d.ts||'';
-  let h='';
-  const o=d.ocr||{};
-  h+=schritt('1 · OCR', [o.triggered?'nachgeholt':'übersprungen', o.triggered?'warn':''],
-     `<dl><dt>Grund</dt><dd>${txt(o.grund)}</dd>`+
-     (o.chars?`<dt>Zeichen</dt><dd>${txt(o.chars)}</dd>`:'')+
-     (o.ki_meldet_unlesbar!==undefined?`<dt>KI meldet unlesbar</dt><dd>${txt(o.ki_meldet_unlesbar)} `+
-       `<span class=muted>(Heuristik stimmt zu: ${txt(o.heuristik_stimmt_zu)})</span></dd>`:'')+
-     `</dl>`+(o.excerpt?pre(o.excerpt):''));
-  if(d.pass0) h+=schritt('2 · Absender vorab', null, pre(d.pass0));
-  const p1=d.pass1||{};
-  h+=schritt('3 · Klassifizierung', null,
-     `<div class=muted>System-Prompt (${(p1.system||'').length} Zeichen)</div>${pre(p1.system||'')}`+
-     `<div class=muted>Dokument (gekürzt)</div>${pre(p1.user||'')}`+
-     `<div class=muted>Antwort</div>${pre(p1.response||{})}`);
-  const k=d.correspondent||{};
-  h+=schritt('4 · Korrespondent', [k.ergebnis&&k.ergebnis.startsWith('exakt')?'exakt':'zugeordnet',
-     k.ergebnis&&k.ergebnis.startsWith('NEU')?'warn':'ok'],
-     `<dl><dt>Vorschlag</dt><dd>${txt(k.vorschlag)}</dd><dt>Ergebnis</dt><dd>${txt(k.ergebnis)}</dd></dl>`+
-     (k.pass2?`<div class=muted>Rückfrage ans Modell</div>${pre(k.pass2)}`:''), true);
-  const w=d.writeback||{};
-  h+=schritt('5 · Zurückgeschrieben', ['geschrieben','ok'], pre(w), true);
-  const rep=d.repair||[];
-  if(rep.length) h+=schritt(`6 · Reparatur (${rep.length} Runden)`,
-     [rep[rep.length-1].ok?'gelöst':'gescheitert', rep[rep.length-1].ok?'ok':'warn'], pre(rep), true);
-  document.getElementById('z').innerHTML=h;
-});
-</script></body></html>"""
-
-
-@app.get("/trace/{doc_id}", response_class=HTMLResponse)
+@app.get("/trace/{doc_id}")
 def trace_seite(doc_id: int, request: Request):
-    """Der Lauf Schritt für Schritt — was die KI sah, was sie antwortete, was geschrieben wurde.
-
-    `/api/trace/{id}` liefert dasselbe als JSON. Für die Fehlersuche ist die Frage aber fast immer
-    „an welcher Stelle ist es gekippt", und die beantwortet eine gegliederte Ansicht schneller als
-    ein 4000-Zeichen-Block.
-    """
+    """Alte Adresse: der Lauf öffnet sich jetzt als Dialog in der Aktivität."""
     guard(request)
-    return seite(TRACE_PAGE.replace("__ID__", str(int(doc_id))))
+    return RedirectResponse(f"/?doc={int(doc_id)}")
 
 
 @app.get("/ablauf", response_class=HTMLResponse)
 def ablauf_seite(request: Request):
     guard(request)
-    return seite(ABLAUF_PAGE)
+    return seite("Ablauf & Prompt", "/ablauf", seiten.ablauf())
 
 
 @app.get("/api/prompt-vorschau")
@@ -697,8 +465,16 @@ async def set_config(request: Request):
     # Typsicher zurückwandeln: ein Formular liefert Text, die Konfiguration braucht Zahlen,
     # Wahrheitswerte und Listen. Was sich nicht umwandeln lässt, wird übergangen und gemeldet —
     # ein Tippfehler darf keinen Schlüssel zerstören.
-    cfg, uebergangen = config_uebernehmen(_cfg(), body)
-    schreibe_json(CONFIG, cfg)
+    # Gegen die WIRKSAME Config umwandeln (kennt auch Schlüssel, die nur als Vorgabe existieren),
+    # aber nur die geschickten Schlüssel in die Datei schreiben — sonst stünden nach dem ersten
+    # Speichern alle Vorgaben fest in der Datei, und eine spätere bessere Vorgabe wirkte nie.
+    neu, uebergangen = config_uebernehmen(_cfg_oeffentlich(), body)
+    ausgelassen = {u.split(" ", 1)[0] for u in uebergangen}
+    datei = _cfg()
+    for k in body:
+        if k in neu and k not in ausgelassen:
+            datei[k] = neu[k]
+    schreibe_json(CONFIG, datei)
     return {"ok": True, "config": _cfg_oeffentlich(), "uebergangen": uebergangen}
 
 
@@ -750,347 +526,7 @@ CORR_FIELDS = ("email", "domains", "telefon", "adresse", "kundennummer", "ustid"
 CORR_ALTNAMEN = {"ustid": "uid"}     # beim Lesen alter Stores
 
 
-def load_corr_store():
-    try:
-        d = json.load(open(CORR_STORE))
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
-
-
-def save_corr_store(d):
-    schreibe_json(CORR_STORE, d)
-
-
-@app.get("/api/correspondents")
-def correspondents(request: Request):
-    guard(request)
-    store = load_corr_store()
-    try:
-        res = api_get("/correspondents/?page_size=2000")["results"]
-    except Exception:
-        res = []
-    out = []
-    for c in res:
-        m = store.get(str(c["id"]), {})
-        row = {"id": c["id"], "name": c["name"], "document_count": c.get("document_count", 0)}
-        for f in CORR_FIELDS:
-            # Altname beruecksichtigen, damit ein Store von vor der Umbenennung nicht
-            # so aussieht, als waere das Feld leer (uid -> ustid, 2026-09-21).
-            row[f] = m.get(f) or m.get(CORR_ALTNAMEN.get(f, ""), "") or ""
-        out.append(row)
-    out.sort(key=lambda x: (x["name"] or "").lower())
-    return out
-
-
-@app.post("/api/correspondents")
-async def save_correspondent(request: Request):
-    guard(request)
-    b = await request.json()
-    cid = str(b.get("id", "")).strip()
-    if not cid.isdigit():
-        raise HTTPException(400, "gültige Paperless-Korrespondent-id nötig")
-    store = load_corr_store()
-    vals = {f: str(b.get(f) or "").strip() for f in CORR_FIELDS}
-    if any(vals.values()):
-        store[cid] = vals
-    else:
-        store.pop(cid, None)   # alles leer → Eintrag entfernen (verwaist)
-    save_corr_store(store)
-    return {"ok": True, "id": cid}
-
-
-@app.post("/api/correspondents/merge")
-async def merge_correspondents(request: Request):
-    """Mehrere Korrespondenten zu einem verschmelzen: Dokumente umhängen, Dubletten löschen.
-
-    Warum das ins Panel gehört: Der Korrespondent-Feedback-Loop verhindert neue Dubletten, räumt
-    aber keine alten auf. Über die Paperless-Oberfläche ist das Handarbeit pro Dokument.
-
-    Der Metadaten-Store hängt an der Paperless-ID, nicht am Namen — das Verschmelzen ist deshalb
-    ein Zusammenführen von Einträgen und kein Umbenennen von Schlüsseln.
-    """
-    guard(request)
-    body = await request.json()
-    ids = [int(x) for x in (body.get("ids") or []) if str(x).strip().isdigit()]
-    ziel = int(body["ziel"]) if str(body.get("ziel", "")).strip().isdigit() else None
-    if len(ids) < 2 or ziel is None or ziel not in ids:
-        raise HTTPException(400, "mindestens zwei IDs und ein Ziel aus dieser Auswahl nötig")
-
-    alle = {c["id"]: c for c in api_get("/correspondents/?page_size=2000")["results"]}
-    fehlend = [i for i in ids if i not in alle]
-    if fehlend:
-        raise HTTPException(404, f"unbekannte Korrespondenten: {fehlend}")
-
-    quellen = [i for i in ids if i != ziel]
-    umgehaengt = 0
-    for dup in quellen:
-        docs = api_get(f"/documents/?correspondent__id__in={dup}&fields=id&page_size=2000")["results"]
-        dids = [d["id"] for d in docs]
-        if dids:
-            api_send("/documents/bulk_edit/", {"documents": dids, "method": "set_correspondent",
-                                               "parameters": {"correspondent": ziel}}, "POST")
-            umgehaengt += len(dids)
-
-    # Erst den Store zusammenführen, DANN löschen: bricht etwas dazwischen ab, sind die
-    # Metadaten gerettet und die Dublette steht noch da — der umgekehrte Fall wäre Datenverlust.
-    store = load_corr_store()
-    verschmolzen = merge_metadaten(store.get(str(ziel), {}),
-                                   [store.get(str(q), {}) for q in quellen])
-    if verschmolzen:
-        store[str(ziel)] = verschmolzen
-    for q in quellen:
-        store.pop(str(q), None)
-    save_corr_store(store)
-
-    geloescht = []
-    for dup in quellen:
-        try:
-            api_send(f"/correspondents/{dup}/", {}, "DELETE")
-            geloescht.append(dup)
-        except Exception as e:
-            # Nicht abbrechen: die Dokumente hängen bereits am Ziel, eine übrig gebliebene
-            # leere Dublette ist ein Schönheitsfehler, kein Datenverlust.
-            print(f"merge: {dup} nicht löschbar: {e!r}", file=sys.stderr)
-    return {"ok": True, "ziel": ziel, "name": alle[ziel]["name"],
-            "umgehaengt": umgehaengt, "geloescht": geloescht,
-            "nicht_geloescht": [q for q in quellen if q not in geloescht]}
-
-
-CORR_PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1"><title>paperlaiss — Korrespondenten</title><link rel=icon href="/logo.png">
-<style>
-:root{color-scheme:light dark}
-body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
-header{padding:14px 20px;background:#161a22;border-bottom:1px solid #262b36;display:flex;align-items:center;gap:14px}
-header h1{font-size:18px;margin:0;font-weight:600}a{color:#7dd3fc;text-decoration:none}
-h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
-.abmelden{margin-left:auto;font-size:13px}
-.wrap{max-width:1000px;margin:0 auto;padding:18px 20px}
-input,textarea{background:#0f1115;color:#e6e6e6;border:1px solid #303643;border-radius:6px;padding:7px 9px;font-family:inherit;width:100%;box-sizing:border-box}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td{padding:7px 8px;border-bottom:1px solid #20252f}tr:hover{background:#151a22;cursor:pointer}
-.muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
-button{cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:13px}button.sec{background:#374151}
-dialog{background:#161a22;color:#e6e6e6;border:1px solid #303643;border-radius:12px;max-width:560px;width:92%}
-label{display:block;font-size:12px;color:#9aa4b2;margin:10px 0 3px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-</style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/">← Dashboard</a><span class=muted>Korrespondenten</span></header>
-<div class=wrap>
-  <div class=row style="margin-bottom:12px">
-    <input id=q placeholder="filtern…" oninput="render()" style="max-width:280px">
-    <span id=msel class=muted style="font-size:13px"></span>
-    <button id=mbtn style="display:none" onclick="merge()">Zusammenführen</button>
-  </div>
-  <table id=tbl></table>
-</div>
-<dialog id=dlg><form method=dialog style="padding:18px"><div style="display:flex;justify-content:space-between;align-items:center"><b id=dt></b><span class=muted id=dc></span></div>
-  <div class=grid2>
-    <div><label>E-Mail</label><input id=f_email></div>
-    <div><label>Domains (Absender-Match, kommagetrennt)</label><input id=f_domains></div>
-    <div><label>Telefon</label><input id=f_telefon></div>
-    <div><label>Kundennummer</label><input id=f_kundennummer></div>
-    <div><label>UID-Nr. (USt-IdNr.)</label><input id=f_ustid></div>
-    <div><label>Quelle</label><input id=f_quelle placeholder="z.B. carddav, bmd — leer = hier gepflegt"></div>
-    <div><label>Kennung in der Quelle</label><input id=f_extern_id></div>
-    <div><label>Aliase (kommagetrennt)</label><input id=f_aliase></div>
-  </div>
-  <label>Adresse</label><input id=f_adresse>
-  <label>Kontext (KI-Hinweis: was ist dieser Absender / welche Dokumente kommen von ihm)</label><textarea id=f_kontext rows=3></textarea>
-  <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end"><button type=button class=sec onclick="dlg.close()">Abbrechen</button><button type=button onclick="save()">Speichern</button></div>
-</form></dialog>
-<script>
-const F=["email","domains","telefon","adresse","kundennummer","ustid","kontext","aliase","quelle","extern_id"];
-let DATA=[],cur=null;
-async function load(){DATA=await (await fetch('/api/correspondents')).json();render()}
-const SEL=new Set();
-function render(){
-  const q=document.getElementById('q').value.toLowerCase();
-  const rows=DATA.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.kontext||'').toLowerCase().includes(q));
-  document.getElementById('tbl').innerHTML=rows.map((c,i)=>{
-    const has=F.some(f=>c[f]);const idx=DATA.indexOf(c);
-    return `<tr><td style="width:28px" onclick="event.stopPropagation()"><input type=checkbox ${SEL.has(c.id)?'checked':''} onchange="pick(${c.id},this.checked)"></td>`+
-      `<td onclick="edit(${idx})"><b>${c.name.replace(/</g,'&lt;')}</b> <span class=pill>${c.document_count} Docs</span></td>`+
-      `<td class=muted onclick="edit(${idx})">${(c.kontext||c.email||'').replace(/</g,'&lt;').slice(0,70)}</td>`+
-      `<td style="text-align:right" onclick="edit(${idx})">${has?'✓ Metadaten':'<span class=muted>—</span>'}</td></tr>`;
-  }).join('');
-  const n=SEL.size;
-  document.getElementById('msel').textContent = n ? `${n} ausgewählt` : '';
-  document.getElementById('mbtn').style.display = n>=2 ? '' : 'none';
-}
-function pick(id,an){ an?SEL.add(id):SEL.delete(id); render(); }
-
-async function merge(){
-  const ids=[...SEL];
-  const namen=ids.map(i=>(DATA.find(c=>c.id===i)||{}).name).filter(Boolean);
-  // Das Ziel muss der Mensch wählen: seine Metadaten bleiben, seine Kundennummer gewinnt.
-  const wahl=prompt(`Welcher Eintrag soll bleiben?\n\n`+
-    namen.map((n,i)=>`${i+1}) ${n}`).join('\n')+`\n\nNummer eingeben:`);
-  const nr=parseInt(wahl,10);
-  if(!nr||nr<1||nr>ids.length) return;
-  const ziel=ids[nr-1];
-  const rest=namen.filter((_,i)=>i!==nr-1).join(', ');
-  if(!confirm(`„${namen[nr-1]}" behalten.\n\nDokumente von ${rest} werden umgehängt, `+
-              `diese Einträge danach gelöscht.\n\nFortfahren?`)) return;
-  const el=document.getElementById('msel'); el.textContent='führe zusammen…';
-  try{
-    const r=await fetch('/api/correspondents/merge',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,ziel})});
-    if(!r.ok) throw new Error(await r.text());
-    const d=await r.json();
-    el.textContent=`${d.umgehaengt} Dokumente auf „${d.name}" umgehängt`;
-    SEL.clear(); await load();
-  }catch(e){ el.textContent=String(e.message||e).slice(0,140); }
-}
-function edit(i){cur=DATA[i];document.getElementById('dt').textContent=cur.name;
-  document.getElementById('dc').textContent='ID '+cur.id+' · '+cur.document_count+' Docs';
-  F.forEach(f=>document.getElementById('f_'+f).value=cur[f]||'');document.getElementById('dlg').showModal();}
-async function save(){
-  const body={id:cur.id};F.forEach(f=>body[f]=document.getElementById('f_'+f).value);
-  await fetch('/api/correspondents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  F.forEach(f=>cur[f]=body[f]);document.getElementById('dlg').close();render();
-}
-load();
-</script></body></html>"""
-
-
-@app.get("/korrespondenten", response_class=HTMLResponse)
-def corr_page(request: Request):
-    guard(request)
-    return seite(CORR_PAGE)
-
-
-# ---------- Dashboard ----------
-PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1">
-<title>paperlaiss</title><link rel=icon href="/logo.png">
-<style>
-:root{color-scheme:light dark}
-body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
-header{padding:14px 20px;background:#161a22;border-bottom:1px solid #262b36;display:flex;align-items:center;gap:12px}
-header h1{font-size:18px;margin:0;font-weight:600}
-h1 .logo,header h1 .logo{vertical-align:middle;margin-right:8px}
-.abmelden{margin-left:auto;font-size:13px}
-.wrap{max-width:1000px;margin:0 auto;padding:18px 20px}
-.banner{padding:10px 14px;border-radius:8px;background:#1b2130;margin-bottom:16px;font-size:14px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:20px}
-.card{background:#161a22;border:1px solid #262b36;border-radius:10px;padding:14px}
-.card .n{font-size:26px;font-weight:700}.card .l{font-size:12px;color:#9aa4b2;margin-top:2px}
-h2{font-size:14px;color:#9aa4b2;text-transform:uppercase;letter-spacing:.05em;margin:22px 0 8px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td{padding:6px 8px;border-bottom:1px solid #20252f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px}
-.badge{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600}
-.ok{background:#12331f;color:#4ade80}.fehler{background:#3a1520;color:#f87171}.repariert{background:#33290f;color:#fbbf24}
-.ocr{background:#12283a;color:#60a5fa}.skip{background:#22262e;color:#8b95a3}.warn{background:#332409;color:#fb923c}.info{background:#22262e;color:#9aa4b2}
-a{color:#7dd3fc;text-decoration:none}button{cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:6px 12px;font-size:13px}
-button.sec{background:#374151}input,textarea{background:#0f1115;color:#e6e6e6;border:1px solid #303643;border-radius:6px;padding:6px 8px;font-family:inherit}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
-dialog{background:#161a22;color:#e6e6e6;border:1px solid #303643;border-radius:12px;max-width:760px;width:92%}
-pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#0f1115;padding:10px;border-radius:8px;max-height:60vh;overflow:auto}
-.bars{display:flex;gap:3px;align-items:flex-end;height:90px;margin:10px 0 4px}
-/* max-width, damit wenige Tage nicht die ganze Breite fuellen: bei zwei Eintraegen sah der
-   Verlauf sonst aus wie zwei Bloecke statt wie ein Verlauf. */
-.bars .t{flex:1;display:flex;flex-direction:column-reverse;gap:1px;min-width:4px;max-width:26px}
-.bars .t .leer{background:#20252f;height:2px}
-.bars i{display:block;border-radius:1px}
-.bars .ok{background:#2563eb}.bars .ocr{background:#7c3aed}.bars .err{background:#dc2626}
-.legende{display:flex;gap:14px;font-size:12px;color:#9aa4b2;margin-bottom:6px}
-.legende b{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
-.auff{font-size:12px;border-left:2px solid #dc2626;padding:4px 10px;margin:4px 0;background:#161a22}
-.auff.geloest{border-color:#059669;opacity:.55}
-.muted{color:#6b7280}.pill{background:#22262e;color:#9aa4b2;border-radius:20px;padding:1px 8px;font-size:11px}
-</style></head><body>
-<header><h1><img class=logo src="/logo.png" alt="" width=28 height=28>paperlaiss</h1><a href="/korrespondenten" style="font-size:13px">Korrespondenten</a><a href="/einstellungen" style="font-size:13px">Einstellungen</a><a href="/ablauf" style="font-size:13px">Ablauf & Prompt</a><span style="font-size:13px;color:#9aa4b2;margin-left:auto">Klassifizierer-Panel</span></header>
-<div class=wrap>
-  <div class=banner id=banner>…</div>
-  <div class=cards id=cards></div>
-  <h2>Verlauf <span class=pill id=voffen style="display:none"></span></h2>
-  <div id=verlauf class=muted style="font-size:13px">lädt…</div>
-
-  <h2>Manuell klassifizieren</h2>
-  <div class=row>
-    <input id=docid placeholder="Doc-ID" style="width:110px">
-    <button onclick="rc('classify')">Neu klassifizieren</button>
-    <button class=sec onclick="rc('ocr')">mit OCR erzwingen</button>
-    <span id=rcout style="font-size:12px;color:#9aa4b2"></span>
-  </div>
-
-  <h2>Aktivität</h2>
-  <table id=feed></table>
-</div>
-<dialog id=dlg><div style="padding:16px"><div class=row style="justify-content:space-between"><b id=dlgt></b><button class=sec onclick="dlg.close()">×</button></div><pre id=dlgc></pre></div></dialog>
-<script>
-const badge=k=>`<span class="badge ${k}">${k}</span>`;
-async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
-function txt(v){return String(v==null?'':v).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
-
-async function ladeVerlauf(){
-  let d; try{ d = await j('/api/verlauf'); }catch(e){ return; }
-  const v=d.verlauf||[];
-  const z=document.getElementById('verlauf');
-  if(!v.length){ z.innerHTML='<span class=muted>Noch keine Läufe im Log.</span>'; return; }
-  const max=Math.max(...v.map(t=>(t.klassifiziert||0)+(t.ocr||0)+(t.fehler||0)),1);
-  const h=v.map(t=>{
-    const k=t.klassifiziert||0,o=t.ocr||0,f=t.fehler||0;
-    const px=n=>Math.round(n/max*84);
-    return `<div class=t title="${t.tag}: ${k} klassifiziert, ${o} OCR, ${f} Fehler">`+
-      (f?`<i class=err style="height:${px(f)}px"></i>`:'')+
-      (o?`<i class=ocr style="height:${px(o)}px"></i>`:'')+
-      (k?`<i class=ok style="height:${px(k)}px"></i>`:'')+
-      (!(k||o||f)?`<i class=leer></i>`:'')+`</div>`;
-  }).join('');
-  const offen=d.offen||0;
-  const marke=document.getElementById('voffen');
-  marke.style.display = offen ? '' : 'none';
-  marke.textContent = offen + ' offen';
-  const auff=(d.auffaelligkeiten||[]).slice(0,8).map(a=>
-    `<div class="auff ${a.geloest?'geloest':''}">${txt(a.ts)} `+
-    (a.doc?`<a href="/trace/${txt(a.doc)}">#${txt(a.doc)}</a> `:'')+
-    `${txt(a.text)}${a.geloest?' <span class=muted>— später gelöst</span>':''}</div>`).join('');
-  z.innerHTML=`<div class=legende><span><b class=ok style="background:#2563eb"></b>klassifiziert</span>`+
-    `<span><b style="background:#7c3aed"></b>OCR</span><span><b style="background:#dc2626"></b>Fehler</span>`+
-    `<span class=muted style="margin-left:auto">${v[0].tag} – ${v[v.length-1].tag}</span></div>`+
-    `<div class=bars>${h}</div>`+(auff?`<div style="margin-top:10px">${auff}</div>`:'');
-}
-
-async function load(){
-  try{
-    const s=await j('/api/stats');
-    document.getElementById('cards').innerHTML=Object.entries(
-      {klassifiziert:'klassifiziert',ocr_rescues:'OCR-Rescues',repariert:'repariert',fehler:'Fehler',skips:'übersprungen'})
-      .map(([k,l])=>`<div class=card><div class=n>${s[k]??0}</div><div class=l>${l}</div></div>`).join('');
-  }catch(e){}
-  try{
-    const r=await j('/api/running');const jobs=r.jobs||[];
-    document.getElementById('banner').textContent=jobs.length
-      ? '⏳ Läuft gerade: '+jobs.map(x=>`Doc ${x.id} — ${x.stage} (${x.src}, ${x.dauer}s)`).join(' · ')
-      : '💤 Idle';
-  }catch(e){}
-  try{
-    const f=await j('/api/feed?limit=120');
-    document.getElementById('feed').innerHTML=f.map(e=>{
-      // Auf die gegliederte Ansicht statt in einen JSON-Block: bei der Fehlersuche ist die
-      // Frage fast immer "an welcher Stelle ist es gekippt".
-      const d=e.doc?`<a href="/trace/${e.doc}">${e.doc}</a>`:'—';
-      return `<tr><td style="color:#6b7280">${e.ts.slice(11)}</td><td>${badge(e.kind)}</td><td>${d}</td><td>${e.msg.replace(/</g,'&lt;')}</td></tr>`;
-    }).join('');
-  }catch(e){}
-}
-async function rc(mode){
-  const doc=document.getElementById('docid').value.trim();if(!doc)return;
-  document.getElementById('rcout').textContent='läuft…';
-  try{const r=await j('/api/reclassify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc,mode})});
-    document.getElementById('rcout').textContent=r.ok?'✓ fertig':'✗ Fehler';load();}
-  catch(e){document.getElementById('rcout').textContent='✗ '+e.message}
-}
-
-load(); ladeVerlauf();
-setInterval(ladeVerlauf, 60000);setInterval(load,6000);
-</script></body></html>"""
-
-
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     guard(request)
-    return seite(PAGE)
+    return seite("Aktivität", "/", seiten.aktivitaet())
