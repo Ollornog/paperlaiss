@@ -75,13 +75,16 @@ function schritt(o){
   const a=ART[o.art]||['',''];
   const badge='<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
   const erg=o.ergebnis?'<span class="badge" data-variant="'+(o.variante||'secondary')+'">'+txt(o.ergebnis)+'</span>':'';
-  const regeln=(o.regeln||[]).length?'<ul class="grid gap-1">'+o.regeln.map(r=>'<li class="flex items-start gap-2"><span class="badge" data-variant="outline">'+txt(r[0])+'</span><span>'+r[1]+'</span></li>').join('')+'</ul>':'';
+  // Regeln als Tabelle „Wenn → Dann" in normaler Schrift — Plaketten mit Text waren schwer zu lesen.
+  const regeln=(o.regeln||[]).length?'<div class="overflow-x-auto"><table class="table"><thead><tr><th>Wenn</th><th>Dann</th></tr></thead><tbody>'+
+    o.regeln.map(r=>'<tr><td>'+txt(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</tbody></table></div>':'';
+  const stand=(o.stand||[]).length?'<p class="text-muted-foreground text-xs">Aktuell: '+o.stand.map(x=>txt(x[0])+' <b>'+txt(x[1])+'</b>').join(' · ')+'</p>':'';
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
   const klappen=(o.klappen||[]).length?'<div class="accordion min-w-0" data-multiple>'+o.klappen.map(k=>klapp(k[0],k[1],k[2])).join('')+'</div>':'';
   return '<div class="card" data-size="sm"'+(o.id?' id="k-'+o.id+'"':'')+'><header class="flex flex-wrap items-center justify-between gap-2">'+
     '<h2 class="flex items-center gap-2"><span class="text-muted-foreground tabular-nums">'+(o.nr||'')+'</span>'+badge+txt(o.titel)+'</h2>'+
     '<div class="flex items-center gap-2">'+erg+(o.knopf||'')+'</div></header>'+
-    '<section class="grid min-w-0 gap-3 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+klappen+'</section></div>';
+    '<section class="grid min-w-0 gap-3 text-sm">'+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
 }
 function kette(liste){let n=0;return liste.map(o=>schritt(o.art==='grenze'?o:{...o,nr:++n})).join(PFEIL_K)}
 """
@@ -294,18 +297,21 @@ function zeichnen(){
     {art:'grenze',titel:'Start — nach dem Import · KI-Knopf in Paperless · Panel'},
     {art:'paperless',titel:'Dokument laden',text:'Titel, Text, Metadaten und Felder aus Paperless.'},
     {art:'entscheidung',id:'vorpruefung',titel:'Schon klassifiziert?',knopf:knopf('vorpruefung'),
-      regeln:[['Klassifizierer '+an(CFG.enabled),'aus: automatische Läufe enden hier'],
-              ['automatisch + Tag „'+txt(CFG.marker_tag)+'“','überspringen (Schleifenschutz)'],
-              ['KI-Knopf / Panel','immer weiter']]},
+      regeln:[['der Klassifizierer ist ausgeschaltet (automatischer Lauf)','Ende'],
+              ['automatischer Lauf und das Dokument trägt den Marker-Tag','Ende — schon klassifiziert (Schleifenschutz)'],
+              ['KI-Knopf oder Panel','immer weiter'],['sonst','weiter']],
+      stand:[['Klassifizierer',an(CFG.enabled)],['Marker-Tag',CFG.marker_tag]]},
     {art:'entscheidung',id:'ocr',titel:'Text brauchbar? — sonst Mistral-OCR',knopf:knopf('ocr'),
-      regeln:[['KI-Knopf','immer OCR'],['kürzer als '+mz+' Zeichen','OCR'],
-              ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter','OCR'],
-              ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','OCR'],
-              ['Immer-OCR '+an(CFG.ocr_always),'an: jedes Dokument'],['sonst','Paperless-Text verwenden']],
+      regeln:[['KI-Knopf','Mistral-OCR'],['„Immer OCR“ ist eingeschaltet','Mistral-OCR'],
+              ['der Text ist kürzer als '+mz+' Zeichen','Mistral-OCR'],
+              ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter im Text','Mistral-OCR'],
+              ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','Mistral-OCR'],
+              ['sonst','Paperless-Text verwenden']],
+      stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
       klappen:[['Eingabe','<p>Das Dokument als PDF an <b>'+txt(CFG.ocr_model)+'</b>.</p>'],['Ausgabe','<p>Der Text als Markdown (Überschriften, Tabellen) — ersetzt den Paperless-Text.</p>']]},
     {art:'ki',id:'pass0',titel:'Pass 0 — Absender erkennen',knopf:knopf('pass0'),
       text:'Modell <b>'+txt(CFG.model)+'</b>, kurzer Aufruf.',
-      regeln:[['Absender-Mail passt zu einer bekannten Domain','Aufruf entfällt']],
+      regeln:[['die Absender-Mail passt zu einer bekannten Mail-Domain','Absender steht fest, kein KI-Aufruf'],['sonst','KI-Aufruf']],
       klappen:[['Eingabe — Anweisung',prosa(V.pass0_system||'')],['Eingabe — Nachricht',prosa('TITEL: <Titel>\n\nINHALT:\n<die ersten 2500 Zeichen>')],
                ['Ausgabe',tabelle({correspondent:'Name des Absenders oder leer'},['Feld','Bedeutung'])]]},
     {art:'code',titel:'Kandidaten suchen',text:'Namensabgleich des Absenders gegen alle Korrespondenten (auch Aliase). Die besten gehen samt Kontext an Pass 1.'},
@@ -320,16 +326,18 @@ function zeichnen(){
                   fields:'je Feld: Wert · leer (löschen) · „BEHALTEN“',document_date:'tatsächliches Dokumentdatum (JJJJ-MM-TT)',
                   summary:'kurze Zusammenfassung',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
     {art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),
-      regeln:[['KI meldet unlesbaren Text ('+an(o.nach_ki_meldung)+')','OCR nachholen, Pass 1 wiederholen'],
-              ['kein Dokumenttyp ('+an(o.wenn_kein_typ)+')','ebenso'],['kein Korrespondent ('+an(o.wenn_kein_korrespondent)+')','ebenso'],
-              ['OCR lief schon','kein zweites Mal']]},
+      regeln:[['in diesem Lauf wurde schon per OCR gelesen','weiter — kein zweites OCR'],
+              ['die KI meldet unlesbaren Text','OCR nachholen, Pass 1 wiederholen'],
+              ['kein Dokumenttyp erkannt','ebenso (wenn eingeschaltet)'],['kein Korrespondent erkannt','ebenso (wenn eingeschaltet)'],
+              ['sonst','weiter']],
+      stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
     {art:'entscheidung',titel:'Korrespondent zuordnen',
-      regeln:[['Name passt exakt','zuordnen'],['ähnliche Kandidaten','Pass 2: dieselbe KI-Unterhaltung wie Pass 1 bekommt die Kandidaten und wählt einen oder keinen'],['kein Treffer','neu anlegen']],
+      regeln:[['der Name passt exakt zu einem Korrespondenten','zuordnen'],['es gibt ähnliche Korrespondenten','Pass 2 — die KI wählt in derselben Unterhaltung einen oder keinen'],['kein Treffer','Korrespondent neu anlegen']],
       klappen:[['Pass 2 — Eingabe (eine weitere Nachricht in der Pass-1-Unterhaltung)',prosa((V.pass2_system||'')+"\nDein vorgeschlagener Absender: <Name>\nBestehende Korrespondenten, die in Frage kommen: <Namen>")],
                ['Pass 2 — Ausgabe',tabelle({match:'exakter Name aus der Kandidatenliste, oder leer'},['Feld','Bedeutung'])]]},
     {art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       text:'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.',
-      regeln:[['Paperless lehnt einen Wert ab','Selbstkorrektur: die Fehlermeldung geht in dieselbe KI-Unterhaltung, die KI korrigiert, es wird erneut geschrieben (mehrere Runden)']]},
+      regeln:[['Paperless lehnt einen Wert ab','Selbstkorrektur — die Fehlermeldung geht in dieselbe KI-Unterhaltung, die KI korrigiert, es wird erneut geschrieben (mehrere Runden)']]},
     {art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
       text:CFG.nachbearbeitung?'Skript <b>'+txt(CFG.nachbearbeitung)+'</b> bekommt das Ergebnis.':'nicht eingerichtet — nur für Zusatzschritte einer einzelnen Installation, etwa eine Verknüpfung in ein eigenes System'},
     {art:'grenze',titel:'Ende'}];
