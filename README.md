@@ -184,8 +184,9 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   name comes from a **template** with `{titel}`, `{korrespondent}`, `{typ}`, `{datum}`, `{jahr}`,
   `{monat}`, `{hinzugefuegt}`, `{id}`, `{asn}`, `{seiten}`, `{original}` and `{feld:<custom field>}`;
   optionally **numbered** (`001_`), optionally as a **ZIP** and with a **table-of-contents PDF** whose
-  entries link to the neighbouring files (remote go-to and relative URI — they work once the ZIP is
-  unpacked) and to Paperless.
+  entries link to the neighbouring files (they work once the ZIP is unpacked) and to Paperless. The
+  title is a relative URI (Chrome's PDF viewer follows it, but not a remote go-to); *Datei: …* is the
+  same file as a remote go-to for viewers that open files themselves.
 - Both can be **sorted** by any variable or custom field, ascending or descending. Source is the
   archive PDF, otherwise the original if it is a PDF; anything else is skipped and listed (in the
   dialog and under *Nicht enthalten* in the table of contents).

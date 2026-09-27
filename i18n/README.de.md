@@ -185,8 +185,10 @@ Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog b
   Dateiname kommt aus einer **Vorlage** mit `{titel}`, `{korrespondent}`, `{typ}`, `{datum}`,
   `{jahr}`, `{monat}`, `{hinzugefuegt}`, `{id}`, `{asn}`, `{seiten}`, `{original}` und
   `{feld:<benutzerdefiniertes Feld>}`; optional **durchnummeriert** (`001_`), optional als **ZIP** und
-  mit einem **Inhaltsverzeichnis-PDF**, dessen Einträge auf die Nachbardateien verlinken (Remote-Go-To
-  und relativer URI — sie greifen, sobald das ZIP entpackt ist) und nach Paperless.
+  mit einem **Inhaltsverzeichnis-PDF**, dessen Einträge auf die Nachbardateien verlinken (sie greifen,
+  sobald das ZIP entpackt ist) und nach Paperless. Der Titel ist ein relativer URI (dem folgt der
+  PDF-Betrachter von Chrome, einem Remote-Go-To nicht); *Datei: …* ist dieselbe Datei als
+  Remote-Go-To für Betrachter, die Dateien selbst öffnen.
 - Beide lassen sich nach jeder Variable oder jedem Feld **sortieren**, auf- oder absteigend. Quelle
   ist das Archiv-PDF, sonst das Original, wenn es ein PDF ist; alles andere wird übersprungen und
   genannt (im Dialog und im Verzeichnis unter *Nicht enthalten*).

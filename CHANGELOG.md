@@ -18,8 +18,9 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
     Datei; **Dateiname aus einer Vorlage** mit `{titel}` `{korrespondent}` `{typ}` `{datum}` `{jahr}`
     `{monat}` `{hinzugefuegt}` `{id}` `{asn}` `{seiten}` `{original}` und `{feld:Name}`; optional
     **durchnummeriert** (`001_`), als **ZIP** und mit **Inhaltsverzeichnis-PDF**. Dort verlinkt der
-    Titel die Nachbardatei per Remote-Go-To (PDF-Betrachter) und „Datei: …" dieselbe per relativem
-    URI (Browser) — je nach Betrachter greift das eine oder das andere; dazu der Paperless-Link.
+    Titel die Nachbardatei per relativem URI — dem folgt der PDF-Betrachter von Chrome, Remote-Go-To
+    ignoriert er (beides gemessen) —, „Datei: …" dieselbe zusätzlich per Remote-Go-To für Betrachter,
+    die Dateien selbst öffnen; dazu der Paperless-Link.
   - Beide: **Sortierung** nach einer Variable oder einem Feld, auf- oder absteigend (Text natürlich:
     „9" vor „10", Ä wie A; ohne Wert hinten; bei Gleichstand die Reihenfolge der Auswahl).
 - Quelle ist das Archiv-PDF, sonst das Original, wenn es ein PDF ist. Alles andere wird übersprungen
@@ -47,7 +48,7 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - Tests: `tests/test_export.py` (Logik, stdlib-only, dazu per AST: jeder Export-Endpunkt fragt die
   Sitzung — vor jeder Suche nach dem Auftrag —, Status und Download prüfen erneut, Start lehnt
   Unlesbares ab, der Download misst die Größe); `tests/abbild_export.py` prüft den PDF-Bau im gebauten Abbild (neuer Schritt im CI-Job
-  `image`); `tests/test_panel_js.py` prüft jetzt auch das Knopf-Skript mit `node --check`. 24
+  `image`); `tests/test_panel_js.py` prüft jetzt auch das Knopf-Skript mit `node --check`. 25
   Mutationen — je Schutz einer abgeschaltet — alle rot. Auf dem Testbett im Browser belegt: beide
   Varianten samt Downloads (mit pypdf geprüft: Sprünge, Lesezeichen, Seitenzahlen, ZIP-Namen,
   Link-Ziele, byte-gleich mit dem API-Download), Dokumente danach unverändert; Rechte, Grenzen und

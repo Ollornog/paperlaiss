@@ -110,8 +110,10 @@ def inhaltsverzeichnis(zeilen, kopf, unterzeile):
             c.setFont(normal if fehlt else fett, 10.5)
             c.drawString(x0, g1, titel)
             tb = _breite(titel, normal if fehlt else fett, 10.5)
+            # Titel → Sprung (ein PDF) bzw. Nachbardatei als relativer URI (einzeln): dem folgt der
+            # PDF-Betrachter von Chrome/Edge, Remote-Go-To ignoriert er (gemessen).
             ziel = ({"sprung": z["sprung"]} if z.get("sprung") is not None
-                    else {"datei": z["datei"]} if z.get("datei") else None)
+                    else {"relativ": z["datei"]} if z.get("datei") else None)
             if ziel:
                 links.append((s, (x0 - 2, g1 - 3, x0 + tb + 2, g1 + 11), ziel))
             if rechts:
@@ -127,11 +129,11 @@ def inhaltsverzeichnis(zeilen, kopf, unterzeile):
             c.setFillColorRGB(*GRAU)
             c.drawString(x0, g2, meta)
             if z.get("datei"):
-                # „Datei: <name>" als zweiter Weg zur Nachbardatei (relativer URI) — manche
-                # Betrachter folgen nur Remote-Go-To, andere nur URIs.
+                # „Datei: <name>" als zweiter Weg zur Nachbardatei, per Remote-Go-To — für
+                # Betrachter, die eine Datei lieber selbst öffnen als über einen URI.
                 anteil = _kuerzen("Datei: " + z["datei"], normal, 8.5, _breite(meta, normal, 8.5))
                 links.append((s, (x0 - 2, g2 - 3, x0 + _breite(anteil, normal, 8.5) + 2, g2 + 9),
-                              {"relativ": z["datei"]}))
+                              {"datei": z["datei"]}))
             if pl:
                 c.setFillColorRGB(*BLAU)
                 c.drawRightString(rechter_rand, g2, _t(pl))

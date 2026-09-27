@@ -213,6 +213,9 @@ try:
     r.check("Einzeln: Titel und Dateiname verlinken die Nachbardatei (Remote-Go-To und relativer URI)",
             [x[1] for x in z if x[0] == "datei"] == namen
             and [unquote(x[1][2:]) for x in z if x[0] == "uri" and x[1].startswith("./")] == namen, str(z))
+    titel_links = [x for x in z if x[0] != "uri" or not x[1].startswith("https://")][0::2]
+    r.check("Einzeln: der Titel (erster Link je Zeile) ist der relative URI — dem folgt Chrome, Remote-Go-To nicht",
+            all(x[0] == "uri" and x[1].startswith("./") for x in titel_links), str(titel_links))
     r.check("Einzeln: relative Links zeigen in denselben Ordner, nie hinaus",
             all(x[1].startswith("./") and "/" not in x[1][2:] for x in z if x[0] == "uri" and not x[1].startswith("http")))
     r.check("Einzeln: je Dokument ein Link nach Paperless (auch das übersprungene)",
