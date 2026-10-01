@@ -210,25 +210,154 @@
 
   // ---------- Mehrfachauswahl: Einträge im Menü „Actions" ----------
   // Paperless hält die Auswahl nur im Speicher der App. Lesbar sind die angehakten Kästchen der
-  // sichtbaren Seite (Tabelle: docCheck<id>, Karten: smallCardCheck<id>). Mit „Alle auswählen"
-  // über mehrere Seiten sind mehr markiert als sichtbar — dann wird das offen gesagt.
-  function auswahl() {
-    return Array.from(document.querySelectorAll('input[id^="docCheck"]:checked, input[id^="smallCardCheck"]:checked'))
-      .map((el) => parseInt(el.id.replace(/\D+/g, ""), 10)).filter((n) => n > 0);
+  // sichtbaren Seite (Tabelle: docCheck<id>, Karten: smallCardCheck<id>) und der Auswahlzähler.
+  // Mit „Alles auswählen" über mehrere Seiten merkt sich Paperless 3 nur „alles, außer …" — die
+  // IDs der anderen Seiten stehen nirgends im Browser. Deshalb hört das Skript die Listenabfragen
+  // von Paperless mit (Filter, Sortierung, Anzahl, IDs der Seite) und holt bei „Alles auswählen"
+  // die übrigen IDs mit genau diesen Filtern selbst. (`all` in der Antwort gibt es nur bis
+  // API-Version 9, das Frontend fragt mit 10.) Befund 2026-10-01: ohne das exportierte der Knopf
+  // von 91 markierten Dokumenten still nur die 50 der sichtbaren Seite.
+  const LISTEN = [];        // die letzten Listenabfragen: {seite: [ids], abfrage: "filter=…", anzahl}
+  const NICHT_FILTER = ["page", "page_size", "truncate_content", "include_selection_data", "fields", "format"];
+
+  function listeMerken(url, text) {
+    try {
+      const u = new URL(url, location.href);
+      if (!/\/api\/documents\/?$/.test(u.pathname) || !u.searchParams.has("page")) return;
+      const j = typeof text === "string" ? JSON.parse(text) : text;
+      if (!j || typeof j.count !== "number" || !Array.isArray(j.results)) return;
+      NICHT_FILTER.forEach((k) => u.searchParams.delete(k));
+      LISTEN.unshift({ seite: j.results.map((d) => d.id), abfrage: u.searchParams.toString(), anzahl: j.count });
+      LISTEN.length = Math.min(LISTEN.length, 5);
+    } catch (e) { /* keine Liste — nichts merken */ }
   }
 
+  // Alle IDs einer gemerkten Abfrage, in ihrer Sortierung — mit der Sitzung des Nutzers, also nur,
+  // was er sehen darf. Seitenweise, damit auch eine große Auswahl keine Riesenantwort braucht.
+  async function alleIds(abfrage) {
+    const ids = [];
+    for (let seite = 1; seite <= 100; seite++) {
+      const u = new URL("api/documents/", document.baseURI);
+      u.search = abfrage;
+      u.searchParams.set("fields", "id");
+      u.searchParams.set("page_size", "500");
+      u.searchParams.set("page", String(seite));
+      const r = await fetch(u.href, { credentials: "include", headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("Paperless antwortet " + r.status);
+      const j = await r.json();
+      (j.results || []).forEach((d) => ids.push(d.id));
+      if (!j.next) return ids;
+    }
+    throw new Error("Auswahl zu groß");
+  }
+
+  // Mithören, ohne Paperless zu stören: jede Ausnahme hier bleibt hier.
+  (function mithoeren() {
+    const X = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+    if (X && !X.__paperlaiss) {
+      X.__paperlaiss = true;
+      const open = X.open, send = X.send;
+      X.open = function (methode, url) { this.__plUrl = String(url); return open.apply(this, arguments); };
+      X.send = function () {
+        if (this.__plUrl && this.__plUrl.indexOf("documents") >= 0) {
+          this.addEventListener("load", () => {
+            try {
+              const t = this.responseType === "json" ? this.response
+                : (this.responseType === "" || this.responseType === "text") ? this.responseText : null;
+              if (t) listeMerken(this.responseURL || this.__plUrl, t);
+            } catch (e) { /* nichts */ }
+          });
+        }
+        return send.apply(this, arguments);
+      };
+    }
+    if (window.fetch && !window.fetch.__paperlaiss) {
+      const f = window.fetch;
+      const neu = function (eingabe) {
+        const p = f.apply(this, arguments);
+        try {
+          const url = typeof eingabe === "string" ? eingabe : (eingabe && eingabe.url) || "";
+          if (url.indexOf("documents") >= 0) {
+            p.then((r) => r.clone().text().then((t) => listeMerken(r.url || url, t))).catch(() => {});
+          }
+        } catch (e) { /* nichts */ }
+        return p;
+      };
+      neu.__paperlaiss = true;
+      window.fetch = neu;
+    }
+  })();
+
+  // <auswahl-logik> — rein, ohne DOM; tests/test_knoepfe_auswahl.py prüft sie mit node.
+  // e = {markiert: [ids angehakt, sichtbar], sichtbar: [ids der Seite], gesamt: Zähler von Paperless
+  // oder null, listen: [{seite, abfrage, anzahl}]}. Ergebnis: {ids}, {alleSeiten, abfrage, anzahl}
+  // (IDs holt alleIds) oder {fehler}. Nie still kürzen.
+  function auswahlBestimmen(e) {
+    const markiert = e.markiert || [], sichtbar = e.sichtbar || [];
+    const gesamt = typeof e.gesamt === "number" && e.gesamt >= 0 ? e.gesamt : null;
+    const gleich = (a, b) => a.length === b.length && a.every((x) => b.indexOf(x) >= 0);
+    const liste = (e.listen || []).find((l) => gleich(l.seite, sichtbar)) || null;
+    const mehrSeiten = liste ? liste.anzahl > sichtbar.length : null;
+    if (gesamt === null) {
+      // Zähler nicht gefunden: der sichtbaren Auswahl nur trauen, wenn es keine weiteren Seiten gibt.
+      if (!markiert.length) return { fehler: "keine Dokumente markiert" };
+      if (mehrSeiten === false) return { ids: markiert };
+      return { fehler: "Paperless zeigt nicht an, wie viele Dokumente markiert sind, und die Liste hat " +
+        "mehrere Seiten — die Auswahl lässt sich nicht sicher bestimmen. Seite neu laden und erneut versuchen." };
+    }
+    if (gesamt === 0 || (!markiert.length && !mehrSeiten)) return { fehler: "keine Dokumente markiert" };
+    if (gesamt === markiert.length) return { ids: markiert };
+    if (gesamt > markiert.length && liste && markiert.length === sichtbar.length && gesamt === liste.anzahl) {
+      return { alleSeiten: true, abfrage: liste.abfrage, anzahl: gesamt };   // „Alles auswählen", nichts abgewählt
+    }
+    if (!liste) {
+      return { fehler: `Markiert sind ${gesamt}, auf dieser Seite sichtbar ${markiert.length} — die übrigen ` +
+        "kann paperlaiss gerade nicht lesen. Seite neu laden und erneut versuchen." };
+    }
+    return { fehler: `Markiert sind ${gesamt}, auf dieser Seite sichtbar ${markiert.length}. Über mehrere Seiten ` +
+      "geht der Export nur mit „Alles auswählen“ ohne einzelne Abwahl — sonst die Seitengröße erhöhen, " +
+      "bis alle markierten auf einer Seite stehen." };
+  }
+  // </auswahl-logik>
+
+  function sichtbareKaestchen() {
+    return Array.from(document.querySelectorAll('input[id^="docCheck"], input[id^="smallCardCheck"]'))
+      .map((el) => ({ id: parseInt(el.id.replace(/\D+/g, ""), 10), an: el.checked })).filter((k) => k.id > 0);
+  }
+
+  // Der Auswahlzähler („× 91") — ein clearable-badge der Dokumentliste, aber NICHT eines der
+  // Filter-Menüs (die tragen dasselbe Element; bis 2026-10-01 griff der Selektor eines davon).
   function markiertLautPaperless() {
-    const b = document.querySelector("pngx-document-list pngx-clearable-badge");
+    const b = Array.from(document.querySelectorAll("pngx-document-list pngx-clearable-badge"))
+      .find((el) => !el.closest("pngx-filter-editor, pngx-filterable-dropdown, pngx-bulk-editor, .dropdown-menu"));
     const n = b ? parseInt((b.textContent || "").replace(/\D+/g, ""), 10) : NaN;
     return isNaN(n) ? null : n;
   }
 
-  function mehrfach(weiter) {
-    const ids = auswahl(), gesamt = markiertLautPaperless();
-    if (!ids.length) { meldung("paperlaiss: keine sichtbaren Dokumente markiert.", "warning"); return; }
-    if (gesamt !== null && gesamt > ids.length &&
-        !confirm(`Markiert sind ${gesamt}, sichtbar sind ${ids.length}. paperlaiss verarbeitet nur die ` +
-                 `${ids.length} sichtbaren. Fortfahren?`)) return;
+  let auswahlLaeuft = false;      // Reklick auf den Menüeintrag, während die Auswahl gelesen wird
+  async function mehrfach(weiter) {
+    if (auswahlLaeuft) return;
+    const k = sichtbareKaestchen();
+    const a = auswahlBestimmen({ markiert: k.filter((x) => x.an).map((x) => x.id), sichtbar: k.map((x) => x.id),
+      gesamt: markiertLautPaperless(), listen: LISTEN });
+    if (a.fehler) { meldung("paperlaiss: " + a.fehler, "warning"); return; }
+    if (!a.alleSeiten) { weiter(a.ids); return; }
+    auswahlLaeuft = true;
+    let ids;
+    try {
+      meldung(`paperlaiss: Auswahl über alle Seiten wird gelesen (${a.anzahl} Dokumente) …`, "info");
+      ids = await alleIds(a.abfrage);
+    } catch (e) {
+      meldung("paperlaiss: Auswahl nicht lesbar — " + e.message, "danger");
+      return;
+    } finally { auswahlLaeuft = false; }
+    if (ids.length !== a.anzahl) {
+      meldung(`paperlaiss: Markiert sind ${a.anzahl}, Paperless liefert für diesen Filter jetzt ${ids.length} — ` +
+              "die Liste hat sich geändert. Seite neu laden und erneut auswählen.", "warning");
+      return;
+    }
+    const m = document.getElementById(MARKE + "-meldung");
+    if (m) m.remove();
     weiter(ids);
   }
 
@@ -270,7 +399,8 @@
     return new URL((b && b.getAttribute("href")) || "/", location.href).href;
   }
 
-  async function herunterladen(job, nr, name) {
+  // Lädt eine fertige Datei und meldet den Fortschritt (0–100, oder null ohne Content-Length).
+  async function herunterladen(job, nr, name, fortschritt) {
     const r = await fetch(PANEL + "/knopf/export/" + encodeURIComponent(job) + "/datei/" + nr,
       { credentials: "include", headers: { "X-Paperlaiss": "1" } });
     if (!r.ok) {
@@ -278,7 +408,23 @@
       try { t = JSON.parse(t).detail || t; } catch (e) { /* Text lassen */ }
       throw new Error(r.status + " " + String(t).slice(0, 200));
     }
-    const url = URL.createObjectURL(await r.blob());
+    let blob;
+    const laenge = parseInt(r.headers.get("Content-Length") || "", 10);
+    if (r.body && r.body.getReader && fortschritt) {
+      const leser = r.body.getReader(), teile = [];
+      let da = 0;
+      for (;;) {
+        const { done, value } = await leser.read();
+        if (done) break;
+        teile.push(value);
+        da += value.length;
+        fortschritt(laenge > 0 ? Math.min(100, Math.round(100 * da / laenge)) : null, da);
+      }
+      blob = new Blob(teile, { type: r.headers.get("Content-Type") || "application/octet-stream" });
+    } else {
+      blob = await r.blob();
+    }
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
@@ -288,9 +434,22 @@
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
+  // Reklick-Schutz: es gibt höchstens EINEN Export-Dialog. Ein zweiter Klick auf „Export" holt den
+  // offenen nach vorn, statt einen zweiten Export anzustoßen.
+  let exportDialogOeffnet = false;
   async function dialogExport(ids) {
+    const offen = document.querySelector("dialog." + MARKE + "-export");
+    if (offen) { if (!offen.open) offen.showModal(); offen.focus(); return; }
+    if (exportDialogOeffnet) return;
+    exportDialogOeffnet = true;
     let opt;
-    try { opt = await panel("/knopf/export/optionen"); } catch (e) { meldung("paperlaiss: " + e.message, "danger"); return; }
+    try {
+      meldung("paperlaiss: Export-Dialog wird geladen …", "info");
+      opt = await panel("/knopf/export/optionen");
+      const m = document.getElementById(MARKE + "-meldung");
+      if (m) m.remove();
+    } catch (e) { meldung("paperlaiss: " + e.message, "danger"); return; }
+    finally { exportDialogOeffnet = false; }
     if (ids.length > opt.grenzen.dokumente) {
       meldung(`paperlaiss: höchstens ${opt.grenzen.dokumente} Dokumente je Export — markiert sind ${ids.length}.`, "warning");
       return;
@@ -306,7 +465,7 @@
     const haken = (name, text, an) => '<div class="form-check"><input class="form-check-input" type="checkbox" name="' + name +
       '" id="pl-' + name + '"' + (an ? " checked" : "") + '><label class="form-check-label" for="pl-' + name + '">' + text + "</label></div>";
     const dlg = document.createElement("dialog");
-    dlg.className = "p-0 border-0 rounded shadow";
+    dlg.className = "p-0 border-0 rounded shadow " + MARKE + "-export";
     dlg.innerHTML =
       '<form method="dialog" class="card" style="width:min(620px,94vw)">' +
       // Ohne diesen ersten, gesperrten Knopf schlösse „Enter" im Dateinamen den Dialog.
@@ -339,7 +498,7 @@
       '<div class="small mt-2" data-text></div><div class="small mt-2" data-ergebnis></div></div>' +
       "</div>" +
       '<div class="card-footer d-flex gap-2 justify-content-end">' +
-      '<button value="nein" class="btn btn-sm btn-outline-secondary">Schließen</button>' +
+      '<button type="button" class="btn btn-sm btn-outline-secondary" data-zu>Schließen</button>' +
       '<button type="button" class="btn btn-sm btn-primary" data-los>Exportieren</button></div></form>';
     document.body.appendChild(dlg);
     const f = dlg.querySelector("form");
@@ -358,26 +517,80 @@
     }));
     dlg.addEventListener("close", () => dlg.remove());
     const los = dlg.querySelector("[data-los]");
+    const balken = dlg.querySelector(".progress-bar");
     const text = (t, fehler) => {
       const el = dlg.querySelector("[data-text]");
       el.className = "small mt-2" + (fehler ? " text-danger" : "");
       el.textContent = t;
     };
+    // Ein Zustand für Knopf, Balken und Formular: „bereit" | „vorbereiten" | „laden" | „fertig".
+    // Solange vorbereitet oder heruntergeladen wird, ist der Knopf gesperrt und sagt, was läuft.
+    let zustand = "bereit";
+    const laeuft = () => zustand === "vorbereiten" || zustand === "laden";
+    const setzen = (z, prozent) => {
+      zustand = z;
+      los.disabled = laeuft();
+      los.setAttribute("aria-busy", laeuft() ? "true" : "false");
+      const spinner = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>';
+      los.innerHTML = z === "vorbereiten" ? spinner + "Wird vorbereitet …"
+        : z === "laden" ? spinner + "Wird heruntergeladen …"
+        : z === "fertig" ? "Neu exportieren" : "Exportieren";
+      f.querySelectorAll("input, select").forEach((el) => { el.disabled = laeuft(); });
+      if (typeof prozent === "number") balken.style.width = prozent + "%";
+      balken.classList.toggle("bg-success", z === "laden" || z === "fertig");
+      balken.classList.toggle("progress-bar-striped", laeuft());
+      balken.classList.toggle("progress-bar-animated", laeuft());
+    };
+    const schliessen = () => {
+      if (laeuft() && !confirm("Der Export läuft noch. Dialog trotzdem schließen? " +
+                               "Die Dateien werden dann nicht heruntergeladen.")) return;
+      dlg.close();
+    };
+    dlg.querySelector("[data-zu]").addEventListener("click", schliessen);
+    dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); schliessen(); });   // Esc
+
+    // Eine Datei laden, mit Stand in Text, Balken und (beim Klick) im Link selbst. Nie zwei
+    // Downloads gleichzeitig — weder automatisch noch per Klick.
+    let ladeSperre = false;
+    const dateiLaden = async (job, st, nr, knopf) => {
+      if (ladeSperre) return false;
+      ladeSperre = true;
+      const d = st.dateien[nr], vorher = knopf ? knopf.innerHTML : "";
+      if (knopf) knopf.disabled = true;
+      const zeigen = (p, da) => {
+        const stand = p === null ? groesse(da) : p + " %";
+        text(`Wird heruntergeladen: ${d.name} (Datei ${nr + 1} von ${st.dateien.length}) — ${stand}`);
+        if (knopf) knopf.textContent = d.name + " — " + stand;
+        if (p !== null) balken.style.width = Math.round((100 * nr + p) / st.dateien.length) + "%";
+      };
+      try {
+        zeigen(0, 0);
+        await herunterladen(job, nr, d.name, zeigen);
+        return true;
+      } catch (e) {
+        text("paperlaiss: Herunterladen fehlgeschlagen — " + e.message, true);
+        return false;
+      } finally {
+        ladeSperre = false;
+        if (knopf) { knopf.disabled = false; knopf.innerHTML = vorher; }
+      }
+    };
+
     los.addEventListener("click", async () => {
+      if (laeuft()) return;                                   // Reklick während des Laufs
       const daten = {
         docs: ids, art: art(), seitenzahlen: feld("seitenzahlen").checked,
         inhalt: art() === "ein" ? feld("inhalt").checked : feld("verzeichnis").checked,
         zip: feld("zip").checked, vorlage: feld("vorlage").value, nummerieren: feld("nummerieren").checked,
         sortierung: feld("sortierung").value, absteigend: feld("richtung").value === "ab", basis: paperlessBasis(),
       };
-      los.disabled = true;
+      setzen("vorbereiten", 0);
       teil("stand").hidden = false;
       dlg.querySelector("[data-ergebnis]").innerHTML = "";
-      text("Export wird gestartet …");
+      text("Export wird vorbereitet …");
       let job;
       try { job = (await panel("/knopf/export", daten)).job; }
-      catch (e) { text("paperlaiss: " + e.message, true); los.disabled = false; return; }
-      const balken = dlg.querySelector(".progress-bar");
+      catch (e) { text("paperlaiss: " + e.message, true); setzen("bereit", 0); return; }
       let st = null;
       for (let i = 0; i < 1200 && dlg.isConnected; i++) {
         await new Promise((ok) => setTimeout(ok, 1500));
@@ -388,14 +601,16 @@
           continue;
         }
         balken.style.width = Math.round(100 * (st.status === "fertig" ? 1 : st.fertig / Math.max(1, st.gesamt))) + "%";
-        text(st.status === "fehler" ? st.meldung : st.status === "fertig" ? "Fertig." : st.schritt + " …", st.status === "fehler");
+        text(st.status === "fehler" ? st.meldung
+          : st.status === "fertig" ? "Vorbereitet." : "Wird vorbereitet: " + st.schritt + " …", st.status === "fehler");
         if (st.status === "fertig" || st.status === "fehler") break;
       }
-      if (!st || !["fertig", "fehler"].includes(st.status)) { los.disabled = false; return; }
+      if (!dlg.isConnected) return;
+      if (!st || !["fertig", "fehler"].includes(st.status)) { setzen("bereit"); return; }
       const erg = dlg.querySelector("[data-ergebnis]");
       let h = "";
       if (st.dateien.length) {
-        h += '<div class="mb-1">Heruntergeladen (' + st.aufbewahrung_min + " Minuten lang erneut abrufbar):</div>" +
+        h += '<div class="mb-1">Dateien (' + st.aufbewahrung_min + " Minuten lang erneut abrufbar):</div>" +
           st.dateien.map((d, nr) => '<div><button type="button" class="btn btn-link btn-sm p-0" data-nr="' + nr + '">' +
             esc(d.name) + "</button> · " + groesse(d.groesse) + "</div>").join("");
       }
@@ -404,16 +619,26 @@
           st.uebersprungen.map((u) => "<div>#" + esc(u.id) + " " + esc(u.titel) + " — " + esc(u.grund) + "</div>").join("");
       }
       erg.innerHTML = h;
-      erg.querySelectorAll("[data-nr]").forEach((b) => b.addEventListener("click", () => {
-        const d = st.dateien[+b.dataset.nr];
-        herunterladen(job, +b.dataset.nr, d.name).catch((e) => text("paperlaiss: " + e.message, true));
+      if (st.status === "fehler") { setzen("bereit"); return; }
+      erg.querySelectorAll("[data-nr]").forEach((b) => b.addEventListener("click", async () => {
+        if (laeuft()) return;
+        setzen("laden");
+        if (await dateiLaden(job, st, +b.dataset.nr, b)) text("Heruntergeladen: " + st.dateien[+b.dataset.nr].name);
+        setzen("fertig", 100);
       }));
-      los.disabled = false;
       // Sofort herunterladen, eine Datei nach der anderen (bei mehreren fragt der Browser einmal nach).
-      for (let nr = 0; nr < st.dateien.length; nr++) {
-        try { await herunterladen(job, nr, st.dateien[nr].name); }
-        catch (e) { text("paperlaiss: " + e.message, true); break; }
-        await new Promise((ok) => setTimeout(ok, 400));
+      setzen("laden", 0);
+      let ok = 0;
+      for (let nr = 0; nr < st.dateien.length && dlg.isConnected; nr++) {
+        if (!(await dateiLaden(job, st, nr, null))) break;
+        ok++;
+        await new Promise((weiter) => setTimeout(weiter, 400));
+      }
+      if (!dlg.isConnected) return;
+      setzen("fertig", 100);
+      if (ok === st.dateien.length) {
+        text(`Fertig: ${ok} Datei${ok !== 1 ? "en" : ""} heruntergeladen` +
+             (st.uebersprungen.length ? `, ${st.uebersprungen.length} Dokument(e) nicht enthalten.` : "."));
       }
     });
     dlg.showModal();

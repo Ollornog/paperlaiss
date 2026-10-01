@@ -218,6 +218,13 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   entries link to the neighbouring files (they work once the ZIP is unpacked) and to Paperless. The
   title is a relative URI (Chrome's PDF viewer follows it, but not a remote go-to); *Datei: …* is the
   same file as a remote go-to for viewers that open files themselves.
+  An empty value takes its separator and an empty bracket with it (`{datum}_{titel} ({feld:Projekt})`
+  without date and project → `Rechnung`); if everything is empty, the file is `dokument-<id>`.
+- **Selection across pages:** with "Select all" the export takes every document of the filter, not
+  just the visible page. If the selection is ambiguous (some deselected, picked by hand across
+  pages), the button says so instead of exporting only part of it.
+- While preparing and downloading, the button is locked and shows the progress; a second click does
+  not start a second export.
 - Both can be **sorted** by any variable or custom field, ascending or descending. Source is the
   archive PDF, otherwise the original if it is a PDF; anything else is skipped and listed (in the
   dialog and under *Nicht enthalten* in the table of contents).

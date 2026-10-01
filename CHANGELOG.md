@@ -6,6 +6,31 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Export nimmt die ganze Auswahl, Knopf mit Reklick-Schutz
+
+- **Export kürzte still auf die sichtbare Seite:** von 91 markierten Dokumenten kamen 50 an.
+  Das Knopf-Skript las nur die angehakten Kästchen der Seite; bei „Alles auswählen“ hält
+  Paperless 3 die übrigen IDs nirgends im Browser. Die Warnung „markiert X, sichtbar Y“ blieb
+  aus, weil der Selektor zuerst das Badge eines Filters traf. Jetzt hört das Skript die
+  Listenabfragen von Paperless mit (Filter, Sortierung, Anzahl) und holt bei „Alles auswählen“
+  alle IDs mit genau diesen Filtern über die Sitzung des Nutzers, geprüft gegen den
+  Auswahlzähler. Ist die Auswahl nicht eindeutig (Abwahl nach „Alles auswählen“, von Hand über
+  mehrere Seiten), gibt es eine Meldung statt eines halben Exports. Gilt auch für den KI-Knopf.
+- Das Init-Skript hängt das Knopf-Skript jetzt **im Kopf** der Seite ein (vor Paperless'
+  `main.js`), damit es die erste Listenabfrage mithört; eine alte Zeile vor `</body>` wird
+  umgezogen.
+- **Reklick-Schutz:** höchstens ein Export-Dialog; „Exportieren“ ist gesperrt, solange
+  vorbereitet oder heruntergeladen wird, und sagt das („Wird vorbereitet …“, „Wird
+  heruntergeladen … 60 %“), danach „Neu exportieren“. Nie zwei Downloads gleichzeitig;
+  Schließen während des Laufs fragt nach.
+- **Leere Felder im Dateinamen:** ein leerer Platzhalter nimmt sein Trennzeichen und eine leere
+  Klammer mit — `{datum}_{feld:Projekt}_{titel}` ohne Datum und Projekt ergibt `Rechnung`
+  statt `__Rechnung`, `{korrespondent} - {titel} ({feld:Projekt})` ergibt `ACME - Rechnung`
+  statt `ACME - Rechnung ()`.
+- Tests: `tests/test_knoepfe_auswahl.py` (Auswahl-Logik per node, Init-Skript gegen eine
+  Attrappe der Startseite), Dateinamen in `tests/test_export.py`; vier Mutationen, alle rot.
+  Im Browser gegen das Testbett: 93 von 93 Dokumenten über zwei Seiten, drei Klicks → ein Export.
+
 ### Geändert — Tests
 
 - Geteilte Testbasis auf repokit 0.27.1. `tests/test_repo.py` ruft die neue Prüfung

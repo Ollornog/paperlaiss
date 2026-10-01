@@ -138,6 +138,21 @@ r.check("Füllen: Titel mit Schrägstrich legt keinen Ordner an",
 r.check("Füllen: benutzerdefiniertes Feld", el.vorlage_fuellen("{feld:status}_{id}", _v) == "bezahlt_12")
 r.check("Füllen: alles leer → dokument-<id>",
         el.vorlage_fuellen("{korrespondent}", el.dokument_variablen({"id": 5}, {})) == "dokument-5")
+_leer = {"werte": {"titel": "Rechnung", "datum": "", "id": "42", "korrespondent": "ACME"},
+         "felder": {"Projekt": "", "Nr": "7"}}
+for _vor, _soll in (("{datum}_{feld:Projekt}_{titel}", "Rechnung"),          # vorn: Trenner fallen ganz weg
+                    ("{titel}_{datum}", "Rechnung"),                          # hinten ebenso
+                    ("{korrespondent}_{datum}_{feld:Projekt}_{titel}", "ACME_Rechnung"),  # Mitte: EIN Trenner
+                    ("{titel} - {datum} - {feld:Nr}", "Rechnung - 7"),
+                    ("{korrespondent} - {titel} ({feld:Projekt})", "ACME - Rechnung"),   # leere Klammer weg
+                    ("{korrespondent} [{datum}] {titel}", "ACME Rechnung"),
+                    ("{titel} ({feld:Nr})", "Rechnung (7)"),                  # volle Klammer bleibt
+                    ("Scan {datum}", "Scan"),
+                    ("({datum}) {feld:Projekt}", "dokument-42")):
+    r.check(f"Füllen mit leeren Werten: {_vor!r} → {_soll!r}", el.vorlage_fuellen(_vor, _leer) == _soll,
+            repr(el.vorlage_fuellen(_vor, _leer)))
+r.check("Füllen: Nullbyte in der Vorlage ist keine Leer-Marke",
+        el.vorlage_fuellen("A\x00_{titel}", _leer) == "A_Rechnung", repr(el.vorlage_fuellen("A\x00_{titel}", _leer)))
 r.check("Nummer: dreistellig, bei mehr als 999 breiter", el.nummer(7, 12) == "007_" and el.nummer(7, 1200) == "0007_")
 r.check("Eindeutig: zweiter und dritter bekommen (2), (3)",
         el.eindeutig(["a.pdf", "a.pdf", "a.pdf"]) == ["a.pdf", "a (2).pdf", "a (3).pdf"])

@@ -335,14 +335,43 @@ def sicherer_name(roh, max_bytes=MAX_STAMM_BYTES, ersatz="dokument"):
     return s
 
 
+# Trennzeichen zwischen Platzhaltern. Fällt ein Platzhalter leer aus, verschwindet mit ihm das
+# Trennzeichen daneben — sonst hieße die Datei „__Rechnung" oder „- Rechnung ()".
+_TRENNER = r"[\s_\-.,;:+~|·–—]"
+_LEER = "\x00"            # Marke für einen leeren Platzhalter; kommt in keinem entschärften Wert vor
+_LEER_LAUF = re.compile(f"{_TRENNER}*{_LEER}(?:{_TRENNER}*{_LEER})*{_TRENNER}*")
+_LEER_KLAMMER = re.compile(r"[(\[]" + f"{_TRENNER}*{_LEER}(?:{_TRENNER}*{_LEER})*{_TRENNER}*" + r"[)\]]")
+
+
+def _leere_wegraeumen(text):
+    """Leere Platzhalter samt Trennzeichen und leerer Klammer entfernen.
+
+    Am Anfang und Ende fällt der ganze Trennzeichen-Lauf weg; in der Mitte bleibt EIN Trenner —
+    der links vom leeren Platzhalter, sonst der rechts davon („A_{leer}_B" → „A_B",
+    „A {leer}- B" → „A B")."""
+    text = _LEER_KLAMMER.sub(_LEER, text)
+
+    def ersetzen(m):
+        if m.start() == 0 or m.end() == len(text):
+            return ""
+        lauf = m.group(0)
+        links = re.match(f"{_TRENNER}*", lauf).group(0)
+        rechts = re.search(f"{_TRENNER}*$", lauf).group(0)
+        return links or rechts
+    return _LEER_LAUF.sub(ersetzen, text)
+
+
 def vorlage_fuellen(vorlage, variablen):
     """Die Vorlage mit den Werten eines Dokuments füllen → Dateiname-Stamm (ohne Endung).
 
     Jeder Wert wird VOR dem Einsetzen entschärft (ein Titel „2025/26" legt keinen Ordner an), das
-    Ergebnis danach noch einmal als Ganzes. Leer bleibt nie: dann „dokument-<id>".
+    Ergebnis danach noch einmal als Ganzes. Ein leerer Wert nimmt sein Trennzeichen und eine leere
+    Klammer mit („{datum}_{titel} ({feld:Projekt})" ohne Datum und Projekt → „Rechnung").
+    Leer bleibt nie: dann „dokument-<id>".
     """
     werte = variablen.get("werte", {})
     felder = variablen.get("felder", {})
+    vorlage = vorlage.replace(_LEER, "")
 
     def ersetzen(m):
         n = m.group(1).strip()
@@ -351,9 +380,10 @@ def vorlage_fuellen(vorlage, variablen):
             wert = felder.get(feld, "") if feld else ""
         else:
             wert = werte.get(n.lower(), "")
-        return sicherer_name(wert, ersatz="") if wert else ""
+        return (sicherer_name(wert, ersatz="") if wert else "") or _LEER
 
-    return sicherer_name(_PLATZHALTER.sub(ersetzen, vorlage), ersatz=f"dokument-{werte.get('id', '')}".rstrip("-"))
+    return sicherer_name(_leere_wegraeumen(_PLATZHALTER.sub(ersetzen, vorlage)),
+                         ersatz=f"dokument-{werte.get('id', '')}".rstrip("-"))
 
 
 def nummer(i, anzahl):
