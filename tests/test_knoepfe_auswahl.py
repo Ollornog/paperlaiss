@@ -38,45 +38,67 @@ r.check("Knopf-Skript: Auswahl-Logik zwischen den Marken gefunden", bool(m))
 
 SEITE = list(range(1, 51))                 # 50 sichtbare Dokumente
 LISTE = {"seite": SEITE, "abfrage": "tags__id__all=60&ordering=-created", "anzahl": 91}
+NACHFRAGEN = {"nachfragen": True, "anzahl": None}
 FAELLE = [
-    # (Name, Eingabe, erwartete IDs oder None für Fehler)
+    # (Name, Eingabe, erwartetes Ergebnis: Liste = ids, dict = genau so, None = Fehler)
     ("eine Seite, einzelne markiert", {"markiert": [3, 5], "sichtbar": SEITE, "gesamt": 2, "listen": [LISTE]}, [3, 5]),
-    ("Befund 2026-10-01: Alles auswählen, 91 über zwei Seiten → alle 91",
+    ("Befund 2026-10-01: Alles auswählen, 91 über zwei Seiten → Filter holen",
      {"markiert": SEITE, "sichtbar": SEITE, "gesamt": 91, "listen": [LISTE]},
-     {"alleSeiten": True, "abfrage": "tags__id__all=60&ordering=-created", "anzahl": 91}),
-    ("Alles auswählen, aber eines auf der Seite abgewählt → Fehler statt raten",
-     {"markiert": SEITE[1:], "sichtbar": SEITE, "gesamt": 90, "listen": [LISTE]}, None),
-    ("Alles auswählen, Abwahl auf einer ANDEREN Seite (Zähler 90) → Fehler statt 91",
-     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": 90, "listen": [LISTE]}, None),
-    ("von Hand über zwei Seiten markiert (nur 2 sichtbar) → Fehler statt 2",
-     {"markiert": [1, 2], "sichtbar": SEITE, "gesamt": 7, "listen": [LISTE]}, None),
-    ("mehr markiert, aber keine passende Listenantwort → Fehler",
-     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": 91, "listen": []}, None),
+     {"abfrage": "tags__id__all=60&ordering=-created", "ausser": [], "anzahl": 91}),
+    ("Alles auswählen, eines abgewählt → Paperless fragen",
+     {"markiert": SEITE[1:], "sichtbar": SEITE, "gesamt": 90, "listen": [LISTE]}, {"nachfragen": True, "anzahl": 90}),
+    ("Abwahl auf einer ANDEREN Seite (Zähler 90) → Paperless fragen, nicht 91 nehmen",
+     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": 90, "listen": [LISTE]}, {"nachfragen": True, "anzahl": 90}),
+    ("von Hand über zwei Seiten (2 sichtbar, 7 markiert) → Paperless fragen",
+     {"markiert": [1, 2], "sichtbar": SEITE, "gesamt": 7, "listen": [LISTE]}, {"nachfragen": True, "anzahl": 7}),
+    ("auf dieser Seite nichts, auf einer anderen 3 → Paperless fragen",
+     {"markiert": [], "sichtbar": SEITE, "gesamt": 3, "listen": [LISTE]}, {"nachfragen": True, "anzahl": 3}),
+    ("keine passende Listenantwort → Paperless fragen",
+     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": 91, "listen": []}, {"nachfragen": True, "anzahl": 91}),
     ("Listenantwort einer anderen Seite (Dashboard) zählt nicht",
      {"markiert": SEITE, "sichtbar": SEITE, "gesamt": 91,
-      "listen": [{"seite": [1, 2], "abfrage": "", "anzahl": 91}]}, None),
+      "listen": [{"seite": [1, 2], "abfrage": "", "anzahl": 91}]}, {"nachfragen": True, "anzahl": 91}),
     ("Zähler unlesbar, Liste hat nur eine Seite → sichtbare Auswahl",
      {"markiert": [4], "sichtbar": [4, 5], "gesamt": None, "listen": [{"seite": [4, 5], "abfrage": "", "anzahl": 2}]}, [4]),
-    ("Zähler unlesbar, Liste hat mehrere Seiten → Fehler",
-     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": None, "listen": [LISTE]}, None),
-    ("Zähler unlesbar, keine Liste → Fehler",
-     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": None, "listen": []}, None),
+    ("Zähler unlesbar, Liste hat mehrere Seiten → Paperless fragen",
+     {"markiert": SEITE, "sichtbar": SEITE, "gesamt": None, "listen": [LISTE]}, NACHFRAGEN),
     ("nichts markiert → Fehler", {"markiert": [], "sichtbar": SEITE, "gesamt": 0, "listen": [LISTE]}, None),
 ]
+# auswahlAusAnfrage(body, gesamt, ordnung): was Paperless an selection_data schickt
+ANFRAGEN = [
+    ("ID-Liste von Hand über Seiten", ({"documents": [7, 3, 99]}, 3, "-created"), [7, 3, 99]),
+    ("ID-Liste passt nicht zum Zähler → Fehler", ({"documents": [7, 3]}, 3, ""), None),
+    ("alle außer abgewählten, mit Sortierung der Liste",
+     ({"all": True, "filters": {"tags__id__all": "60", "correspondent__id__in": [1, 2]}, "excluded_documents": [5]}, 90, "-created"),
+     {"abfrage": "tags__id__all=60&correspondent__id__in=1%2C2&ordering=-created", "ausser": [5], "anzahl": 90}),
+    ("eigene Sortierung in den Filtern bleibt",
+     ({"all": True, "filters": {"ordering": "title"}, "excluded_documents": []}, 4, "-created"),
+     {"abfrage": "ordering=title", "ausser": [], "anzahl": 4}),
+    ("keine Anfrage gesehen → Fehler", (None, 3, ""), None),
+    ("unbekannte Form → Fehler", ({"irgendwas": 1}, 3, ""), None),
+]
+
+
+def stimmt(ist, soll):
+    if soll is None:
+        return ist is not None and "fehler" in ist and len(ist) == 1 and len(ist["fehler"]) > 10
+    if isinstance(soll, dict):
+        return ist == soll
+    return ist is not None and ist.get("ids") == soll and len(ist) == 1
+
+
 if node and m:
     prog = m.group(1) + "\nconst f = " + json.dumps([f[1] for f in FAELLE]) + ";\n" \
-        + "process.stdout.write(JSON.stringify(f.map(auswahlBestimmen)));\n"
+        + "const a = " + json.dumps([list(f[1]) for f in ANFRAGEN]) + ";\n" \
+        + "process.stdout.write(JSON.stringify([f.map(auswahlBestimmen), a.map((x) => auswahlAusAnfrage(...x))]));\n"
     lauf = subprocess.run([node, "-e", prog], capture_output=True, text=True)
     r.check("Auswahl-Logik läuft in node", lauf.returncode == 0, lauf.stderr.strip()[:300])
-    ergebnisse = json.loads(lauf.stdout or "[]") if lauf.returncode == 0 else []
-    for (name, _, soll), ist in zip(FAELLE, ergebnisse + [None] * len(FAELLE)):
-        ok = (ist is not None and "fehler" in ist and "ids" not in ist and "alleSeiten" not in ist) if soll is None \
-            else (ist == soll) if isinstance(soll, dict) else (ist is not None and ist.get("ids") == soll)
-        r.check(f"Auswahl: {name}", ok, json.dumps(ist, ensure_ascii=False)[:200])
-    fehlertexte = [e.get("fehler", "") for e in ergebnisse]
-    r.check("Auswahl: jede Fehlermeldung ist ein Satz für den Nutzer, nie leer",
-            len(ergebnisse) == len(FAELLE)
-            and all(len(t) > 10 for t, (_, _, soll) in zip(fehlertexte, FAELLE) if soll is None))
+    erg_f, erg_a = json.loads(lauf.stdout) if lauf.returncode == 0 else ([], [])
+    r.check("Auswahl: ein Ergebnis je Fall", len(erg_f) == len(FAELLE) and len(erg_a) == len(ANFRAGEN))
+    for (name, _, soll), ist in zip(FAELLE, erg_f):
+        r.check(f"Auswahl: {name}", stimmt(ist, soll), json.dumps(ist, ensure_ascii=False)[:200])
+    for (name, _, soll), ist in zip(ANFRAGEN, erg_a):
+        r.check(f"Paperless-Auswahl: {name}", stimmt(ist, soll), json.dumps(ist, ensure_ascii=False)[:200])
 
 # ---- Init-Skript gegen eine Attrappe der Startseite
 SEITE_HTML = """<!doctype html><html><head>

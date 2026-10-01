@@ -217,6 +217,10 @@
   // die übrigen IDs mit genau diesen Filtern selbst. (`all` in der Antwort gibt es nur bis
   // API-Version 9, das Frontend fragt mit 10.) Befund 2026-10-01: ohne das exportierte der Knopf
   // von 91 markierten Dokumenten still nur die 50 der sichtbaren Seite.
+  // Alle anderen Fälle (Abwahl nach „Alles auswählen", von Hand über mehrere Seiten) beantwortet
+  // Paperless selbst: öffnet man ein Menü der Massenbearbeitung (Tags, Korrespondent …), schickt es
+  // seine Auswahl an `selection_data` — als ID-Liste oder als „Filter, außer …". Das Skript öffnet
+  // dafür kurz ein solches Menü und liest die Anfrage mit.
   const LISTEN = [];        // die letzten Listenabfragen: {seite: [ids], abfrage: "filter=…", anzahl}
   const NICHT_FILTER = ["page", "page_size", "truncate_content", "include_selection_data", "fields", "format"];
 
@@ -251,6 +255,14 @@
     throw new Error("Auswahl zu groß");
   }
 
+  let AUSWAHL = { nr: 0, body: null };      // letzte selection_data-Anfrage von Paperless
+  function auswahlMerken(url, body) {
+    try {
+      if (String(url).indexOf("selection_data") < 0 || typeof body !== "string") return;
+      AUSWAHL = { nr: AUSWAHL.nr + 1, body: JSON.parse(body) };
+    } catch (e) { /* kein JSON — nichts merken */ }
+  }
+
   // Mithören, ohne Paperless zu stören: jede Ausnahme hier bleibt hier.
   (function mithoeren() {
     const X = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
@@ -258,7 +270,8 @@
       X.__paperlaiss = true;
       const open = X.open, send = X.send;
       X.open = function (methode, url) { this.__plUrl = String(url); return open.apply(this, arguments); };
-      X.send = function () {
+      X.send = function (body) {
+        if (this.__plUrl) auswahlMerken(this.__plUrl, body);
         if (this.__plUrl && this.__plUrl.indexOf("documents") >= 0) {
           this.addEventListener("load", () => {
             try {
@@ -273,7 +286,11 @@
     }
     if (window.fetch && !window.fetch.__paperlaiss) {
       const f = window.fetch;
-      const neu = function (eingabe) {
+      const neu = function (eingabe, init) {
+        try {
+          const url = typeof eingabe === "string" ? eingabe : (eingabe && eingabe.url) || "";
+          auswahlMerken(url, init && init.body);
+        } catch (e) { /* nichts */ }
         const p = f.apply(this, arguments);
         try {
           const url = typeof eingabe === "string" ? eingabe : (eingabe && eingabe.url) || "";
@@ -290,33 +307,49 @@
 
   // <auswahl-logik> — rein, ohne DOM; tests/test_knoepfe_auswahl.py prüft sie mit node.
   // e = {markiert: [ids angehakt, sichtbar], sichtbar: [ids der Seite], gesamt: Zähler von Paperless
-  // oder null, listen: [{seite, abfrage, anzahl}]}. Ergebnis: {ids}, {alleSeiten, abfrage, anzahl}
-  // (IDs holt alleIds) oder {fehler}. Nie still kürzen.
+  // oder null, listen: [{seite, abfrage, anzahl}]}. Ergebnis: {ids}, {abfrage, ausser, anzahl}
+  // (IDs holt alleIds), {nachfragen, anzahl} (Paperless nach seiner Auswahl fragen) oder {fehler}.
   function auswahlBestimmen(e) {
     const markiert = e.markiert || [], sichtbar = e.sichtbar || [];
     const gesamt = typeof e.gesamt === "number" && e.gesamt >= 0 ? e.gesamt : null;
     const gleich = (a, b) => a.length === b.length && a.every((x) => b.indexOf(x) >= 0);
     const liste = (e.listen || []).find((l) => gleich(l.seite, sichtbar)) || null;
     const mehrSeiten = liste ? liste.anzahl > sichtbar.length : null;
+    if (gesamt === 0 || (gesamt === null && !markiert.length)) return { fehler: "keine Dokumente markiert" };
     if (gesamt === null) {
       // Zähler nicht gefunden: der sichtbaren Auswahl nur trauen, wenn es keine weiteren Seiten gibt.
-      if (!markiert.length) return { fehler: "keine Dokumente markiert" };
-      if (mehrSeiten === false) return { ids: markiert };
-      return { fehler: "Paperless zeigt nicht an, wie viele Dokumente markiert sind, und die Liste hat " +
-        "mehrere Seiten — die Auswahl lässt sich nicht sicher bestimmen. Seite neu laden und erneut versuchen." };
+      return mehrSeiten === false ? { ids: markiert } : { nachfragen: true, anzahl: null };
     }
-    if (gesamt === 0 || (!markiert.length && !mehrSeiten)) return { fehler: "keine Dokumente markiert" };
     if (gesamt === markiert.length) return { ids: markiert };
     if (gesamt > markiert.length && liste && markiert.length === sichtbar.length && gesamt === liste.anzahl) {
-      return { alleSeiten: true, abfrage: liste.abfrage, anzahl: gesamt };   // „Alles auswählen", nichts abgewählt
+      return { abfrage: liste.abfrage, ausser: [], anzahl: gesamt };     // „Alles auswählen", nichts abgewählt
     }
-    if (!liste) {
-      return { fehler: `Markiert sind ${gesamt}, auf dieser Seite sichtbar ${markiert.length} — die übrigen ` +
-        "kann paperlaiss gerade nicht lesen. Seite neu laden und erneut versuchen." };
+    return { nachfragen: true, anzahl: gesamt };
+  }
+
+  // Die Auswahl, die Paperless an selection_data schickt: {documents: [ids]} oder
+  // {all: true, filters: {param: wert}, excluded_documents: [ids]}. `ordnung` ist die Sortierung der
+  // gemerkten Liste (ordering=…), damit „wie ausgewählt" der Liste folgt.
+  function auswahlAusAnfrage(body, gesamt, ordnung) {
+    if (!body || typeof body !== "object") return { fehler: "Paperless hat seine Auswahl nicht genannt" };
+    const zahlen = (l) => (Array.isArray(l) ? l : []).map((x) => parseInt(x, 10)).filter((x) => x > 0);
+    if (Array.isArray(body.documents)) {
+      const ids = zahlen(body.documents);
+      if (gesamt !== null && ids.length !== gesamt) {
+        return { fehler: `Paperless meldet ${gesamt} markierte, nennt aber ${ids.length} — Seite neu laden` };
+      }
+      return ids.length ? { ids } : { fehler: "keine Dokumente markiert" };
     }
-    return { fehler: `Markiert sind ${gesamt}, auf dieser Seite sichtbar ${markiert.length}. Über mehrere Seiten ` +
-      "geht der Export nur mit „Alles auswählen“ ohne einzelne Abwahl — sonst die Seitengröße erhöhen, " +
-      "bis alle markierten auf einer Seite stehen." };
+    if (body.all && body.filters && typeof body.filters === "object") {
+      const q = new URLSearchParams();
+      Object.keys(body.filters).forEach((k) => {
+        const v = body.filters[k];
+        if (v !== null && v !== undefined && v !== "") q.set(k, Array.isArray(v) ? v.join(",") : String(v));
+      });
+      if (ordnung && !q.has("ordering")) q.set("ordering", ordnung);
+      return { abfrage: q.toString(), ausser: zahlen(body.excluded_documents), anzahl: gesamt };
+    }
+    return { fehler: "Paperless hat seine Auswahl in unbekannter Form genannt" };
   }
   // </auswahl-logik>
 
@@ -334,28 +367,55 @@
     return isNaN(n) ? null : n;
   }
 
+  // Paperless nach seiner Auswahl fragen: ein Menü der Massenbearbeitung kurz öffnen (dabei schickt
+  // Paperless sie an selection_data) und gleich wieder schließen.
+  async function auswahlVonPaperless() {
+    const knoepfe = Array.from(document.querySelectorAll(
+      "pngx-bulk-editor pngx-filterable-dropdown .dropdown-toggle")).filter((b) => !b.disabled);
+    const offen = (k) => !!(k.parentElement && k.parentElement.querySelector(".dropdown-menu.show"));
+    for (const k of knoepfe) {
+      const vorher = AUSWAHL.nr;
+      k.click();
+      for (let i = 0; i < 40 && AUSWAHL.nr === vorher; i++) await new Promise((ok) => setTimeout(ok, 75));
+      await new Promise((ok) => setTimeout(ok, 50));
+      if (offen(k)) k.click();                                      // Menü wieder zu
+      if (AUSWAHL.nr !== vorher) return AUSWAHL.body;
+    }
+    return null;
+  }
+
   let auswahlLaeuft = false;      // Reklick auf den Menüeintrag, während die Auswahl gelesen wird
   async function mehrfach(weiter) {
     if (auswahlLaeuft) return;
     const k = sichtbareKaestchen();
-    const a = auswahlBestimmen({ markiert: k.filter((x) => x.an).map((x) => x.id), sichtbar: k.map((x) => x.id),
-      gesamt: markiertLautPaperless(), listen: LISTEN });
+    const gesamt = markiertLautPaperless();
+    let a = auswahlBestimmen({ markiert: k.filter((x) => x.an).map((x) => x.id), sichtbar: k.map((x) => x.id),
+      gesamt, listen: LISTEN });
     if (a.fehler) { meldung("paperlaiss: " + a.fehler, "warning"); return; }
-    if (!a.alleSeiten) { weiter(a.ids); return; }
+    if (a.ids) { weiter(a.ids); return; }
     auswahlLaeuft = true;
     let ids;
     try {
-      meldung(`paperlaiss: Auswahl über alle Seiten wird gelesen (${a.anzahl} Dokumente) …`, "info");
-      ids = await alleIds(a.abfrage);
+      meldung(`paperlaiss: Auswahl wird gelesen${gesamt ? ` (${gesamt} Dokumente)` : ""} …`, "info");
+      if (a.nachfragen) {
+        const ordnung = LISTEN.length ? new URLSearchParams(LISTEN[0].abfrage).get("ordering") : "";
+        a = auswahlAusAnfrage(await auswahlVonPaperless(), gesamt, ordnung);
+        if (a.fehler) throw new Error(a.fehler);
+      }
+      if (a.ids) {
+        ids = a.ids;
+      } else {
+        const weg = new Set(a.ausser);
+        ids = (await alleIds(a.abfrage)).filter((id) => !weg.has(id));
+        if (a.anzahl !== null && ids.length !== a.anzahl) {
+          throw new Error(`markiert sind ${a.anzahl}, Paperless liefert für diese Auswahl jetzt ${ids.length} — ` +
+                          "die Liste hat sich geändert. Seite neu laden und erneut auswählen.");
+        }
+      }
     } catch (e) {
-      meldung("paperlaiss: Auswahl nicht lesbar — " + e.message, "danger");
+      meldung("paperlaiss: Auswahl nicht lesbar — " + e.message, "warning");
       return;
     } finally { auswahlLaeuft = false; }
-    if (ids.length !== a.anzahl) {
-      meldung(`paperlaiss: Markiert sind ${a.anzahl}, Paperless liefert für diesen Filter jetzt ${ids.length} — ` +
-              "die Liste hat sich geändert. Seite neu laden und erneut auswählen.", "warning");
-      return;
-    }
     const m = document.getElementById(MARKE + "-meldung");
     if (m) m.remove();
     weiter(ids);
@@ -366,7 +426,12 @@
     b.type = "button";
     b.className = "dropdown-item " + MARKE;
     b.innerHTML = '<span class="me-1">' + icon + "</span>" + text;
-    b.addEventListener("click", aktion);
+    b.addEventListener("click", () => {
+      // Das Menü „Actions" schließen — sonst bleibt es hinter dem Dialog offen stehen.
+      const t = document.querySelector("pngx-bulk-editor #dropdownSelect");
+      if (t && t.getAttribute("aria-expanded") === "true") t.click();
+      aktion();
+    });
     return b;
   }
 
