@@ -216,9 +216,10 @@ Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog b
   Remote-Go-To für Betrachter, die Dateien selbst öffnen.
   Ein leerer Wert nimmt sein Trennzeichen und eine leere Klammer mit (`{datum}_{titel} ({feld:Projekt})`
   ohne Datum und Projekt → `Rechnung`); ist alles leer, heißt die Datei `dokument-<id>`.
-- **Auswahl über mehrere Seiten:** mit „Alles auswählen“ nimmt der Export alle Dokumente des Filters,
-  nicht nur die sichtbare Seite. Ist die Auswahl nicht eindeutig (einzelne abgewählt, von Hand über
-  mehrere Seiten markiert), meldet der Knopf das, statt nur einen Teil zu exportieren.
+- **Auswahl über mehrere Seiten:** der Export nimmt genau, was in Paperless markiert ist — auch
+  „Alles auswählen“ mit einzelnen abgewählten Dokumenten und von Hand über mehrere Seiten Markiertes,
+  nicht nur die sichtbare Seite. Die Auswahl kommt von Paperless selbst (die Anfrage, die es beim
+  Öffnen eines Menüs der Massenbearbeitung schickt) und muss zum Auswahlzähler passen.
 - Während vorbereitet und heruntergeladen wird, ist der Knopf gesperrt und zeigt den Stand; ein
   zweiter Klick stößt keinen zweiten Export an.
 - Beide lassen sich nach jeder Variable oder jedem Feld **sortieren**, auf- oder absteigend. Quelle

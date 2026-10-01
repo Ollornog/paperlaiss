@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Auswahl über mehrere Seiten in jedem Fall
+
+- Abwahl nach „Alles auswählen“ und von Hand über mehrere Seiten Markiertes brachen bisher mit
+  einer Meldung ab („Seitengröße erhöhen“). Jetzt fragt der Knopf Paperless nach seiner Auswahl:
+  er öffnet kurz ein Menü der Massenbearbeitung, Paperless schickt dabei seine Auswahl an
+  `selection_data` (ID-Liste oder „Filter, außer …“), das Skript liest die Anfrage mit und
+  schließt das Menü wieder. Die Anzahl muss zum Auswahlzähler passen.
+- Das Menü „Actions“ schließt sich beim Klick auf einen paperlaiss-Eintrag.
+- Tests: `auswahlAusAnfrage` mit beiden Formen; drei Mutationen, alle rot. Im Browser gegen das
+  Testbett: Alles auswählen (93), Alles minus eines auf Seite 1 und auf Seite 2 (92), von Hand
+  2 + 3 auf zwei Seiten (5) — jeweils genau die markierten IDs.
+
 ### Behoben — Export nimmt die ganze Auswahl, Knopf mit Reklick-Schutz
 
 - **Export kürzte still auf die sichtbare Seite:** von 91 markierten Dokumenten kamen 50 an.

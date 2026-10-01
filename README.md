@@ -220,9 +220,10 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   same file as a remote go-to for viewers that open files themselves.
   An empty value takes its separator and an empty bracket with it (`{datum}_{titel} ({feld:Projekt})`
   without date and project → `Rechnung`); if everything is empty, the file is `dokument-<id>`.
-- **Selection across pages:** with "Select all" the export takes every document of the filter, not
-  just the visible page. If the selection is ambiguous (some deselected, picked by hand across
-  pages), the button says so instead of exporting only part of it.
+- **Selection across pages:** the export takes exactly what is selected in Paperless — including
+  "Select all" with some documents deselected and documents picked by hand across pages, not just
+  the visible page. The selection comes from Paperless itself (the request it sends when a bulk-edit
+  menu opens) and must match the selection counter.
 - While preparing and downloading, the button is locked and shows the progress; a second click does
   not start a second export.
 - Both can be **sorted** by any variable or custom field, ascending or descending. Source is the
