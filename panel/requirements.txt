@@ -1,5 +1,5 @@
 fastapi==0.141.1
-uvicorn[standard]==0.53.0
+uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 tinysesam[oidc,argon2]==0.22.0
 pypdf[crypto]==6.19.0
