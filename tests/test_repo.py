@@ -380,6 +380,10 @@ r.check("jede Testdatei wird von einem Läufer gerufen", not _td, " | ".join(_td
 _vt = hygiene.pruefe_veroeffentlichen_am_tag(str(ROOT))
 r.check("in tag-Workflows hängt jedes Veröffentlichen am Tag", not _vt, " | ".join(_vt[:3]))
 
+# Kit 0.27.0: Die Worker-Zahl paralleler Läufe kommt aus `CI_KERNE`, nie aus einer Erkennung.
+_pw = hygiene.pruefe_parallel_worker(str(ROOT), DATEIEN)
+r.check("Worker-Zahl paralleler Läufe aus CI_KERNE", not _pw, " | ".join(_pw[:3]))
+
 _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT), ausgenommen={
     "pruefe_extras_imports":
         "kein CI-Job ohne Extras (`minimal`) — die Suite läuft immer mit allen Extras, ein ungeschützter Extra-Import kann hier nicht brechen (Kit 0.24.0, T-9)",
