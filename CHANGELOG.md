@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Panel: TinySesam 0.23.0
+
+- `panel/requirements.txt`: TinySesam 0.22.0 → 0.23.0. Kein Bruch der API; der erste Start hebt die
+  Benutzer-DB des Panels auf Schema 13 (zwei neue Tabellen) — vorher `tinysesam.db` und `tinysesam.db.key`
+  sichern.
+
 ### Behoben — Auswahl über mehrere Seiten in jedem Fall
 
 - Abwahl nach „Alles auswählen“ und von Hand über mehrere Seiten Markiertes brachen bisher mit
