@@ -6,6 +6,27 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit — Schwachstellen-Tor und reproduzierbares Panel-Abbild
+
+- **Neuer Workflow `audit`** (Muster aus C22): löst `pyproject.toml` samt Extra `panel` in der
+  neuesten und der niedrigsten erlaubten Fassung auf und prüft beides mit `pip-audit --strict`,
+  dazu den Hash-Lock des Panel-Abbilds und die Werkzeugliste selbst (`.github/audit/`, gehasht,
+  von Dependabot gepflegt); nächtlich zusätzlich. Ein Lauf, der nichts auflöst, ist rot.
+  `audit` wird Pflicht-Check auf `main`.
+- **Untergrenzen angehoben**, gefunden vom Tor (Auflösung `boden`): `fastapi>=0.133.0` (vorher
+  `>=0.115`, zog starlette 0.38 mit bekannten Lücken) und `python-multipart>=0.0.31` (vorher
+  `>=0.0.20`). Das ausgelieferte Panel war nicht betroffen, es pinnte schon neuere Fassungen.
+- **Panel-Abbild reproduzierbar:** `panel/requirements.in` ist die Eingabe, `panel/requirements.txt`
+  der per `uv pip compile --universal --generate-hashes` erzeugte Lock mit Prüfsummen aller
+  Pakete, auch der Unterabhängigkeiten (bisher ungepinnt). Das Dockerfile installiert mit
+  `--require-hashes` und pinnt `python:3.14-slim` per Digest. Dependabot pflegt den Lock (`uv`,
+  `/panel`) — bisher veralteten die Panel-Pins still. `tests/test_repo.py` prüft alle vier Punkte.
+- **`release.yml`:** getrennt in `pruefen` (nur Lesen) und `veroeffentlichen` (Schreiben); bisher
+  galten die Schreibrechte für den ganzen Lauf samt Suite. `cache-binary: false` an
+  `setup-buildx-action` (zizmor `cache-poisoning`), Digest über `env`.
+- **`dependabot-auto-merge.yml`:** Rechte nur am Job; ausgelöst auch nach `audit`, Nachlauf mit
+  `audit.yml`.
+
 ### Geändert — Panel: TinySesam 0.23.0
 
 - `panel/requirements.txt`: TinySesam 0.22.0 → 0.23.0. Kein Bruch der API; der erste Start hebt die
