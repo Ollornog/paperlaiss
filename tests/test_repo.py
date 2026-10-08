@@ -292,6 +292,26 @@ _panel_module = sorted(p.name for p in (ROOT / "panel").glob("*.py"))
 _fehlend = [m for m in _panel_module if m not in _dockerfile]
 r.check("Panel-Dockerfile kopiert alle Module aus panel/", not _fehlend, ", ".join(_fehlend))
 
+# ---- Panel-Abbild reproduzierbar (M6/B2, seit 2026-10-08)
+# Bis dahin: FROM per Tag, requirements.txt mit direkten Pins ohne Prüfsummen, die
+# Unterabhängigkeiten ungepinnt — zwei Bauläufe desselben Commits ergaben verschiedene Abbilder.
+r.check("Panel-Dockerfile: jedes FROM per Digest gepinnt",
+        all("@sha256:" in z for z in re.findall(r"^FROM\s+\S+", _dockerfile, re.M))
+        and re.search(r"^FROM\s", _dockerfile, re.M) is not None)
+r.check("Panel-Dockerfile installiert mit --require-hashes",
+        re.search(r"^RUN pip install [^\n]*--require-hashes -r requirements\.txt", _dockerfile, re.M)
+        is not None)
+_panel_req = (ROOT / "panel" / "requirements.txt").read_text(encoding="utf-8")
+_bloecke = re.split(r"\n(?=[A-Za-z0-9])", _panel_req)
+_ohne_hash = [b.split()[0] for b in _bloecke if b.strip() and not b.startswith("#")
+              and "--hash=sha256:" not in b]
+r.check("jede Paketzeile in panel/requirements.txt trägt eine Prüfsumme",
+        not _ohne_hash and "==" in _panel_req, " | ".join(_ohne_hash[:5]))
+_kopf = _panel_req.split("\n", 2)[:2]
+r.check("panel/requirements.txt ist per `uv pip compile --universal --generate-hashes` erzeugt",
+        len(_kopf) == 2 and "uv pip compile" in _kopf[1] and "--universal" in _kopf[1]
+        and "--generate-hashes" in _kopf[1] and "requirements.in" in _kopf[1], " / ".join(_kopf))
+
 # ---- .dockerignore liegt dort, wo Docker sie liest: im Build-KONTEXT
 # Docker liest die Ignore-Liste nur im Wurzelverzeichnis des Kontexts. Bis 2026-09-24 lag sie hier
 # gar nicht (bzw. neben dem Repo), gebaut wird aber aus einem Unterordner — die Liste griff nie.

@@ -1,0 +1,11 @@
+# Direkte Abhängigkeiten des Panel-Abbilds, exakt gepinnt. Die Auflösung MIT Prüfsummen (auch
+# aller Unterabhängigkeiten) steht in requirements.txt — erzeugt, nie von Hand bearbeitet
+# (Befehl im Kopf dort). Dependabot (`uv`, /panel) hebt die Pins hier und erzeugt den Lock neu.
+# Bis 2026-10-08 war requirements.txt selbst die Eingabe: direkte Pins ohne Prüfsummen, die
+# Unterabhängigkeiten ungepinnt — jeder Bau zog, was der Index gerade lieferte.
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+tinysesam[oidc,argon2]==0.23.0
+pypdf[crypto]==6.19.0
+reportlab==5.0.1
