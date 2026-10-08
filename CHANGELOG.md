@@ -24,6 +24,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - **`release.yml`:** getrennt in `pruefen` (nur Lesen) und `veroeffentlichen` (Schreiben); bisher
   galten die Schreibrechte für den ganzen Lauf samt Suite. `cache-binary: false` an
   `setup-buildx-action` (zizmor `cache-poisoning`), Digest über `env`.
+  Der Trockenlauf baut jetzt auch auf Branches mit `/` im Namen (Abbild-Tag ohne `/`; vorher
+  „invalid reference format“).
 - **`dependabot-auto-merge.yml`:** Rechte nur am Job; ausgelöst auch nach `audit`, Nachlauf mit
   `audit.yml`.
 
