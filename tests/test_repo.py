@@ -386,6 +386,10 @@ r.check("jeder Policy-Schlüssel wird gelesen", not _pk, " | ".join(_pk[:3]))
 _fremd = hygiene.pruefe_keine_fremdressourcen(str(ROOT), DATEIEN, POLICY)
 r.check("nichts wird von Dritten nachgeladen", not _fremd, " | ".join(_fremd[:3]))
 
+# Kit 0.28 (PO 2026-10-08): jede vollständige Seite trägt ein Favicon.
+_favicon = hygiene.pruefe_favicon(str(ROOT), DATEIEN, POLICY)
+r.check("jede Seite hat ein Favicon", not _favicon, " | ".join(_favicon[:3]))
+
 # ---- Wird jede Testdatei überhaupt gerufen? (Kit 0.21.0)
 # Von AUSSEN gefragt: ein nicht verkabelter Hygiene-Test besteht seine eigene
 # Aufruf-Prüfung dadurch, dass er schweigt. Autodiscovery (run_all+glob, pytest)
