@@ -1235,4 +1235,15 @@ _rt = _lauf([_ok], korrespondenten=[{"id": 7, "name": "Nord Autoteile"}], titel=
 r.check("Verdrahtung: erneuter Lauf findet den eigenen Titelkopf nicht als Kandidaten, einen Paperless-Titel schon",
         "Name „Nord Autoteile“" not in _rk["chat"][0] and "Name „Nord Autoteile“" in _rt["chat"][0], _rk["chat"][0][:300])
 
+# ---- Tabellenreste aus dem OCR: weder im Namen noch in den Stammdaten.
+r.check("Tabellenrest: Rand weg, Inhalt bleibt",
+        classify.ohne_tabellenrest("| Häuser ") == "Häuser" and classify.ohne_tabellenrest("• A-B GmbH |") == "A-B GmbH"
+        and classify.ohne_tabellenrest(None) == "")
+_tr, _tg, _ = classify.stammdaten_nachtragen({}, {"adresse": "| Fasanenweg 20a, 21614 Buxtehude"}, "", classify.eigene_kennungen({}), "Test")
+r.check("Tabellenrest: Stammdaten-Wert wird ohne Rand gespeichert",
+        _tr.get("adresse") == "Fasanenweg 20a, 21614 Buxtehude", str(_tr))
+_tn = _lauf([{**_ok, "correspondent": "| Neue Firma"}], dry=False)
+r.check("Tabellenrest: neuer Korrespondent wird ohne Rand angelegt",
+        any(d and d.get("name") == "Neue Firma" for _, d in _tn.get("send", [])), str(_tn.get("send")))
+
 sys.exit(r.done())

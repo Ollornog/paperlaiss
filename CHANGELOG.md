@@ -6,6 +6,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Tabellenreste in Stammdaten
+
+- `ohne_tabellenrest()` entfernt Tabellen- und Aufzählungszeichen am Rand („| Fasanenweg 20a …“), jetzt
+  auch bei den Stammdaten-Werten (Adresse, Telefon, Mail …) und nicht nur beim Korrespondentennamen.
+
 ### Geändert — Dokumenttyp ohne Auswahlliste, eigene Vorlagen beim Gegenüber
 
 - **Dokumenttyp ohne `enum` im Schema:** Mit Auswahlliste wählte Mistral für eine

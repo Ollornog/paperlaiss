@@ -450,6 +450,13 @@ def stammdaten_fremd(corrs, meta, eigener_id):
     return fremd
 
 
+
+def ohne_tabellenrest(wert):
+    """Ein Wert ohne die Tabellen- und Aufzählungszeichen, die das OCR an den Rand setzt
+    („| Häuser“, „| Fasanenweg 20a …“). Gilt für den Korrespondentennamen und die Stammdaten
+    (2026-10-10: beide kamen so aus einer Tabelle)."""
+    return str(wert or "").strip(" \t\n|·•-–—:;,")
+
 def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None, kontext=""):
     """Stammdaten eines Korrespondenten aus dem Dokument nachtragen.
 
@@ -464,7 +471,7 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
     neu, erfasst = dict(alt), dict(alt.get("erfasst") or {})
     geschrieben, verworfen = {}, {}
     ab = absender if isinstance(absender, dict) else {}
-    wert = lambda k: "" if is_null(ab.get(k)) else str(ab.get(k)).strip()
+    wert = lambda k: "" if is_null(ab.get(k)) else ohne_tabellenrest(ab.get(k))
 
     def setze(feld, w):
         if not w or feld in geschrieben:
@@ -1850,8 +1857,7 @@ def main():
 
     # --- Korrespondent-Feedback-Loop ---
     set_stage(did, "Korrespondent")
-    # Tabellenreste aus dem OCR („| Häuser“) gehören nicht zum Namen (2026-10-10).
-    corr_name = str(prop.get("correspondent") or "").strip(" \t\n|·•-–—:;,")
+    corr_name = ohne_tabellenrest(prop.get("correspondent"))
     corr_id = None; corr_info = "kein"
     if corr_name:
         at = ctoks(corr_name); ak = " ".join(at)
