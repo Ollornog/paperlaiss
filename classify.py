@@ -797,6 +797,34 @@ CACHE_KEY = ""
 NUTZUNG = []
 
 
+# Wiederholen bei Ratenbegrenzung und vorübergehenden Fehlern (2026-10-11): ein Probelauf mit drei
+# gleichzeitigen Dokumenten bekam 94 von 203 Mal HTTP 429 — ohne Wiederholung blieb jedes davon
+# unklassifiziert, genauso wie beim Hochladen vieler Dokumente auf einmal.
+WIEDERHOLEN_BEI = {429, 500, 502, 503, 504}
+WARTEN_S = (5, 15, 30, 60)
+
+
+def mistral_senden(req, timeout, warten=None):
+    """Eine Mistral-Anfrage senden, bei 429/5xx und Netzfehlern mit wachsender Pause wiederholen.
+    Ein `Retry-After` der Gegenseite geht vor (höchstens 120 s). Andere Fehler (400, 401, 422)
+    werden sofort weitergereicht — sie heilen nicht durch Warten."""
+    pausen = WARTEN_S if warten is None else warten
+    for versuch in range(len(pausen) + 1):
+        try:
+            return json.load(urllib.request.urlopen(req, timeout=timeout))
+        except urllib.error.HTTPError as e:
+            if e.code not in WIEDERHOLEN_BEI or versuch == len(pausen):
+                raise
+            nach = e.headers.get("Retry-After") if e.headers else None
+            pause = min(120, int(nach)) if nach and str(nach).isdigit() else pausen[versuch]
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if versuch == len(pausen):
+                raise
+            pause = pausen[versuch]
+        log(f"Mistral: Versuch {versuch + 1} gescheitert, neuer Versuch in {pause} s")
+        __import__("time").sleep(pause)
+
+
 def mistral_chat(messages, max_tokens=900, schema=None, name="antwort"):
     """Ein Chat-Aufruf mit JSON-Antwort. Mit `schema` erzwingt Mistral dessen Aufbau
     (`response_format: json_schema`, strict) — nicht nur „irgendein JSON" wie `json_object`."""
@@ -808,7 +836,7 @@ def mistral_chat(messages, max_tokens=900, schema=None, name="antwort"):
         body["prompt_cache_key"] = CACHE_KEY
     req = urllib.request.Request(MISTRAL_URL, data=json.dumps(body).encode("utf-8"),
         headers={"Authorization": f"Bearer {KEY_TEXT}", "Content-Type": "application/json"})
-    r = json.load(urllib.request.urlopen(req, timeout=120))
+    r = mistral_senden(req, 120)
     u = r.get("usage") or {}
     NUTZUNG.append({"name": name, "prompt": u.get("prompt_tokens"), "completion": u.get("completion_tokens"),
                     "cached": (u.get("prompt_tokens_details") or {}).get("cached_tokens")})
@@ -891,7 +919,7 @@ def mistral_ocr(did):
     body = {"model": OCR_MODEL, "document": {"type": "document_url", "document_url": f"data:application/pdf;base64,{b64}"}}
     req = urllib.request.Request(MISTRAL_OCR, data=json.dumps(body).encode("utf-8"),
         headers={"Authorization": f"Bearer {KEY_OCR}", "Content-Type": "application/json"})
-    resp = json.load(urllib.request.urlopen(req, timeout=180))
+    resp = mistral_senden(req, 180)
     return "\n\n".join(p.get("markdown", "") for p in resp.get("pages", [])).strip()
 
 
@@ -1017,6 +1045,31 @@ def dokument_datum(prop):
         if 1950 <= tag.year <= 2035:
             return wert
     return None
+
+
+_MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+           "November", "Dezember"]
+
+
+def datum_belegt(iso, text):
+    """Steht das Datum 'YYYY-MM-DD' in irgendeiner gängigen Schreibweise im Text?
+
+    Die KI erfand bei einem Teilstück ohne jedes Datum („Seite 2 von 7“) den 01.07.2026 (2026-10-11).
+    Ein Datum, das nicht im Dokument steht, wird deshalb nicht geschrieben. Lieber das alte Datum
+    stehen lassen als ein erfundenes setzen. Leerraum zählt nicht („16. 12. 2010“ = „16.12.2010“)."""
+    try:
+        j, m, t = iso.split("-"); mi, ti = int(m), int(t)
+    except (ValueError, AttributeError):
+        return False
+    roh = re.sub(r"\s+", "", str(text or "")).lower()
+    jj = j[2:]
+    formen = {f"{t}.{m}.{j}", f"{ti}.{mi}.{j}", f"{t}.{m}.{jj}", f"{ti}.{mi}.{jj}", f"{t}.{mi}.{j}", f"{ti}.{m}.{j}",
+              iso, f"{j}{m}{t}", f"{t}/{m}/{j}", f"{ti}/{mi}/{j}", f"{mi}/{ti}/{j}", f"{m}/{t}/{j}", f"{t}-{m}-{j}",
+              f"{ti}.{_MONATE[mi - 1]}{j}", f"{t}.{_MONATE[mi - 1]}{j}", f"{ti}.{_MONATE[mi - 1][:3]}{j}",
+              f"{ti}{_MONATE[mi - 1]}{j}", f"{ti}.{_MONATE[mi - 1]}{jj}"}
+    if mi == 1:
+        formen |= {f"{ti}.jänner{j}", f"{t}.jänner{j}"}
+    return any(re.sub(r"\s+", "", x).lower() in roh for x in formen)
 
 def is_null(raw):
     return raw is None or (isinstance(raw, str) and raw.strip().lower() in ("", "null", "none", "-", "—", "n/a", "kein", "unbekannt"))
@@ -1557,7 +1610,10 @@ KORRESPONDENT_ANWEISUNG = (
     "sie abgibt und unterschreibt — auch wenn wir sie vorbereitet oder zur Unterschrift verschickt haben, etwa "
     "über eine Signaturplattform. Ebenso jedes Dokument, das wir selbst aufgesetzt haben und das eine andere "
     "Person unterschreibt oder mit uns schließt (Einverständniserklärung, Vereinbarung, Vertrag): correspondent ist "
-    "diese andere Person, nicht wir — auch wenn wir im Kopf als Partei stehen.")
+    "diese andere Person, nicht wir — auch wenn wir im Kopf als Partei stehen. Lohn- und Gehaltsabrechnungen, "
+    "Lohnsteuerbescheinigungen, Meldebescheinigungen zur Sozialversicherung und Arbeitszeitnachweise stammen vom "
+    "ARBEITGEBER, auch wenn sein Name klein oder verstümmelt dasteht; Krankenkasse, Finanzamt oder "
+    "Lohnbuchhaltungs-Software sind darin nur Angaben.")
 # Das Dokumentdatum, ebenfalls unabhängig vom eigenen Prompt (PO 2026-10-10): Paperless setzt beim Import
 # das erste Datum im Text — bei Erklärungen und Verträgen oft ein Geburtsdatum.
 TYP_ANWEISUNG = (
@@ -2105,6 +2161,9 @@ def main():
     flds = prop.get("fields") or {}
     date_note = None
     datum = dokument_datum(prop)
+    if datum and not datum_belegt(datum, content):
+        TRACE["datum_ohne_beleg"] = datum
+        datum = None
     if datum and (doc.get("created") or "")[:10] != datum:
         patch["created"] = f"{datum}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {datum}"

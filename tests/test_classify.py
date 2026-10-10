@@ -1198,8 +1198,8 @@ r.check("Datum: Unsinn, ungültiger Tag und Jahre außerhalb → None",
         and classify.dokument_datum({"document_date": None, "fields": None}) is None)
 
 
-def _datum_geschrieben(antwort):
-    a = _lauf([{**_ok, **antwort}], dry=False)
+def _datum_geschrieben(antwort, text=_gut + " Ausgestellt am 19.08.2026."):
+    a = _lauf([{**_ok, **antwort}], dry=False, text=text)
     return [p.get("created") for p in a.get("patch", [])]
 
 
@@ -1316,5 +1316,46 @@ r.check("Verdrahtung: bei Erikas Dokument ist Max ein Kandidat und Erika allein 
 _kg = _lauf([{**_ok, "correspondent": "Max Muster"}], text=_gut + " Absender: Max Muster, Musterweg 1",
             korrespondenten=[{"id": 7, "name": "Max Muster"}], besitzer=_erika, cfg={**_haus, "kennungen_je_konto": False})
 r.check("Verdrahtung: ohne Schalter bleibt Max „wir“ (kein Kandidat)", "Name „Max Muster“" not in _kg["chat"][0])
+
+# ---- Datum nur mit Beleg im Text; Mistral-Anfragen werden bei 429/5xx wiederholt.
+r.check("Datumsbeleg: gängige Schreibweisen werden gefunden",
+        classify.datum_belegt("2026-08-19", "Krik DK, 19.8.26") and classify.datum_belegt("2010-12-16", "16. 12. 2010")
+        and classify.datum_belegt("2026-08-20", "Unterzeichnet: 2026-08-20") and classify.datum_belegt("2026-09-24", "24. September 2026")
+        and classify.datum_belegt("2018-01-31", "31. Jänner 2018") and classify.datum_belegt("2026-08-19", "8/19/2026, 12:45 PM"))
+r.check("Datumsbeleg: ein Datum, das nicht im Text steht, gilt nicht",
+        not classify.datum_belegt("2026-07-01", "Seite 2 von 7 … vom 01.09.2012 bis 28.02.2013")
+        and not classify.datum_belegt("kaputt", "x"))
+r.check("Schreibstelle: KI-Datum ohne Beleg im Text wird nicht geschrieben",
+        _datum_geschrieben({"document_date": "2026-07-01"}) == [None]
+        and classify.TRACE.get("datum_ohne_beleg") == "2026-07-01")
+
+import urllib.error as _ue
+
+
+def _senden_mit(fehlercodes):
+    folge = list(fehlercodes); aufrufe = []
+    def urlopen(req, timeout=0):
+        aufrufe.append(1)
+        if folge:
+            code = folge.pop(0)
+            raise _ue.HTTPError("u", code, "x", {}, None)
+        return io.BytesIO(json.dumps({"ok": True}).encode())
+    alt = classify.urllib.request.urlopen
+    classify.urllib.request.urlopen = urlopen
+    try:
+        try:
+            return classify.mistral_senden(object(), 5, warten=(0, 0)), len(aufrufe)
+        except _ue.HTTPError as e:
+            return e.code, len(aufrufe)
+    finally:
+        classify.urllib.request.urlopen = alt
+
+
+import io, json
+r.check("Mistral: 429 und 503 werden wiederholt, dann klappt es", _senden_mit([429, 503]) == ({"ok": True}, 3))
+r.check("Mistral: nach allen Versuchen kommt der Fehler durch", _senden_mit([429, 429, 429]) == (429, 3))
+r.check("Mistral: 401 wird nicht wiederholt", _senden_mit([401]) == (401, 1))
+r.check("Prompt: Lohnunterlagen stammen vom Arbeitgeber, Krankenkasse ist nur Angabe",
+        "ARBEITGEBER" in classify.KORRESPONDENT_ANWEISUNG and "Krankenkasse" in classify.KORRESPONDENT_ANWEISUNG)
 
 sys.exit(r.done())

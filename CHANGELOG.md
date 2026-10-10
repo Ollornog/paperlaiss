@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Ratenbegrenzung, erfundene Daten, Lohnunterlagen
+
+- **Mistral-Anfragen werden bei 429/5xx und Netzfehlern wiederholt** (`mistral_senden()`: 5, 15, 30 und
+  60 s, ein `Retry-After` geht vor). Ein Probelauf mit drei gleichzeitigen Dokumenten bekam 94 von
+  203 Mal HTTP 429. Ohne Wiederholung blieb jedes davon unklassifiziert, so auch beim Hochladen
+  vieler Dokumente auf einmal. 400, 401 und 422 werden nicht wiederholt.
+- **Ein KI-Datum wird nur geschrieben, wenn es im Text steht** (`datum_belegt()`: gängige
+  Schreibweisen, Leerraum egal). Bei einem Teilstück ohne Datum („Seite 2 von 7“) erfand die KI den
+  01.07.2026.
+- **Korrespondent:** Lohn- und Gehaltsabrechnungen, Lohnsteuer- und Meldebescheinigungen stammen vom
+  Arbeitgeber. Krankenkasse, Finanzamt und Lohnsoftware sind darin nur Angaben. Die Regel greift
+  nur, wenn der Arbeitgeber im Text steht; auf manchen Abrechnungen steht er nur im Logo.
+
 ### Hinzugefügt — eigene Kennungen je Konto
 
 - **`kennungen_je_konto`** (Panel: „Eigene Kennungen je Konto“): In einem Haushalt, in dem jede Person
