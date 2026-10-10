@@ -89,11 +89,12 @@ import contextlib as _ctx, io as _io
 
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
-          dry=True, source="", force=False, korr=None, titel="Beleg", typen=None):
+          dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": [],
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
-                                "correspondent": korr},
+                                "correspondent": korr, "owner": 3 if besitzer else None},
+              "/users/3/": besitzer or {},
               "/tags/": {"results": []}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
@@ -122,7 +123,9 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
         return True, ""
     tmp = tempfile.mkdtemp()
     alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "TOK", "DRY", "FORCE_OCR",
-                                            "send", "patch_doc", "SCRIPT_DIR", "SOURCE", "FORCE")}
+                                            "send", "patch_doc", "SCRIPT_DIR", "SOURCE", "FORCE", "CFG")}
+    if cfg:
+        classify.CFG = {**classify.CFG, **cfg}
     classify.get, classify.mistral_ocr, classify.mistral_chat = get, ocr, chat
     classify.TOK, classify.DRY, classify.FORCE_OCR = "x", dry, force_ocr
     classify.send, classify.patch_doc, classify.SCRIPT_DIR = send, patch_doc, tmp
@@ -1288,5 +1291,30 @@ r.check("Schreibstelle: feste Zuweisung schlägt die KI und steht im Trace",
 _rw = _lauf([{**_ok, "document_type": "Rechnung"}], dry=False, typen=_rt, text=_gut + " Mahnung")
 r.check("Schreibstelle: ohne feste Zuweisung bleibt die KI-Wahl",
         [p.get("document_type") for p in _rw.get("patch", [])] == [1], str(_rw.get("patch")))
+
+# ---- Kennungen je Konto: im Haushalt ist „wir" nur der Besitzer des Dokuments.
+_haus = {"kennungen_je_konto": True, "eigene_kennungen": {"namen": ["Erika Muster", "Max Muster"]},
+         "konten": {"erika": {"iban": ["DE00 1111"]}, "*": {"email": ["post@example.com"]}}}
+_erika = {"username": "erika", "first_name": "Erika", "last_name": "Muster", "email": "erika@example.com"}
+_kc = classify.konto_cfg(_haus, 3, _erika)
+r.check("Konto: nur der Besitzer ist „wir“, mit Mail aus dem Konto, IBAN aus konten, Gemeinsames aus „*“",
+        _kc["eigene_kennungen"]["namen"] == ["Erika Muster"] and _kc["_konto"] == "erika"
+        and set(_kc["eigene_kennungen"]["email"]) == {"erika@example.com", "post@example.com"}
+        and _kc["eigene_kennungen"]["iban"] == ["DE00 1111"], str(_kc.get("eigene_kennungen")))
+r.check("Konto: Schalter aus, kein Besitzer oder kein lesbares Konto → gemeinsame Kennungen",
+        classify.konto_cfg({**_haus, "kennungen_je_konto": False}, 3, _erika)["eigene_kennungen"]["namen"] == ["Erika Muster", "Max Muster"]
+        and classify.konto_cfg(_haus, None, _erika) is _haus and classify.konto_cfg(_haus, 3, {}) is _haus)
+r.check("Konto: Prompt nennt nur den Besitzer und die anderen als Gegenüber",
+        "im Konto von Erika Muster" in classify.eigene_firma_anweisung(_kc)
+        and "Max Muster" not in classify.eigene_firma_anweisung(_kc)
+        and "Gegenüber wie jedes andere" in classify.eigene_firma_anweisung(_kc))
+_kl = _lauf([{**_ok, "correspondent": "Max Muster"}], text=_gut + " Absender: Max Muster, Musterweg 1",
+            korrespondenten=[{"id": 7, "name": "Max Muster"}], besitzer=_erika, cfg=_haus)
+r.check("Verdrahtung: bei Erikas Dokument ist Max ein Kandidat und Erika allein „wir“",
+        "Name „Max Muster“" in _kl["chat"][0] and "im Konto von Erika Muster" in _kl["system"]
+        and (classify.TRACE.get("konto") == "erika"), _kl["chat"][0][:300])
+_kg = _lauf([{**_ok, "correspondent": "Max Muster"}], text=_gut + " Absender: Max Muster, Musterweg 1",
+            korrespondenten=[{"id": 7, "name": "Max Muster"}], besitzer=_erika, cfg={**_haus, "kennungen_je_konto": False})
+r.check("Verdrahtung: ohne Schalter bleibt Max „wir“ (kein Kandidat)", "Name „Max Muster“" not in _kg["chat"][0])
 
 sys.exit(r.done())

@@ -106,6 +106,8 @@ CFG = {
     "eigene_regel": "",
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
     "type_descriptions": {},           # {"Typname": "wann dieser Typ gilt"} — steht im Prompt unter den Typen
+    "kennungen_je_konto": False,       # an: „wir" = Besitzer des Dokuments (Haushalt mit eigenen Konten)
+    "konten": {},                      # {"benutzername": {iban, email, domains, ustid, telefon, namen}, "*": gemeinsam}
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
 }
@@ -297,6 +299,44 @@ def eigene_kennungen(cfg):
             "namen": [set(ctoks(n)) for n in (e.get("namen") or []) if ctoks(n)],
             "telefon": {norm_telefon(x) for x in werte(e, "telefon")} - {""}}
 
+
+
+def _roh_liste(v):
+    """Einträge einer Config-Liste wie geschrieben (eine Zeichenkette zählt als ein Eintrag)."""
+    return [str(x).strip() for x in (v if isinstance(v, (list, tuple)) else [v]) if x is not None and str(x).strip()]
+
+
+CFG_LAUF = CFG   # Config dieses Laufs: bei kennungen_je_konto mit den Kennungen des Dokument-Besitzers
+
+
+def konto_cfg(cfg, owner_id, benutzer=None):
+    """Die Config für ein Dokument: bei `kennungen_je_konto` sind „wir" nur der Besitzer.
+
+    Haushalt mit eigenen Konten (PO 2026-10-11): jede Person klassifiziert für sich; die anderen
+    sind ein Gegenüber wie jedes andere — mit einer gemeinsamen Liste konnte bei Daniels Dokumenten
+    weder Melli noch Martin Korrespondent werden. Name und Mail kommen aus dem Paperless-Konto
+    (`benutzer` oder GET /users/<id>/), IBAN & Co. aus `konten[<benutzername>]`, Gemeinsames
+    (etwa das Postfach eines Mail-Abrufs) aus `konten["*"]`. Ohne Schalter, ohne Besitzer oder
+    ohne lesbares Konto bleibt die gemeinsame `eigene_kennungen` (Firma: alle für die Firma)."""
+    if not cfg.get("kennungen_je_konto") or not owner_id:
+        return cfg
+    try:
+        u = benutzer if benutzer is not None else get(f"/users/{owner_id}/")
+    except Exception:
+        u = None
+    if not u or not u.get("username"):
+        return cfg
+    konten = cfg.get("konten") or {}
+    eigen, alle = konten.get(u["username"]) or {}, konten.get("*") or {}
+    name = f"{u.get('first_name') or ''} {u.get('last_name') or ''}".strip()
+    e = {}
+    for feld in ("namen", "email", "iban", "ustid", "domains", "telefon"):
+        e[feld] = list(dict.fromkeys(
+            ([name] if feld == "namen" and name else []) + ([u["email"]] if feld == "email" and u.get("email") else [])
+            + _roh_liste(eigen.get(feld)) + _roh_liste(alle.get(feld))))
+    if not e["namen"]:
+        return cfg
+    return {**cfg, "eigene_kennungen": e, "_konto": u["username"]}
 
 def _domain_passt(dom, domains):
     return any(dom == d or dom.endswith("." + d) for d in domains)
@@ -1558,10 +1598,14 @@ def eigene_firma_anweisung(cfg):
     kenn = [f"USt-ID {u}" for u in (e.get("ustid") or [])] + [f"IBAN {i}" for i in (e.get("iban") or [])]
     kenn += [f"Mail {m}" for m in (e.get("email") or [])] + [f"Domain {d}" for d in (e.get("domains") or [])]
     regel = str(cfg.get("eigene_regel") or "").strip() or EIGENE_REGEL
-    return ("\nWICHTIG: Dieses Archiv gehört " + " / ".join(namen)
-            + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. "
-            + regel.replace("{ERSTER}", namen[0])
-            + " absender enthält NIE unsere eigenen Stammdaten.")
+    if cfg.get("_konto"):
+        kopf = ("\nWICHTIG: Dieses Dokument liegt im Konto von " + namen[0]
+                + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das ist WIR. Andere Personen, auch aus "
+                "demselben Haushalt, sind für dieses Dokument ein Gegenüber wie jedes andere. ")
+    else:
+        kopf = ("\nWICHTIG: Dieses Archiv gehört " + " / ".join(namen)
+                + (" (" + ", ".join(kenn) + ")" if kenn else "") + " — das sind WIR. ")
+    return kopf + regel.replace("{ERSTER}", namen[0]) + " absender enthält NIE unsere eigenen Stammdaten."
 TITEL_ANWEISUNG = (
     "\nGib ausserdem titel_kennung = was DIESES Dokument von anderen desselben Absenders und derselben Art "
     "unterscheidet, 1 bis 5 Wörter, OHNE Absender und OHNE Dokumentart (auch kein Wort, das nur die Art umschreibt, "
@@ -1728,6 +1772,10 @@ def main():
         log(f"skip {did}: Klassifizierer im Panel deaktiviert"); return
 
     doc = get(f"/documents/{did}/")
+    global CFG_LAUF
+    CFG_LAUF = konto_cfg(CFG, doc.get("owner"))
+    if CFG_LAUF.get("_konto"):
+        TRACE["konto"] = CFG_LAUF["_konto"]
     content = doc.get("content") or ""
     title = doc.get("title") or ""
     tag_ids_on = list(doc.get("tags", []))
@@ -1809,7 +1857,7 @@ def main():
     # Kandidaten wurden. Die Kandidaten findet jetzt die Suche im Text selbst; den Absender
     # nennt Pass 1, und Abgleich/Pass 2 danach bleiben.
     set_stage(did, "Kandidaten")
-    eigene = eigene_kennungen(CFG)
+    eigene = eigene_kennungen(CFG_LAUF)
     # 1. Passt die Absender-Mail zu genau einem Korrespondenten, ist er der stärkste Kandidat —
     #    aber keine Zuordnung: ein Portal verschickt Dokumente vieler Firmen von derselben Adresse
     #    (PO 2026-09-27). Entscheiden tut Pass 1 mit allen Funden.
@@ -1852,7 +1900,7 @@ def main():
     fieldspec = "\n".join(fspec(f) for f in ai_flds)
 
     set_stage(did, "Pass 1")
-    system = pass1_system(CFG, types, tags_all, reserved, bool(summary_fid))
+    system = pass1_system(CFG_LAUF, types, tags_all, reserved, bool(summary_fid))
     global CACHE_KEY
     CACHE_KEY = "paperlaiss-" + __import__("hashlib").sha256(system.encode("utf-8")).hexdigest()[:16]
     NUTZUNG.clear()
