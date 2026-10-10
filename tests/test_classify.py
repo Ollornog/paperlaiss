@@ -423,8 +423,9 @@ r.check("Typ überschreibbar: Import ohne FORCE, Knopf, Panel ja — Bestand, FO
         and not classify.typ_ueberschreibbar("bulk", False) and not classify.typ_ueberschreibbar("irgendwas", False))
 r.check("Typ-Vorschlag: ohne vorbelegten Typ kein Hinweis",
         "vorbelegt" not in "".join(t for t, _, _ in classify.pass1_nachricht_teile("", None, "", "", "", "d", "", "a", "", "T", "I")))
-r.check("Verdrahtung: Pass 1 läuft mit Schema (Dokumenttyp aus der Liste)",
-        (_s.get("schemas") or [None])[0] and "Rechnung" in _s["schemas"][0]["properties"]["document_type"]["enum"])
+r.check("Verdrahtung: Pass 1 läuft mit Schema (Dokumenttyp frei, Typen im Prompt)",
+        (_s.get("schemas") or [None])[0] and "enum" not in _s["schemas"][0]["properties"]["document_type"]
+        and "Rechnung" in _s["system"])
 r.check("Verdrahtung: Treffer steht mit Begründung in der Nachricht an Pass 1",
         "Beispiel Software" in _s["chat"][0] and "gefunden: USt-ID ATU99988777" in _s["chat"][0])
 r.check("Verdrahtung: Trockenlauf zeigt die Stammdaten, schreibt sie nicht",
@@ -529,8 +530,8 @@ r.check("Kürzung: Anfang 9000 + Ende 1000, dazwischen ein Hinweis, Summe am End
         _k.startswith("A" * 9000) and _k.endswith("ENDE-SUMME 123,45") and "Zeichen ausgelassen" in _k
         and "MITTE" not in _k and len(_k) < 10100, str(len(_k)))
 _s1 = classify.pass1_schema({"Rechnung": 1, "Brief": 2}, ["Betrag", "IBAN"], False, True, True)
-r.check("Schema Pass 1: Dokumenttyp nur aus der Liste oder null, Felder und Absender vorgegeben",
-        _s1["properties"]["document_type"]["enum"] == ["Brief", "Rechnung", None]
+r.check("Schema Pass 1: Dokumenttyp ohne Auswahlliste, Felder und Absender vorgegeben",
+        "enum" not in _s1["properties"]["document_type"] and "dokumentart" in _s1["required"]
         and set(_s1["properties"]["fields"]["properties"]) == {"Betrag", "IBAN"}
         and "absender" in _s1["required"] and "summary" in _s1["properties"] and "tags" not in _s1["properties"])
 r.check("Schema Pass 1: offen für Zusatzschlüssel eigener Prompts (summary_long …)",
@@ -551,9 +552,26 @@ _sch = [classify.pass1_schema({"Bescheid": 1, "Bewerbung": 2}, ["Betrag"], t, a,
 r.check("Schema Pass 1: required ohne Doppelte und nur aus properties (sonst 422 von Mistral)",
         all(len(x["required"]) == len(set(x["required"])) and set(x["required"]) <= set(x["properties"]) for x in _sch),
         str([x["required"] for x in _sch if len(x["required"]) != len(set(x["required"]))][:1]))
-r.check("Schema Pass 1: Auswahlliste ohne Doppelte, Dokumenttyp Pflicht",
-        all(len(x["properties"]["document_type"]["enum"]) == len(set(map(str, x["properties"]["document_type"]["enum"])))
-            and "document_type" in x["required"] for x in _sch))
+r.check("Schema Pass 1: Dokumenttyp Pflicht, freie Dokumentart direkt davor",
+        all("document_type" in x["required"] and list(x["properties"])[-2:] == ["dokumentart", "document_type"]
+            for x in _sch))
+
+# ---- typ_zuordnen(): die freie Antwort auf die Typen abbilden (seit die Auswahlliste fehlt).
+_ty = {"Rechnung": 1, "Bescheid": 2, "Erklaerung": 3, "Vollmacht": 4, "Kuendigung": 5, "Brief": 6}
+r.check("Typ: genau und ohne Schreibweise (ä = ae, Groß/klein)",
+        classify.typ_zuordnen("Rechnung", _ty) == 1 and classify.typ_zuordnen("Erklärung", _ty) == 3
+        and classify.typ_zuordnen("kündigung", _ty) == 5)
+r.check("Typ: über das Wortende auf den Oberbegriff",
+        classify.typ_zuordnen("Einverständniserklärung", _ty) == 3 and classify.typ_zuordnen("Bußgeldbescheid", _ty) == 2
+        and classify.typ_zuordnen("Stromrechnung", _ty) == 1)
+r.check("Typ: nichts Passendes, leer oder zu kurzes Ende → None",
+        classify.typ_zuordnen("Zeugenaussage", _ty) is None and classify.typ_zuordnen(None, _ty) is None
+        and classify.typ_zuordnen("Personalakte", {"Akte": 6}) is None and classify.typ_zuordnen("Liebesbrief", {"Brief": 6}) == 6)
+_tz = _lauf([{**_ok, "document_type": "Haftungserklärung"}], dry=False, typ=None)
+_tz2 = _lauf([{**_ok, "document_type": None, "dokumentart": "Zahlungsmahnung"}], dry=False, typ=None)
+r.check("Schreibstelle: freie Typ-Antwort und ersatzweise die Dokumentart werden zugeordnet",
+        [p.get("document_type") for p in _tz.get("patch", [])] == [None] and
+        [p.get("document_type") for p in _tz2.get("patch", [])] == [2], f"{_tz.get('patch')} {_tz2.get('patch')}")
 r.check("Schema Pass 2: nur Kandidaten oder null", classify.pass2_schema(["A", "B"])["properties"]["match"]["enum"] == ["A", "B", None])
 
 # Was tatsächlich an Mistral geht: response_format json_schema (strict) und prompt_cache_key.
@@ -1194,6 +1212,8 @@ r.check("Schreibstelle: Datumswechsel steht in der OK-Zeile",
 _sys_eigen = classify.pass1_system({"system_prompt": "Eigener Prompt {TYPES}"}, {"Rechnung": 1}, [], set(), False)
 r.check("Prompt: Korrespondenten-Regel auch bei eigenem Prompt (Werkzeug ≠ Absender, Unterschrift für die Stelle)",
         classify.KORRESPONDENT_ANWEISUNG in _sys_eigen and "STAMMT" in _sys_eigen and "Google Docs" in _sys_eigen)
+r.check("Prompt: eigene Vorlage, die ein anderer unterschreibt, gehört zum anderen",
+        "selbst aufgesetzt" in _sys_eigen and "diese andere Person, nicht wir" in _sys_eigen)
 r.check("Prompt: Datumsregel auch bei eigenem Prompt (Unterschrift, nie Geburtsdatum)",
         classify.DATUM_ANWEISUNG in _sys_eigen and "Geburtsdatum" in _sys_eigen and "Unterschrift" in _sys_eigen)
 r.check("Prompt: Kandidatenliste verlangt Herkunft, nicht bloße Nennung",
@@ -1204,6 +1224,12 @@ r.check("Titel: eigener Kopf „Korrespondent – “ fällt für die Suche weg,
         classify.titel_ohne_eigenen_kopf("Google – Sonstiges Zeugenaussage", "Google") == "Sonstiges Zeugenaussage"
         and classify.titel_ohne_eigenen_kopf("Rechnung Google März", "Google") == "Rechnung Google März"
         and classify.titel_ohne_eigenen_kopf("Google – Rechnung", None) == "Google – Rechnung")
+r.check("Titel: mit Typ fällt auch der Typ weg, die Kennung bleibt",
+        classify.titel_ohne_eigenen_kopf("Daniel – Vollmacht Unterrichtsvereinbarung", "Daniel", "Vollmacht") == "Unterrichtsvereinbarung"
+        and classify.titel_ohne_eigenen_kopf("Daniel – Vollmachten 2026", "Daniel", "Vollmacht") == "Vollmachten 2026")
+_rn = _lauf([_ok], korrespondenten=[{"id": 7, "name": "Nord Autoteile"}], korr=7, typ=1, titel="Nord Autoteile – Rechnung 4711")
+r.check("Verdrahtung: Nachricht an Pass 1 zeigt den Titel ohne eigenen Kopf und Typ",
+        "TITEL: 4711" in _rn["chat"][0] and "Nord Autoteile – Rechnung" not in _rn["chat"][0], _rn["chat"][0][-400:])
 _rk = _lauf([_ok], korrespondenten=[{"id": 7, "name": "Nord Autoteile"}], korr=7, titel="Nord Autoteile – Rechnung 4711")
 _rt = _lauf([_ok], korrespondenten=[{"id": 7, "name": "Nord Autoteile"}], titel="Rechnung Nord Autoteile 4711")
 r.check("Verdrahtung: erneuter Lauf findet den eigenen Titelkopf nicht als Kandidaten, einen Paperless-Titel schon",

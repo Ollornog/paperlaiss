@@ -804,7 +804,15 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary, mit_tite
     if mit_titel:
         props["titel_kennung"] = _NULLBAR("string")
         pflicht.append("titel_kennung")
-    props["document_type"] = {"type": ["string", "null"], "enum": sorted(typen) + [None]}
+    # Frei vor der Auswahl (2026-10-10): wie das Dokument sich selbst nennt. Stand die Art nicht in der
+    # Liste („Einverständniserklärung“), kippte die erzwungene Auswahl auf ein falsches Wort (Vollmacht),
+    # obwohl die Zusammenfassung die Art richtig nannte.
+    props["dokumentart"] = _NULLBAR("string")
+    pflicht.append("dokumentart")
+    # Ohne Auswahlliste (seit 2026-10-10): mit `enum` wählte Mistral bei einer Einverständniserklärung
+    # 5 von 5 Mal „Vollmacht“, ohne Liste „Erklärung“ — die Beschränkung beim Erzeugen lenkte auf ein
+    # falsches Wort. Die Typen stehen im Prompt; typ_zuordnen() bildet die Antwort auf sie ab.
+    props["document_type"] = _NULLBAR("string")
     pflicht.insert(0, "document_type")
     return {"type": "object", "properties": props, "required": pflicht, "additionalProperties": True}
 
@@ -1259,14 +1267,47 @@ def typ_setzen(dt_id, bisher, darf_ueberschreiben):
 
 
 
-def titel_ohne_eigenen_kopf(title, korrespondent):
-    """Der Titel für die Suche im Text, ohne den Korrespondenten, den ein früherer Lauf selbst
-    vorangestellt hat („Google – Sonstiges …“). Sonst fand die Vorsuche beim erneuten Lauf genau
-    den Namen, den sie zuvor gesetzt hatte, als „im Briefkopf“, und eine Fehlzuordnung bestätigte
-    sich selbst (2026-10-10). Der Rest des Titels bleibt, ebenso ein Titel von Paperless."""
+
+def _typ_falte(s):
+    """Typname zum Vergleichen: klein, Umlaute als ae/oe/ue/ss, nur Buchstaben und Ziffern —
+    „Erklärung“ und „Erklaerung“ sind derselbe Typ (norm() machte aus ä ein a)."""
+    s = str(s or "").lower()
+    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        s = s.replace(a, b)
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode())
+
+
+def typ_zuordnen(antwort, types):
+    """Die id des Dokumenttyps zur Antwort der KI, sonst None. Genau, dann ohne Schreibweise, dann
+    über das Wortende: die deutsche Zusammensetzung endet auf den Oberbegriff
+    („Einverständniserklärung“ → Erklärung, „Bußgeldbescheid“ → Bescheid); der längste passende
+    Typ gewinnt, ab 5 Zeichen."""
+    if not antwort:
+        return None
+    if antwort in types:
+        return types[antwort]
+    f = _typ_falte(antwort)
+    gefaltet = {_typ_falte(n): i for n, i in types.items()}
+    if f in gefaltet:
+        return gefaltet[f]
+    enden = [(len(n), i) for n, i in gefaltet.items() if len(n) >= 5 and f.endswith(n)]
+    return max(enden)[1] if enden else None
+
+def titel_ohne_eigenen_kopf(title, korrespondent, typ=None):
+    """Der Titel ohne das, was ein früherer Lauf selbst vorangestellt hat: den Korrespondenten
+    („Google – …“) und dahinter den Dokumenttyp („… – Vollmacht Unterrichtsvereinbarung“).
+
+    Beides stammt aus der letzten Zuordnung, nicht aus dem Dokument. In der Vorsuche fand ein
+    erneuter Lauf so den eigenen Namen „im Briefkopf“, in der Nachricht an Pass 1 übernahm die KI
+    Korrespondent und Typ aus dem Titel — eine Fehlzuordnung bestätigte sich selbst (2026-10-10).
+    Die Kennung bleibt, ebenso ein Titel von Paperless."""
     t, k = str(title or ""), str(korrespondent or "").strip()
-    if k and t.startswith(k + " – "):
-        return t[len(k) + 3:]
+    if not (k and t.startswith(k + " – ")):
+        return t
+    t = t[len(k) + 3:]
+    ty = str(typ or "").strip()
+    if ty and (t == ty or t.startswith(ty + " ")):
+        t = t[len(ty):].strip()
     return t
 
 def titel_bilden(korrespondent, typ, kennung):
@@ -1420,9 +1461,16 @@ KORRESPONDENT_ANWEISUNG = (
     "Zahlungswege und Firmen, über die nur berichtet wird. Ein Schreiben von jemand anderem, in dem „Google“ "
     "steht, ist kein Google-Dokument. Eine Erklärung, Zeugenaussage oder Bestätigung stammt von der Person, die "
     "sie abgibt und unterschreibt — auch wenn wir sie vorbereitet oder zur Unterschrift verschickt haben, etwa "
-    "über eine Signaturplattform.")
+    "über eine Signaturplattform. Ebenso jedes Dokument, das wir selbst aufgesetzt haben und das eine andere "
+    "Person unterschreibt oder mit uns schließt (Einverständniserklärung, Vereinbarung, Vertrag): correspondent ist "
+    "diese andere Person, nicht wir — auch wenn wir im Kopf als Partei stehen.")
 # Das Dokumentdatum, ebenfalls unabhängig vom eigenen Prompt (PO 2026-10-10): Paperless setzt beim Import
 # das erste Datum im Text — bei Erklärungen und Verträgen oft ein Geburtsdatum.
+TYP_ANWEISUNG = (
+    "\ndokumentart = wie das Dokument sich selbst nennt oder was es ist, in 1 bis 3 eigenen Wörtern "
+    "(z. B. „Einverständniserklärung“, „Zeugenaussage“, „Stromrechnung“). Danach document_type = der Eintrag aus "
+    "DOKUMENTTYPEN, der diese Art am besten trifft — der Oberbegriff (Erklärung für eine Einverständniserklärung), "
+    "nicht ein Typ, der nur ähnlich klingt; null, wenn keiner passt.")
 DATUM_ANWEISUNG = (
     "\ndocument_date (oberste Ebene der Antwort, nicht in fields) = der Tag, an dem DIESES Dokument entstanden "
     "ist: das Datum im Briefkopf bzw. das Ausstellungsdatum; trägt das Dokument keines, das Datum der "
@@ -1495,6 +1543,7 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
         teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
     teile.append((KORRESPONDENT_ANWEISUNG, "Wer der Korrespondent ist (immer angehängt)"))
     teile.append((DATUM_ANWEISUNG, "Dokumentdatum (immer angehängt)"))
+    teile.append((TYP_ANWEISUNG, "Dokumentart vor dem Typ (immer angehängt)"))
     if eigene_firma_anweisung(cfg):
         teile.append((eigene_firma_anweisung(cfg), "Wir und das Gegenüber (automatisch angehängt, aus „Eigene Namen“"
                       + (" und „Regel zum Gegenüber“" if str(cfg.get("eigene_regel") or "").strip() else "") + ")"))
@@ -1755,11 +1804,13 @@ def main():
     TRACE["ki_nutzung"] = NUTZUNG
     schema1 = pass1_schema(types, [f["name"] for f in ai_flds], CFG["tagging_enabled"],
                            CFG.get("stammdaten_erfassen", True), bool(summary_fid), CFG.get("titel_setzen", True))
+    _typ_bisher = next((n for n, i in types.items() if i == doc.get("document_type")), None)
     user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
         (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
-        fieldspec, title, text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000)),
-        typ_vorschlag=next((n for n, i in types.items() if i == doc.get("document_type")), None)))
+        fieldspec, titel_ohne_eigenen_kopf(title, cname, _typ_bisher) or "—",
+        text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000)),
+        typ_vorschlag=_typ_bisher))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200, schema1, "pass1")
 
@@ -1873,8 +1924,8 @@ def main():
                 tag_ids.append(tid)
         new_tags = [t for t in (prop.get("new_tags") or []) if t and norm(t) not in tagid_by_norm]
 
-    dt = prop.get("document_type")
-    dt_id = types.get(dt) or (next((v for k, v in types.items() if norm(k) == norm(dt)), None) if dt else None)
+    dt_id = typ_zuordnen(prop.get("document_type"), types) or typ_zuordnen(prop.get("dokumentart"), types)
+    dt = next((n for n, i in types.items() if i == dt_id), None) if dt_id else prop.get("document_type")
     summary = summary_aus(prop) if summary_fid else ""
     if new_tags and summary_fid:
         summary = (summary + f"\n\n[KI-Tag-Vorschlag: {', '.join(new_tags)}]").strip()
