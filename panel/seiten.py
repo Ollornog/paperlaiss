@@ -682,6 +682,13 @@ EINSTELLUNGEN = {
     "stammdaten_erfassen": ("Korrespondenten", "Stammdaten erfassen",
                             "An: USt-ID, IBAN, Mail, Telefon, Adresse und Kundennummer des Absenders werden beim "
                             "zugeordneten Korrespondenten nachgetragen — nur in leere Felder, nie überschreibend."),
+    "kennungen_je_konto": ("Korrespondenten", "Eigene Kennungen je Konto",
+                           "An: „wir“ ist nur der Besitzer des Dokuments — Name und Mail aus seinem Paperless-Konto, "
+                           "dazu IBAN & Co. aus „Kennungen je Konto“. Für einen Haushalt, in dem jede Person für sich "
+                           "ablegt. Aus: alle unter „Eigene …“ gelten für jedes Dokument (eine Firma)."),
+    "konten": ("Korrespondenten", "Kennungen je Konto",
+               "Je Paperless-Benutzername weitere eigene Kennungen, als {\"benutzer\": {\"iban\": [...], \"email\": [...], "
+               "\"domains\": [...]}}; \"*\" gilt für alle Konten. Nur bei „Eigene Kennungen je Konto“."),
     "eigene_kennungen.ustid": ("Korrespondenten", "Eigene USt-IDs",
                                "Eigene USt-IDs. Stehen auf fast jedem Dokument und zählen nie als Absender. Eine je Zeile."),
     "eigene_kennungen.iban": ("Korrespondenten", "Eigene IBANs",

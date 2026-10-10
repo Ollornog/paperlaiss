@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — eigene Kennungen je Konto
+
+- **`kennungen_je_konto`** (Panel: „Eigene Kennungen je Konto“): In einem Haushalt, in dem jede Person
+  für sich ablegt, ist „wir“ nur der Besitzer des Dokuments. Name und Mail kommen aus seinem
+  Paperless-Konto (`/users/<id>/`), IBAN & Co. aus **`konten[<benutzername>]`**, Gemeinsames (etwa
+  das Postfach eines Mail-Abrufs) aus `konten["*"]`. Die anderen Personen sind für dieses Dokument
+  ein Gegenüber wie jedes andere: Sie werden Kandidaten der Vorsuche, und ihre Stammdaten werden
+  erfasst. Mit einer gemeinsamen Liste konnte bei Dokumenten der einen Person keine andere
+  Korrespondent werden. Ohne Schalter, ohne Besitzer oder ohne lesbares Konto gilt weiter
+  `eigene_kennungen` (eine Firma: alle für die Firma).
+
 ### Hinzugefügt — feste Typ-Zuweisung aus Paperless, Beschreibungen der Dokumenttypen
 
 - **Zuweisung „Exakt“ oder „Regulärer Ausdruck“ am Dokumenttyp in Paperless gilt vor der KI**
