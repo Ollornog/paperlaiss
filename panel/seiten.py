@@ -442,7 +442,7 @@ function zeichnen(){
           'Modell <b>'+txt(CFG.model)+'</b>, Temperatur '+txt(CFG.temperature)+', Text bis '+txt(CFG.content_max_len)+' Zeichen (bei längeren Dokumenten Anfang + die letzten '+txt(CFG.content_end_len??1000)+'). Die Antwort ist per JSON-Schema festgelegt (Dokumenttyp nur aus der Liste).',
       klappen:[['Eingabe — Anweisung (System-Prompt)',promptEditor()],
                ['Eingabe — Nachricht je Dokument',teileHtml(V.nachricht_teile)],
-               ['Ausgabe',tabelle({document_type:'Dokumenttyp aus der Liste, oder leer',correspondent:'Name des Absenders, oder leer',
+               ['Ausgabe',tabelle({dokumentart:'wie das Dokument sich nennt, frei (z. B. Einverständniserklärung)',document_type:'Dokumenttyp aus der Liste, frei geschrieben und danach zugeordnet (genau, ä = ae, Wortende), sonst die Dokumentart, oder leer',correspondent:'Name des Absenders, oder leer',
                   fields:'je Feld: Wert · leer (löschen) · „BEHALTEN“',document_date:'tatsächliches Dokumentdatum (JJJJ-MM-TT)',
                   summary:'kurze Zusammenfassung',titel_kennung:'was dieses Dokument unterscheidet (Nummer, Zeitraum, Betreff) — für den Titel',tags:'Tags aus der Liste (nur bei aktivem Tagging)',needs_ocr:'ja, wenn der Text unlesbar ist'},['Feld','Bedeutung'])]]},
     {phase:'Analysieren',art:'entscheidung',id:'nachlauf',titel:'Text lesbar laut KI?',knopf:knopf('nachlauf'),

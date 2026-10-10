@@ -6,6 +6,21 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Dokumenttyp ohne Auswahlliste, eigene Vorlagen beim Gegenüber
+
+- **Dokumenttyp ohne `enum` im Schema:** Mit Auswahlliste wählte Mistral für eine
+  Einverständniserklärung 5 von 5 Mal „Vollmacht“, ohne Liste „Erklärung“, obwohl die
+  Zusammenfassung die Art richtig nannte. Die Typen stehen weiter im Prompt. Neu `typ_zuordnen()`
+  bildet die Antwort ab: genau, dann ohne Schreibweise (ä = ae, das alte `norm()` machte aus ä ein a),
+  dann über das Wortende auf den Oberbegriff („Bußgeldbescheid“ → Bescheid, ab 5 Zeichen).
+  Neues freies Feld `dokumentart` direkt vor dem Typ (`TYP_ANWEISUNG`) dient als Rückfall.
+- **Titel in der Nachricht an Pass 1** ohne den selbst gesetzten Kopf samt Typ
+  („Daniel – Vollmacht …“ → „…“). Ein erneuter Lauf übernahm sonst Korrespondent und Typ daraus.
+- **Korrespondent:** Ein Dokument, das wir aufgesetzt haben und das eine andere Person unterschreibt
+  oder mit uns schließt, gehört zu dieser Person.
+- Probe an 17 echten Dokumenten (Trockenlauf): Einverständniserklärung → Erklärung, Zeugenaussagen
+  → Zeugenaussage, Zahlungserinnerung → Mahnung, Rechnungen und Bescheide unverändert.
+
 ### Behoben — Dokumentdatum wurde nie geschrieben, Korrespondent nach Herkunft
 
 - **Dokumentdatum:** Seit dem JSON-Schema (#71) steht `document_date` auf der obersten Ebene der
