@@ -105,6 +105,7 @@ CFG = {
     # Lebenslauf, Vollmacht zwischen Mitgliedern) — deshalb einstellbar statt fest.
     "eigene_regel": "",
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
+    "type_descriptions": {},           # {"Typname": "wann dieser Typ gilt"} — steht im Prompt unter den Typen
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
     "api_key_ocr": "",
 }
@@ -1212,7 +1213,21 @@ PLATZHALTER = {"TYPES": "Dokumenttypen aus Paperless", "TAGBLOCK": "Tag-Liste sa
                "TAGS": "nur die Tag-Liste"}
 
 
-def baue_system_teile(tpl, types, taglines):
+
+def typ_block(types, beschreibungen):
+    """Die Beschreibungen der Dokumenttypen für den Prompt, direkt hinter der Typliste; leer ohne.
+
+    Nur Typen, die es gibt. Anlass (2026-10-11): eigene Typen wie „Unterrichtsvereinbarung“ für eine
+    Vorlage, die sich selbst „Einverständniserklärung“ nennt — ohne Beschreibung nahm die KI den Typ,
+    der nach dem Wortlaut klingt (Erklärung)."""
+    zeilen = [f"- {n}: {str(b).strip()}" for n, b in sorted((beschreibungen or {}).items())
+              if n in types and str(b or "").strip()]
+    if not zeilen:
+        return ""
+    return ("\nBEDEUTUNG EINZELNER TYPEN (gilt vor dem Wortlaut, mit dem sich ein Dokument selbst nennt):\n"
+            + "\n".join(zeilen))
+
+def baue_system_teile(tpl, types, taglines, typ_beschreibungen=None):
     """Wie baue_system(), aber in Stuecken: (Text, Platzhaltername oder None).
 
     Der Lauf fuegt die Stuecke zusammen, das Panel markiert die eingesetzten Werte. Eine
@@ -1225,7 +1240,7 @@ def baue_system_teile(tpl, types, taglines):
                     + taglines + "\n"
                     "Wenn WIRKLICH kein Tag passt, gib in new_tags 1-2 kurze Vorschläge (sonst leeres Array). Sonst KEINE Tags erfinden.\n"
                     "JSON zusätzlich: tags (Array bestehender Namen), new_tags (Array).\n\n")
-    werte = {"TYPES": ", ".join(sorted(types)), "TAGBLOCK": tagblock, "TAGS": taglines}
+    werte = {"TYPES": ", ".join(sorted(types)) + typ_block(types, typ_beschreibungen), "TAGBLOCK": tagblock, "TAGS": taglines}
     teile = []
     for i, stueck in enumerate(re.split(r"\{(TYPES|TAGBLOCK|TAGS)\}", tpl)):
         if i % 2:
@@ -1283,6 +1298,38 @@ def _typ_falte(s):
         s = s.replace(a, b)
     return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode())
 
+
+
+# Zuweisungsarten von Paperless, die als bewusste, genaue Regel gelten: Exakt (3) und Regulärer Ausdruck (4).
+FESTE_ZUWEISUNG = {3, 4}
+
+
+def typ_aus_regel(types_roh, text):
+    """Der Dokumenttyp, den eine genaue Zuweisung in Paperless festlegt, sonst None.
+
+    Nur „Exakt“ und „Regulärer Ausdruck“ (Paperless-Doku: Exakt = der Text steht genau so, in dieser
+    Reihenfolge, im Dokument). Sie gelten vor der KI: eine eigene Vorlage, die sich selbst anders nennt
+    („Einverständniserklärung“ → Typ Unterrichtsvereinbarung), erkennt die KI nicht zuverlässig, eine
+    Zuweisung schon (PO 2026-10-11). „Irgendein Wort“, „Alle Wörter“, „Ungefähr“ und „Automatisch“
+    bleiben Sache der KI — sie sind grob („Rechnung Invoice Faktura“) und machten sonst aus jeder
+    Rechnung, die eine Mahnung erwähnt, eine Mahnung. Bei Exakt zählt jeder Leerraum als Leerraum
+    (das OCR bricht Zeilen). Treffen mehrere, gewinnt die längste Zuweisung."""
+    treffer = []
+    for t in types_roh or ():
+        m = str(t.get("match") or "").strip()
+        if t.get("matching_algorithm") not in FESTE_ZUWEISUNG or not m:
+            continue
+        flags = re.IGNORECASE if t.get("is_insensitive", True) else 0
+        if t["matching_algorithm"] == 3:
+            muster = r"(?<!\w)" + r"\s+".join(re.escape(w) for w in m.split()) + r"(?!\w)"
+        else:
+            muster = m
+        try:
+            if re.search(muster, str(text or ""), flags):
+                treffer.append((len(m), t))
+        except re.error:
+            continue
+    return max(treffer, key=lambda x: x[0])[1] if treffer else None
 
 def typ_zuordnen(antwort, types):
     """Die id des Dokumenttyps zur Antwort der KI, sonst None. Genau, dann ohne Schreibweise, dann
@@ -1475,9 +1522,9 @@ KORRESPONDENT_ANWEISUNG = (
 # das erste Datum im Text — bei Erklärungen und Verträgen oft ein Geburtsdatum.
 TYP_ANWEISUNG = (
     "\ndokumentart = wie das Dokument sich selbst nennt oder was es ist, in 1 bis 3 eigenen Wörtern "
-    "(z. B. „Einverständniserklärung“, „Zeugenaussage“, „Stromrechnung“). Danach document_type = der Eintrag aus "
-    "DOKUMENTTYPEN, der diese Art am besten trifft — der Oberbegriff (Erklärung für eine Einverständniserklärung), "
-    "nicht ein Typ, der nur ähnlich klingt; null, wenn keiner passt.")
+    "(z. B. „Zeugenaussage“, „Stromrechnung“). Danach document_type = der Eintrag aus DOKUMENTTYPEN, der dieses "
+    "Dokument am genauesten trifft: ein spezieller Typ — auch über seine Beschreibung — geht einem Oberbegriff vor, "
+    "der Oberbegriff nur, wenn es keinen genaueren gibt; nie ein Typ, der nur ähnlich klingt; null, wenn keiner passt.")
 DATUM_ANWEISUNG = (
     "\ndocument_date (oberste Ebene der Antwort, nicht in fields) = der Tag, an dem DIESES Dokument entstanden "
     "ist: das Datum im Briefkopf bzw. das Ausstellungsdatum; trägt das Dokument keines, das Datum der "
@@ -1544,7 +1591,7 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
     else:
         taglines = None
     tpl = cfg.get("system_prompt") or DEFAULT_PROMPT
-    teile = baue_system_teile(tpl, types, taglines)
+    teile = baue_system_teile(tpl, types, taglines, cfg.get("type_descriptions"))
     system = "".join(t for t, _ in teile)
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
         teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
@@ -1726,7 +1773,8 @@ def main():
     if len(content.strip()) < 20:
         log(f"skip {did}: kein Text nach OCR"); return
 
-    types = {t["name"]: t["id"] for t in get("/document_types/?page_size=1000")["results"]}
+    types_roh = get("/document_types/?page_size=1000")["results"]
+    types = {t["name"]: t["id"] for t in types_roh}
     corrs = get("/correspondents/?page_size=2000")["results"]
     cfields = get("/custom_fields/?page_size=200")["results"]
     cur_vals = {c["field"]: c.get("value") for c in doc.get("custom_fields", [])}
@@ -1931,6 +1979,10 @@ def main():
         new_tags = [t for t in (prop.get("new_tags") or []) if t and norm(t) not in tagid_by_norm]
 
     dt_id = typ_zuordnen(prop.get("document_type"), types) or typ_zuordnen(prop.get("dokumentart"), types)
+    regel_typ = typ_aus_regel(types_roh, content)
+    if regel_typ and regel_typ["id"] != dt_id:
+        TRACE["typ_regel"] = {"typ": regel_typ["name"], "zuweisung": regel_typ["match"], "ki": prop.get("document_type")}
+        dt_id = regel_typ["id"]
     dt = next((n for n, i in types.items() if i == dt_id), None) if dt_id else prop.get("document_type")
     summary = summary_aus(prop) if summary_fid else ""
     if new_tags and summary_fid:
@@ -2042,7 +2094,9 @@ def main():
         patch.pop("custom_fields", None); patch_doc(did, patch)
 
     log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}"
-        + (f" | datum {date_note}" if date_note else "") + (f" | {repair_note}" if repair_note else ""))
+        + (f" | datum {date_note}" if date_note else "")
+        + (f" | typ per Zuweisung {TRACE['typ_regel']['typ']}" if TRACE.get("typ_regel") else "")
+        + (f" | {repair_note}" if repair_note else ""))
     if pruefen:
         # Nach der OK-Zeile: die Aktivität zeigt es als „Prüfen“, bis ein späterer Lauf ohne Widerspruch folgt.
         log(f"PRÜFEN {did} | {corr_info} | " + "; ".join(f"{k} {x}" for k, x in pruefen.items()))
