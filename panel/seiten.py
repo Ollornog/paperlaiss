@@ -655,6 +655,9 @@ EINSTELLUNGEN = {
     "tagging_enabled": ("Tags", "KI vergibt Tags", "An: die KI wählt passende Tags aus dem Bestand. Aus: nur Typ, Korrespondent, Felder."),
     "tag_descriptions": ("Tags", "Tag-Beschreibungen",
                          "Kurze Beschreibung je Tag für die KI, als {\"Tagname\": \"Beschreibung\"}. Nur bei aktivem Tagging."),
+    "type_descriptions": ("Allgemein", "Beschreibungen der Dokumenttypen",
+                          "Wann ein Dokumenttyp gilt, als {\"Typname\": \"Beschreibung\"}. Steht im Prompt unter den Typen "
+                          "und geht dem Wortlaut des Dokuments vor — für eigene Typen, deren Dokumente sich anders nennen."),
     "reserved_tags": ("Tags", "Reservierte Tags",
                       "Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (Status, Richtung …). Ein Eintrag je Zeile."),
     "unsicher_tag": ("Tags", "Tag bei Unsicherheit", "Wird gesetzt, wenn die KI einen neuen Tag vorschlägt. Leer = aus."),

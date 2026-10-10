@@ -6,6 +6,21 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — feste Typ-Zuweisung aus Paperless, Beschreibungen der Dokumenttypen
+
+- **Zuweisung „Exakt“ oder „Regulärer Ausdruck“ am Dokumenttyp in Paperless gilt vor der KI**
+  (`typ_aus_regel()`). Damit lassen sich eigene Vorlagen sicher erkennen, deren Dokumente sich anders
+  nennen: eine „Einverständniserklärung“ ist dann Typ „Unterrichtsvereinbarung“. Die KI traf das
+  auch mit Beschreibung nicht zuverlässig. „Irgendein Wort“, „Alle Wörter“, „Ungefähr“ und
+  „Automatisch“ bleiben bei der KI, weil sie zu grob sind. Bei „Exakt“ zählt jeder Leerraum als
+  Leerraum (OCR-Zeilenumbrüche). Treffen mehrere Zuweisungen, gewinnt die längste. Die OK-Zeile
+  zeigt `| typ per Zuweisung …`.
+- **`type_descriptions`** (Panel: „Beschreibungen der Dokumenttypen“): Die Beschreibungen stehen im
+  Prompt unter der Typliste und gehen dem Wortlaut des Dokuments vor.
+- `TYP_ANWEISUNG` ohne das feste Beispiel „Erklärung für eine Einverständniserklärung“, das einen
+  Oberbegriff erzwang. Jetzt gilt: der genaueste passende Typ, der Oberbegriff nur, wenn es keinen
+  genaueren gibt.
+
 ### Behoben — Tabellenreste in Stammdaten
 
 - `ohne_tabellenrest()` entfernt Tabellen- und Aufzählungszeichen am Rand („| Fasanenweg 20a …“), jetzt

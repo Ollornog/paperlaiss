@@ -89,12 +89,12 @@ import contextlib as _ctx, io as _io
 
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
-          dry=True, source="", force=False, korr=None, titel="Beleg"):
+          dry=True, source="", force=False, korr=None, titel="Beleg", typen=None):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": [],
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
                                 "correspondent": korr},
-              "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}]},
+              "/tags/": {"results": []}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
     def get(pfad, raw=False):
@@ -1245,5 +1245,48 @@ r.check("Tabellenrest: Stammdaten-Wert wird ohne Rand gespeichert",
 _tn = _lauf([{**_ok, "correspondent": "| Neue Firma"}], dry=False)
 r.check("Tabellenrest: neuer Korrespondent wird ohne Rand angelegt",
         any(d and d.get("name") == "Neue Firma" for _, d in _tn.get("send", [])), str(_tn.get("send")))
+
+# ---- Beschreibungen der Dokumenttypen: unter der Typliste, nur für vorhandene Typen.
+_tb = classify.typ_block({"Unterrichtsvereinbarung": 1, "Rechnung": 2},
+                         {"Unterrichtsvereinbarung": "Einverständniserklärung für private Anleitung", "Gibtsnicht": "x", "Rechnung": " "})
+r.check("Typ-Beschreibung: nur vorhandene Typen mit Text, Vorrang vor dem Wortlaut genannt",
+        "- Unterrichtsvereinbarung: Einverständniserklärung" in _tb and "Gibtsnicht" not in _tb
+        and "- Rechnung" not in _tb and "vor dem Wortlaut" in _tb)
+r.check("Typ-Beschreibung: ohne Beschreibungen kein Block", classify.typ_block({"A": 1}, {}) == "" and classify.typ_block({"A": 1}, None) == "")
+_sys_tb = classify.pass1_system({"system_prompt": "Typen: {TYPES}", "type_descriptions": {"Rechnung": "auch Abrechnungen"}},
+                                {"Rechnung": 1, "Brief": 2}, [], set(), False)
+r.check("Typ-Beschreibung: landet im System-Prompt an der Stelle von {TYPES}",
+        _sys_tb.startswith("Typen: Brief, Rechnung\nBEDEUTUNG") and "- Rechnung: auch Abrechnungen" in _sys_tb, _sys_tb[:200])
+r.check("Typ-Anweisung: kein festes Beispiel, das einen Oberbegriff erzwingt",
+        "Erklärung für eine Einverständniserklärung" not in classify.TYP_ANWEISUNG and "genauesten" in classify.TYP_ANWEISUNG)
+
+# ---- Feste Zuweisung aus Paperless (Exakt / Regulärer Ausdruck) geht der KI vor, grobe Arten nicht.
+_rt = [{"id": 1, "name": "Rechnung", "matching_algorithm": 1, "match": "Rechnung Invoice", "is_insensitive": True},
+       {"id": 2, "name": "Mahnung", "matching_algorithm": 1, "match": "Mahnung", "is_insensitive": True},
+       {"id": 3, "name": "Unterrichtsvereinbarung", "matching_algorithm": 3,
+        "match": "Einverständniserklärung für private Anleitung", "is_insensitive": True},
+       {"id": 4, "name": "Tandem", "matching_algorithm": 4, "match": r"Beförderungsvertrag\s+Tandem", "is_insensitive": False},
+       {"id": 5, "name": "Kaputt", "matching_algorithm": 4, "match": "(", "is_insensitive": True},
+       {"id": 6, "name": "Leer", "matching_algorithm": 3, "match": " ", "is_insensitive": True}]
+_ta = lambda text: (classify.typ_aus_regel(_rt, text) or {}).get("name")
+r.check("Typ-Regel: Exakt trifft über Zeilenumbruch und Groß/klein",
+        _ta("EINVERSTÄNDNISERKLÄRUNG FÜR PRIVATE\nANLEITUNG – Seite 1") == "Unterrichtsvereinbarung")
+r.check("Typ-Regel: Exakt verlangt die Reihenfolge und ganze Wörter",
+        _ta("private Anleitung, Einverständniserklärung für") is None
+        and _ta("Einverständniserklärung für private Anleitungen") is None)
+r.check("Typ-Regel: Regulärer Ausdruck mit Groß/klein, kaputter Ausdruck stört nicht",
+        _ta("Beförderungsvertrag  Tandemflug") == "Tandem" and _ta("beförderungsvertrag tandem") is None)
+r.check("Typ-Regel: „Irgendein Wort“ und leere Zuweisung gelten nicht fest",
+        _ta("Rechnung mit Mahnung") is None and classify.typ_aus_regel([], "x") is None)
+_rv = _lauf([{**_ok, "document_type": "Rechnung"}], dry=False, typen=_rt,
+            text=_gut + " Einverständniserklärung für private Anleitung")
+r.check("Schreibstelle: feste Zuweisung schlägt die KI und steht im Trace",
+        [p.get("document_type") for p in _rv.get("patch", [])] == [3]
+        and (classify.TRACE.get("typ_regel") or {}).get("typ") == "Unterrichtsvereinbarung"
+        and "typ per Zuweisung Unterrichtsvereinbarung" in Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8"),
+        str(_rv.get("patch")))
+_rw = _lauf([{**_ok, "document_type": "Rechnung"}], dry=False, typen=_rt, text=_gut + " Mahnung")
+r.check("Schreibstelle: ohne feste Zuweisung bleibt die KI-Wahl",
+        [p.get("document_type") for p in _rw.get("patch", [])] == [1], str(_rw.get("patch")))
 
 sys.exit(r.done())
