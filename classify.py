@@ -361,6 +361,11 @@ def stammdaten_treffer(corrs, meta, text, eigene):
     return sorted(aus, key=lambda x: -len(x[1]))
 
 
+
+# Ein Dateiname in einer Textzeile („Angebot.pdf", „Liste - Google Sheets.xlsx").
+DATEINAME_IN_ZEILE = re.compile(r"\S\.(?:pdf|docx?|odt|rtf|txt|xlsx?|ods|pptx?|odp|jpe?g|png|heic|tiff?|eml|msg)\b",
+                                re.IGNORECASE)
+
 def namens_treffer(corrs, alias, text, eigene_namen=()):
     """Korrespondenten, deren Name oder Alias im Text steht: [(korrespondent, [Grund])].
 
@@ -370,8 +375,12 @@ def namens_treffer(corrs, alias, text, eigene_namen=()):
     deshalb nur Kandidat für Pass 1. Längere Namen zuerst: „Muster Autoteile" sagt mehr als „Muster"."""
     # Zeilen mit Bankdaten zählen nicht: „Bank: Raiffeisenbank …" nennt, wo gezahlt wird, nicht wer
     # schreibt — bei kurzen Dokumenten rutscht die Fusszeile sonst in den Briefkopf (2026-09-27).
+    # Ebenso Zeilen mit einem Dateinamen: „Zeugenaussage - Google Docs.pdf" (Druckkopf des Browsers,
+    # Signaturseite von Documenso) nennt das Werkzeug, mit dem das Dokument entstand, nicht wer es
+    # ausstellt — eine Zeugenaussage landete so bei Google (2026-10-10).
     kopf = "\n".join(z for z in str(text or "")[:1000].splitlines()
-                     if not re.search(r"\b(IBAN|BIC|SWIFT|Bank|Bankverbindung|Konto|Kto)\b", z, re.IGNORECASE))
+                     if not re.search(r"\b(IBAN|BIC|SWIFT|Bank|Bankverbindung|Konto|Kto)\b", z, re.IGNORECASE)
+                     and not DATEINAME_IN_ZEILE.search(z))
     woerter = set(ctoks(kopf))
     aus = []
     for c in corrs:
@@ -927,10 +936,31 @@ DEFAULT_PROMPT = (
     "korrespondent_kontext (1 kurzer Satz: was ist dieser Absender / welche Dokumente kommen von ihm — bei NEUEM Korrespondent und bei einem bekannten ohne [Kontext], sonst null), "
     "needs_ocr (true wenn Text unbrauchbar/Müll), "
     "fields (Objekt, siehe VERFÜGBARE FELDER). "
-    "Ein Feld nur füllen, wenn das Dokument den Wert konkret hergibt — nichts hineinraten; im Zweifel null lassen. "
-    "document_date = tatsächliches Ausstellungs-/Erstellungsdatum des Dokuments 'YYYY-MM-DD', NICHT nur im Text erwähnte/referenzierte Daten; null wenn unklar."
-)
+    "Ein Feld nur füllen, wenn das Dokument den Wert konkret hergibt — nichts hineinraten; im Zweifel null lassen."
+)  # document_date regelt DATUM_ANWEISUNG, die immer angehängt wird.
 
+
+
+def dokument_datum(prop):
+    """Das Dokumentdatum aus der Pass-1-Antwort als 'YYYY-MM-DD', sonst None.
+
+    Seit dem JSON-Schema (#71) steht document_date auf der obersten Ebene der Antwort; gelesen
+    wurde es bis 2026-10-10 aber aus fields — dort stand es nie, und kein Lauf hat je ein Datum
+    geschrieben (gemessen: 18 von 18 Vorschlägen verloren). fields bleibt als Rückfall für eigene
+    Prompts, die es dort ablegen."""
+    for quelle in (prop, prop.get("fields") or {}):
+        if not isinstance(quelle, dict):
+            continue
+        wert = str(quelle.get("document_date") or "").strip()
+        if not re.match(r"\d{4}-\d{2}-\d{2}$", wert):
+            continue
+        try:
+            tag = datetime.date.fromisoformat(wert)
+        except ValueError:
+            continue
+        if 1950 <= tag.year <= 2035:
+            return wert
+    return None
 
 def is_null(raw):
     return raw is None or (isinstance(raw, str) and raw.strip().lower() in ("", "null", "none", "-", "—", "n/a", "kein", "unbekannt"))
@@ -1228,6 +1258,17 @@ def typ_setzen(dt_id, bisher, darf_ueberschreiben):
     return dt_id
 
 
+
+def titel_ohne_eigenen_kopf(title, korrespondent):
+    """Der Titel für die Suche im Text, ohne den Korrespondenten, den ein früherer Lauf selbst
+    vorangestellt hat („Google – Sonstiges …“). Sonst fand die Vorsuche beim erneuten Lauf genau
+    den Namen, den sie zuvor gesetzt hatte, als „im Briefkopf“, und eine Fehlzuordnung bestätigte
+    sich selbst (2026-10-10). Der Rest des Titels bleibt, ebenso ein Titel von Paperless."""
+    t, k = str(title or ""), str(korrespondent or "").strip()
+    if k and t.startswith(k + " – "):
+        return t[len(k) + 3:]
+    return t
+
 def titel_bilden(korrespondent, typ, kennung):
     """Der Titel aus dem Muster „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27), etwa
     „Beispiel GmbH – Rechnung 12/2026“. Fehlt ein Teil, fällt er weg; ohne Dokumentart UND Kennung
@@ -1354,8 +1395,7 @@ FELD_ANWEISUNG = (
     "\nFülle im fields-Objekt JEDES unter VERFÜGBARE FELDER gelistete Feld mit GENAU einer Wahl: "
     "(a) korrekter Wert passend zum Typ; (b) null = leeren (Feld trifft sicher nicht zu ODER bestehender Wert ist falsch); "
     "(c) \"BEHALTEN\" = bestehenden Wert unverändert lassen, wenn du unsicher bist. "
-    "Bei Auswahl-Feldern exakt ein gelistetes Label. Zusätzlich document_date 'YYYY-MM-DD' = tatsächliches "
-    "Dokumentdatum (NICHT nur referenzierte Daten); null wenn unklar. "
+    "Bei Auswahl-Feldern exakt ein gelistetes Label. "
     "needs_ocr NUR true, wenn der INHALT wirklich unlesbar ist (Zeichensalat, leer, offensichtlich kaputtes OCR); "
     "bei knappem, aber lesbarem Text (aus dem du Felder extrahieren konntest) IMMER false.")
 ABSENDER_ANWEISUNG = (
@@ -1365,6 +1405,29 @@ ABSENDER_ANWEISUNG = (
     "Und korrespondent_kontext = 1 kurzer Satz, was das Gegenüber ist (Art, Branche, Ort — etwa „Kfz-Werkstatt "
     "in Salzburg“), wenn es neu ist oder in den möglichen Korrespondenten kein [Kontext: …] trägt, sonst null.")
 
+
+# Wer der Korrespondent ist, unabhängig vom eigenen Prompt (PO 2026-10-10): der, von dem das Dokument
+# STAMMT — nicht jeder Name, der darin steht. Anlass: eine Zeugenaussage einer Privatperson, mit
+# Google Docs geschrieben und über Documenso signiert, landete bei „Google“.
+KORRESPONDENT_ANWEISUNG = (
+    "\nWER IST DER KORRESPONDENT: der, von dem das Dokument STAMMT — in dessen Namen es geschrieben, ausgestellt "
+    "oder verschickt wurde (Briefkopf, Absender, Aussteller, wer die Erklärung abgibt). Unterschreibt jemand für "
+    "diese Stelle (Sachbearbeiter, Geschäftsführung, Ärztin einer Praxis), bleibt die Stelle der correspondent: "
+    "ein Brief von Google mit der Unterschrift eines Mitarbeiters kommt von Google. Bei Firmen zählt die Marke, "
+    "unter der sie auftreten (Logo, Website), nicht die Rechtsträgerin oder Mutterfirma dahinter. Wer im Text nur VORKOMMT, ist "
+    "es nicht: das Werkzeug oder die Plattform, mit der das Dokument erstellt, signiert, gedruckt oder verschickt "
+    "wurde (z. B. Google Docs, Word, Documenso, DocuSign, ein Mailprogramm), Empfänger, Zeugen, Dritte, Produkte, "
+    "Zahlungswege und Firmen, über die nur berichtet wird. Ein Schreiben von jemand anderem, in dem „Google“ "
+    "steht, ist kein Google-Dokument. Eine Erklärung, Zeugenaussage oder Bestätigung stammt von der Person, die "
+    "sie abgibt und unterschreibt — auch wenn wir sie vorbereitet oder zur Unterschrift verschickt haben, etwa "
+    "über eine Signaturplattform.")
+# Das Dokumentdatum, ebenfalls unabhängig vom eigenen Prompt (PO 2026-10-10): Paperless setzt beim Import
+# das erste Datum im Text — bei Erklärungen und Verträgen oft ein Geburtsdatum.
+DATUM_ANWEISUNG = (
+    "\ndocument_date (oberste Ebene der Antwort, nicht in fields) = der Tag, an dem DIESES Dokument entstanden "
+    "ist: das Datum im Briefkopf bzw. das Ausstellungsdatum; trägt das Dokument keines, das Datum der "
+    "Unterschrift (bei mehreren Unterschriften die letzte). NIE ein Geburtsdatum, eine Frist, ein Leistungs- "
+    "oder Lieferzeitraum oder ein Tag, über den das Dokument nur berichtet. null, wenn es kein solches Datum gibt.")
 
 # Die eingebaute Regel zum Gegenüber — für eine Firma. {ERSTER} = der erste eigene Name.
 # Aufgeweicht 2026-09-27 (PO, nach der Stichprobe): „nie die eigene Firma" liess die KI bei internen
@@ -1430,6 +1493,8 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
     system = "".join(t for t, _ in teile)
     if "VERFÜGBARE FELDER" not in system and "VERFUEGBARE FELDER" not in system:
         teile.append((FELD_ANWEISUNG, "Feld-Anweisung (automatisch angehängt)"))
+    teile.append((KORRESPONDENT_ANWEISUNG, "Wer der Korrespondent ist (immer angehängt)"))
+    teile.append((DATUM_ANWEISUNG, "Dokumentdatum (immer angehängt)"))
     if eigene_firma_anweisung(cfg):
         teile.append((eigene_firma_anweisung(cfg), "Wir und das Gegenüber (automatisch angehängt, aus „Eigene Namen“"
                       + (" und „Regel zum Gegenüber“" if str(cfg.get("eigene_regel") or "").strip() else "") + ")"))
@@ -1445,8 +1510,11 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
 # Bis 2026-09-27: „wähle GENAU einen dieser Namen; nur wenn wirklich keiner passt einen neuen“ —
 # das drängte die KI zur Liste. Ein ähnlicher, aber falscher Name wurde dann exakt übernommen und
 # direkt zugeordnet (Pass 2 prüft nur Namen, die NICHT exakt passen). Jetzt: Angebot, keine Pflicht.
-KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, "
-             "übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):")
+# Seit 2026-10-10: „passt“ heißt, das Dokument stammt von ihm — die Vorsuche findet auch Namen, die nur
+# erwähnt werden (Werkzeug, Zahlungsweg), und die KI übernahm sie.
+KAND_KOPF = ("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — stammt das Dokument von "
+             "einem davon, übernimm seinen Namen exakt im Feld correspondent; dass sein Name im Text steht, reicht "
+             "nicht; sonst nenne den tatsächlichen Absender):")
 
 
 def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, created, dateiname,
@@ -1462,7 +1530,10 @@ def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, cr
               (hinweis, "Hinweis vom KI-Knopf", w), ("\n\n", None, w)]
     if chint:
         w = "nur wenn das Dokument schon einen Korrespondenten mit Kontext hat"
-        T += [("HINWEIS zum Korrespondenten '", None, w), (cname, "bisheriger Korrespondent", w), ("': ", None, w),
+        # Bis 2026-10-10 „HINWEIS zum Korrespondenten '…'“ — das las sich wie eine Vorgabe, und eine
+        # Fehlzuordnung bestätigte sich bei jedem erneuten Lauf selbst.
+        T += [("BISHER ZUGEORDNETER KORRESPONDENT (kann falsch sein — nur behalten, wenn das Dokument von ihm stammt): '",
+               None, w), (cname, "bisheriger Korrespondent", w), ("' — ", None, w),
               (chint, "Kontext aus seinen Stammdaten", w), ("\n\n", None, w)]
     if kand_lines:
         w = "nur wenn die Suche im Text (oder die Absender-Mail) Korrespondenten gefunden hat"
@@ -1473,7 +1544,8 @@ def pass1_nachricht_teile(hinweis, cname, chint, kand_lines, mail_ktx, added, cr
         T += [("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):\n", None, w),
               (mail_ktx, "Text der Mail", w), ("\n\n", None, w)]
     T += [("METADATEN:\n- Hinzugefügt am: ", None, None), (added, "Datum", None),
-          ("\n- Aktuelles Dokumentdatum (evtl. falsch): ", None, None), (created, "Datum", None),
+          ("\n- Von Paperless beim Import geratenes Datum (das erste Datum im Text, oft ein Geburtsdatum — kein Beleg, "
+           "document_date selbst im Dokument bestimmen): ", None, None), (created, "Datum", None),
           ("\n- Originaldateiname: ", None, None), (dateiname, "Dateiname", None)]
     if typ_vorschlag:
         w = "nur wenn Paperless schon einen Dokumenttyp gesetzt hat (Automatik oder Workflow)"
@@ -1639,7 +1711,7 @@ def main():
     #    (PO 2026-09-27). Entscheiden tut Pass 1 mit allen Funden.
     mail_corr, mail_grund = mail_zuordnung(corrs, cmeta, mail_from, eigene) if mail_from else (None, None)
     # 2. Trotzdem immer im Text suchen: Stammdaten (harte Kennungen), dann Namen und Aliase.
-    _text = title + "\n" + content
+    _text = titel_ohne_eigenen_kopf(title, cname) + "\n" + content
     treffer = stammdaten_treffer(corrs, cmeta, _text, eigene)
     _gefunden = {}
     if mail_corr:
@@ -1727,7 +1799,8 @@ def main():
 
     # --- Korrespondent-Feedback-Loop ---
     set_stage(did, "Korrespondent")
-    corr_name = (prop.get("correspondent") or "").strip()
+    # Tabellenreste aus dem OCR („| Häuser“) gehören nicht zum Namen (2026-10-10).
+    corr_name = str(prop.get("correspondent") or "").strip(" \t\n|·•-–—:;,")
     corr_id = None; corr_info = "kein"
     if corr_name:
         at = ctoks(corr_name); ak = " ".join(at)
@@ -1853,7 +1926,8 @@ def main():
     if DRY:
         out = {"id": did, "title": titel_neu, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
-               "summary": summary, "fields": prop.get("fields"), "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
+               "summary": summary, "fields": prop.get("fields"), "document_date": dokument_datum(prop),
+               "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}"
             + (" | prüfen: " + "; ".join(f"{k} {x}" for k, x in pruefen.items()) if pruefen else ""))
@@ -1873,10 +1947,10 @@ def main():
 
     flds = prop.get("fields") or {}
     date_note = None
-    dm = re.match(r"(\d{4})-(\d{2})-(\d{2})$", str(flds.get("document_date") or "").strip())
-    if dm and 1950 <= int(dm.group(1)) <= 2035 and (doc.get("created") or "")[:10] != dm.group(0):
-        patch["created"] = f"{dm.group(0)}T12:00:00+00:00"
-        date_note = f"{(doc.get('created') or '?')[:10]} -> {dm.group(0)}"
+    datum = dokument_datum(prop)
+    if datum and (doc.get("created") or "")[:10] != datum:
+        patch["created"] = f"{datum}T12:00:00+00:00"
+        date_note = f"{(doc.get('created') or '?')[:10]} -> {datum}"
     code_flds = {}
     cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
     patch["custom_fields"] = cfs
@@ -1910,7 +1984,8 @@ def main():
     if not ok:   # nach allen Runden weiter Fehler → wenigstens ohne custom_fields speichern
         patch.pop("custom_fields", None); patch_doc(did, patch)
 
-    log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}" + (f" | {repair_note}" if repair_note else ""))
+    log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}"
+        + (f" | datum {date_note}" if date_note else "") + (f" | {repair_note}" if repair_note else ""))
     if pruefen:
         # Nach der OK-Zeile: die Aktivität zeigt es als „Prüfen“, bis ein späterer Lauf ohne Widerspruch folgt.
         log(f"PRÜFEN {did} | {corr_info} | " + "; ".join(f"{k} {x}" for k, x in pruefen.items()))

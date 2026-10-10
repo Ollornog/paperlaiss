@@ -6,6 +6,31 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Dokumentdatum wurde nie geschrieben, Korrespondent nach Herkunft
+
+- **Dokumentdatum:** Seit dem JSON-Schema (#71) steht `document_date` auf der obersten Ebene der
+  Antwort, die Schreibstelle las es aber aus `fields`. Kein Lauf hat seither ein Datum gesetzt,
+  und es blieb das Datum, das Paperless beim Import aus dem Text nimmt (oft ein Geburtsdatum).
+  Neu `dokument_datum()`: oberste Ebene, `fields` als Rückfall, ungültige Tage werden verworfen.
+  Ein Datumswechsel steht jetzt in der OK-Zeile (`| datum alt -> neu`).
+- **Prompt, immer angehängt (auch bei eigenem `system_prompt`):** `KORRESPONDENT_ANWEISUNG`
+  verlangt den Urheber des Dokuments. Eine Person, die für eine Stelle unterschreibt, ändert daran
+  nichts. Werkzeuge, Plattformen, Zahlungswege und bloß erwähnte Firmen zählen nicht.
+  `DATUM_ANWEISUNG` nimmt Briefkopf- bzw. Ausstellungsdatum, sonst die (letzte) Unterschrift und
+  nie ein Geburtsdatum, eine Frist oder einen Zeitraum. Die bisherigen Datumssätze in
+  `DEFAULT_PROMPT` und `FELD_ANWEISUNG` entfallen.
+- **Kandidatenliste:** Ein Name im Text reicht nicht mehr, das Dokument muss vom Kandidaten stammen.
+- **Vorsuche:** Zeilen mit einem Dateinamen (`… - Google Docs.pdf`) zählen nicht zum Briefkopf.
+  Eine Zeugenaussage landete so bei „Google“. Den Titelkopf „Korrespondent – “ eines früheren Laufs
+  durchsucht sie nicht mehr (`titel_ohne_eigenen_kopf()`). Vorher fand jeder erneute Lauf den
+  selbst gesetzten Namen und bestätigte damit eine Fehlzuordnung.
+- **Nachricht an Pass 1:** Statt „HINWEIS zum Korrespondenten“ steht jetzt „BISHER ZUGEORDNETER
+  KORRESPONDENT (kann falsch sein …)“. Das von Paperless geratene Datum heißt jetzt so, weil die KI
+  es als „Aktuelles Dokumentdatum“ übernahm, oft ein Geburtsdatum. Bei Firmen zählt die Marke, nicht
+  die Rechtsträgerin. Tabellenreste („| Name“) werden vom Korrespondentennamen abgeschnitten.
+- Probe an 17 echten Dokumenten (Trockenlauf): Zeugenaussagen bei der aussagenden Person, alle Daten
+  auf Ausstellung bzw. Unterschrift, Rechnungen unverändert.
+
 ### Sicherheit — Schwachstellen-Tor und reproduzierbares Panel-Abbild
 
 - **Neuer Workflow `audit`** (Muster aus C22): löst `pyproject.toml` samt Extra `panel` in der

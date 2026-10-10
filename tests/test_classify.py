@@ -89,9 +89,9 @@ import contextlib as _ctx, io as _io
 
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
-          dry=True, source="", force=False, korr=None):
+          dry=True, source="", force=False, korr=None, titel="Beleg"):
     aufrufe = {"ocr": 0, "chat": []}
-    routen = {"/documents/5/": {"id": 5, "content": text, "title": "Beleg", "tags": [],
+    routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": [],
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
                                 "correspondent": korr},
               "/tags/": {"results": []}, "/document_types/": {"results": [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}]},
@@ -193,10 +193,11 @@ r.check("Prompt-Vorschau: Entwurf aus dem Editor wird eingesetzt, ohne zu speich
 def _alte_nachricht(hinweis, cname, chint, kand_lines, mail_ktx, added, created, fname, fieldspec, title, content):
     _NL = "\n"
     hint_block = (f"WICHTIGER NUTZER-HINWEIS (was zuletzt falsch war — bitte korrigieren):\n{hinweis}\n\n" if hinweis else "")
-    corr_hint_block = f"HINWEIS zum Korrespondenten '{cname}': {chint}\n\n" if chint else ""
-    kand_block = (("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — passt einer, übernimm seinen Namen exakt im Feld correspondent; sonst nenne den tatsächlichen Absender):" + _NL + kand_lines + _NL + _NL) if kand_lines else "")
+    corr_hint_block = (f"BISHER ZUGEORDNETER KORRESPONDENT (kann falsch sein — nur behalten, wenn das Dokument von ihm stammt): "
+                       f"'{cname}' — {chint}\n\n" if chint else "")
+    kand_block = (("MÖGLICHE KORRESPONDENTEN (bekannte Korrespondenten, die passen könnten — stammt das Dokument von einem davon, übernimm seinen Namen exakt im Feld correspondent; dass sein Name im Text steht, reicht nicht; sonst nenne den tatsächlichen Absender):" + _NL + kand_lines + _NL + _NL) if kand_lines else "")
     mail_block = ("HERKUNFT-KONTEXT (Nachricht/Anschreiben zu diesem Dokument — für Absender und Einordnung nutzen):" + _NL + mail_ktx + _NL + _NL) if mail_ktx else ""
-    meta = (f"METADATEN:\n- Hinzugefügt am: {added}\n- Aktuelles Dokumentdatum (evtl. falsch): {created}\n"
+    meta = (f"METADATEN:\n- Hinzugefügt am: {added}\n- Von Paperless beim Import geratenes Datum (das erste Datum im Text, oft ein Geburtsdatum — kein Beleg, document_date selbst im Dokument bestimmen): {created}\n"
             f"- Originaldateiname: {fname}\n")
     return (f"{hint_block}{corr_hint_block}{kand_block}{mail_block}{meta}\n"
             f"VERFÜGBARE FELDER (im fields-Objekt je Feld: Wert / null=leeren / \"BEHALTEN\"=unsicher):\n{fieldspec}\n\n"
@@ -296,6 +297,11 @@ r.check("Namen: Zeilen mit Bankdaten zählen nicht, auch wenn sie im Briefkopf s
                                     "Eigenfirma - Testweg 1\nRechnung\nBank Raiffeisenbank IBAN AT00")
         and classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "",
                                     "Raiffeisenbank Musterstadt\nKontoauszug Nr. 3"))
+r.check("Namen: Zeilen mit Dateinamen zählen nicht (Druckkopf „… - Google Docs.pdf“)",
+        not classify.namens_treffer([{"id": 6, "name": "Google"}], lambda c: "",
+                                    "Zeugenerklärung\n• Phillip Zeugenaussage - Google Docs.pdf\nName: Erika Muster")
+        and classify.namens_treffer([{"id": 6, "name": "Google"}], lambda c: "",
+                                    "Google Ireland Limited\nGordon House, Dublin\nRechnung"))
 r.check("Namen: nur im Briefkopf — die Bank in der Fußzeile ist kein Kandidat",
         not classify.namens_treffer([{"id": 6, "name": "Raiffeisenbank"}], lambda c: "", "Rechnung " + "x " * 600 + "Bank: Raiffeisenbank"))
 r.check("Namen: alle Wörter ohne Rechtsform, auch über Aliase; halber Name trifft nicht",
@@ -1159,5 +1165,48 @@ _pk = _lauf([{**_ok, "correspondent": "Mavros"}, {"match": "Georg Mavros Automob
 classify.CORR_META.clear()
 r.check("Pass 2: Kandidat mit Alias und Kontext in der Frage", len(_pk["chat"]) == 2 and "Autohaus in Wien" in _pk["chat"][1]
         and "Mavros Wien" in _pk["chat"][1], _pk["chat"][-1][:400])
+
+# ---- Dokumentdatum: steht seit dem JSON-Schema auf oberster Ebene der Antwort. Bis 2026-10-10 las die
+# Schreibstelle es aus fields und schrieb nie eines (gemessen: 18 von 18 Vorschlägen verloren).
+r.check("Datum: oberste Ebene wird gelesen", classify.dokument_datum({"document_date": "2026-08-19", "fields": {}}) == "2026-08-19")
+r.check("Datum: fields als Rückfall für eigene Prompts", classify.dokument_datum({"fields": {"document_date": "2026-08-19"}}) == "2026-08-19")
+r.check("Datum: Unsinn, ungültiger Tag und Jahre außerhalb → None",
+        classify.dokument_datum({"document_date": "19.08.2026"}) is None
+        and classify.dokument_datum({"document_date": "2026-02-30"}) is None
+        and classify.dokument_datum({"document_date": "1890-01-01"}) is None
+        and classify.dokument_datum({"document_date": None, "fields": None}) is None)
+
+
+def _datum_geschrieben(antwort):
+    a = _lauf([{**_ok, **antwort}], dry=False)
+    return [p.get("created") for p in a.get("patch", [])]
+
+
+r.check("Schreibstelle: Datum der obersten Ebene landet in created",
+        _datum_geschrieben({"document_date": "2026-08-19"}) == ["2026-08-19T12:00:00+00:00"],
+        str(_datum_geschrieben({"document_date": "2026-08-19"})))
+r.check("Schreibstelle: gleiches Datum oder keines → created bleibt unberührt",
+        _datum_geschrieben({"document_date": "2026-01-01"}) == [None] and _datum_geschrieben({}) == [None])
+r.check("Schreibstelle: Datumswechsel steht in der OK-Zeile",
+        "datum 2026-01-01 -> 2026-08-19" in Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8"))
+
+# ---- Prompt: Herkunft des Korrespondenten und Dokumentdatum gelten auch bei eigenem system_prompt.
+_sys_eigen = classify.pass1_system({"system_prompt": "Eigener Prompt {TYPES}"}, {"Rechnung": 1}, [], set(), False)
+r.check("Prompt: Korrespondenten-Regel auch bei eigenem Prompt (Werkzeug ≠ Absender, Unterschrift für die Stelle)",
+        classify.KORRESPONDENT_ANWEISUNG in _sys_eigen and "STAMMT" in _sys_eigen and "Google Docs" in _sys_eigen)
+r.check("Prompt: Datumsregel auch bei eigenem Prompt (Unterschrift, nie Geburtsdatum)",
+        classify.DATUM_ANWEISUNG in _sys_eigen and "Geburtsdatum" in _sys_eigen and "Unterschrift" in _sys_eigen)
+r.check("Prompt: Kandidatenliste verlangt Herkunft, nicht bloße Nennung",
+        "stammt das Dokument von" in classify.KAND_KOPF and "reicht nicht" in classify.KAND_KOPF)
+
+# ---- Erneuter Lauf: der selbst gesetzte Titelkopf ist kein Fund „im Briefkopf“.
+r.check("Titel: eigener Kopf „Korrespondent – “ fällt für die Suche weg, sonst bleibt der Titel",
+        classify.titel_ohne_eigenen_kopf("Google – Sonstiges Zeugenaussage", "Google") == "Sonstiges Zeugenaussage"
+        and classify.titel_ohne_eigenen_kopf("Rechnung Google März", "Google") == "Rechnung Google März"
+        and classify.titel_ohne_eigenen_kopf("Google – Rechnung", None) == "Google – Rechnung")
+_rk = _lauf([_ok], korrespondenten=[{"id": 7, "name": "Nord Autoteile"}], korr=7, titel="Nord Autoteile – Rechnung 4711")
+_rt = _lauf([_ok], korrespondenten=[{"id": 7, "name": "Nord Autoteile"}], titel="Rechnung Nord Autoteile 4711")
+r.check("Verdrahtung: erneuter Lauf findet den eigenen Titelkopf nicht als Kandidaten, einen Paperless-Titel schon",
+        "Name „Nord Autoteile“" not in _rk["chat"][0] and "Name „Nord Autoteile“" in _rt["chat"][0], _rk["chat"][0][:300])
 
 sys.exit(r.done())
