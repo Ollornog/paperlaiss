@@ -460,7 +460,8 @@ _LISTE = {f for f, _, art in KORR_FELDER if art == "liste"}
 def sperre_oeffnen(pfad):
     """Die Sperrdatei für flock öffnen — nur lesend (flock braucht kein Schreibrecht), angelegt mit 0666.
 
-    Panel (root) und Klassifizierer (uid 1000) sperren dieselbe Datei. Bis 2026-09-27 öffneten beide
+    Panel und Klassifizierer (uid 1000) sperren dieselbe Datei (das Panel lief bis 2026-10-11 als root,
+    ältere Installationen können also noch so laufen). Bis 2026-09-27 öffneten beide
     mit "a": legte das Panel die Datei zuerst an (root, 0644), scheiterte danach jede Stammdaten-
     Erfassung des Klassifizierers mit PermissionError — still, nur als Zeile im Log."""
     return os.fdopen(os.open(pfad, os.O_RDONLY | os.O_CREAT, 0o666), "rb")

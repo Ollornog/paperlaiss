@@ -4,7 +4,10 @@
 #    classify-config.json + log/traces/running) und die CLASSIFY_*-Env erweitern.
 # 2) Den panel-Service ergänzen (baut ./panel).
 # 3) Secrets in .env (siehe .env.example). ./scripts muss für beide Container
-#    schreibbar sein (chmod 777 scripts; touch scripts/classify.log; chmod 666 …).
+#    schreibbar sein. Das Panel läuft als uid/gid 1000, der Paperless-Worker als
+#    USERMAP_UID/USERMAP_GID (Vorgabe ebenfalls 1000): `sudo chown -R 1000:1000 scripts`.
+#    Weicht USERMAP_UID ab, beim panel `user: "<uid>:<gid>"` auf denselben Wert setzen.
+#    Update von einer Fassung, in der das Panel als root lief: CHANGELOG, Upgrade-Hinweis.
 services:
   paperless:
     # ... euer bestehender paperless-ngx-Service (image, db, redis, …) ...
@@ -34,6 +37,9 @@ services:
       - "8400:8400"                    # in Prod hinter Reverse-Proxy + Auth (PANEL_TOKEN / TinyAuth / OIDC)
     volumes:
       - ./scripts:/scripts
+      # Nur mit PANEL_AUTH=tinysesam: Benutzerdatenbank. Ein benanntes Volume übernimmt beim ersten
+      # Einhängen die Rechte aus dem Abbild (uid 1000); ein Bind-Mount muss vorher uid 1000 gehören.
+      # - panel-auth:/auth
     environment:
       PAPERLESS_API: http://paperless:8000/api
       PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
@@ -52,3 +58,6 @@ services:
       # EXPORT_SPEICHER_MB: "10000"
     depends_on:
       - paperless
+
+# volumes:
+#   panel-auth:

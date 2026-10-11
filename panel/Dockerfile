@@ -18,6 +18,13 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY app.py kern.py huelle.py seiten.py exportlogik.py exportpdf.py paperlaiss.png ./
 # Aussehen: vendortes C22 (scripts/vendor-c22.sh)
 COPY static ./static
+# Ohne root (PO 2026-10-11): uid/gid 1000 wie der Paperless-Worker (USERMAP_UID/USERMAP_GID,
+# Vorgabe 1000), der dasselbe ./scripts beschreibt. Geschrieben wird nur in CLASSIFY_DIR (/scripts),
+# in die TinySesam-DB (PANEL_AUTH_DB, /auth) und nach /tmp (EXPORT_TMP). /auth gehört deshalb schon
+# im Abbild uid 1000 — ein neues benanntes Volume übernimmt das beim ersten Einhängen.
+# Bestehende Installationen: Upgrade-Hinweis im CHANGELOG (chown der root-eigenen Dateien).
+RUN mkdir -p /auth && chown 1000:1000 /auth
+USER 1000:1000
 EXPOSE 8400
 # --root-path aus PANEL_PFAD: hinter einem Proxy, der den Pfad abschneidet (Caddy handle_path),
 # braucht TinySesam ihn für Weiterleitungen und next=-Ziele (TinySesam T-15).

@@ -298,6 +298,13 @@ r.check("Panel-Dockerfile kopiert alle Module aus panel/", not _fehlend, ", ".jo
 r.check("Panel-Dockerfile: jedes FROM per Digest gepinnt",
         all("@sha256:" in z for z in re.findall(r"^FROM\s+\S+", _dockerfile, re.M))
         and re.search(r"^FROM\s", _dockerfile, re.M) is not None)
+# ---- Panel ohne root (PO 2026-10-11). Die Startprobe (scripts/_abbild_probe.sh) prüft die laufende
+# uid; das hier fängt es schon in der stdlib-Suite ab, ohne Docker.
+_user = re.findall(r"^USER\s+(\S+)", _dockerfile, re.M)
+r.check("Panel-Dockerfile: letzte USER-Zeile ist nicht root",
+        bool(_user) and _user[-1].split(":")[0] not in ("0", "root"), str(_user))
+r.check("Panel-Dockerfile: /auth gehört im Abbild dem Panel-Nutzer",
+        bool(_user) and re.search(r"chown " + re.escape(_user[-1]) + r" /auth\b", _dockerfile) is not None)
 r.check("Panel-Dockerfile installiert mit --require-hashes",
         re.search(r"^RUN pip install [^\n]*--require-hashes -r requirements\.txt", _dockerfile, re.M)
         is not None)

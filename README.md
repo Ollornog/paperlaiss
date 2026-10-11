@@ -102,7 +102,7 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
     only with `PANEL_PASSWORD_LOGIN=1` (meant for a test instance), first account from
     `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`. Required: `PANEL_BASE_URL` (the address browsers
     use); the user store lives in `PANEL_AUTH_DB` (default `/auth/tinysesam.db`, mount it as a
-    volume). A half-configured OIDC or no sign-in method at all stops the container with a message.
+    volume; a named volume takes over the image's ownership, a bind mount must belong to uid 1000). A half-configured OIDC or no sign-in method at all stops the container with a message.
     A set `PANEL_TOKEN` stays valid for scripts. Behind a reverse proxy set `PANEL_TRUSTED_PROXIES`
     (comma-separated networks of **every** proxy in the chain, e.g. the Docker network
     `172.16.0.0/12` plus an upstream proxy) — otherwise all users share the proxy's IP and rate
@@ -181,7 +181,10 @@ classifier uses it in three ways:
 See [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) and
 [`deploy/.env.example`](deploy/.env.example): extend your existing `paperless` service with the
 `./scripts` volume, `POST_CONSUME` and the `CLASSIFY_*` variables, and add the `panel` service.
-`scripts/` must be writable by both containers.
+`scripts/` must be writable by both containers. The panel runs as uid/gid 1000 (not root), the
+same as the Paperless worker's default `USERMAP_UID`/`USERMAP_GID`; if yours differs, give the panel
+the same `user:`. Upgrading from a version whose panel ran as root: see the upgrade note in the
+[changelog](CHANGELOG.md).
 
 ### Buttons in Paperless (optional)
 

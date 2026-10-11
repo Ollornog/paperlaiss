@@ -7,6 +7,10 @@
 # startet das Abbild im Betriebsmodus mit Anmeldung über TinySesam (lädt also die schwerste
 # Abhängigkeit), ohne Netz nach draußen, und verlangt `/health` mit 200.
 #
+# Außerdem: das Panel läuft nicht als root (PO 2026-10-11), und die TinySesam-DB entsteht im /auth
+# des Abbilds — ohne tmpfs davor, damit die Probe die Rechte des Abbilds prüft und nicht die eines
+# frischen tmpfs (1777).
+#
 # Aufruf: scripts/_abbild_probe.sh [abbild]   (ohne Argument wird ./panel gebaut)
 set -euo pipefail
 
@@ -27,7 +31,7 @@ trap aufraeumen EXIT
 
 # Nur Werte, die das Starten braucht; kein Anbieter ist erreichbar (--network none). Die App darf
 # beim Start nicht nach draußen müssen — täte sie es, wäre das ein Befund.
-docker run -d --name "$name" --network none --tmpfs /auth \
+docker run -d --name "$name" --network none \
   -e PANEL_AUTH=tinysesam \
   -e PANEL_BASE_URL=http://localhost:8400 \
   -e PANEL_OIDC_ISSUER=https://id.example.com \
@@ -46,4 +50,9 @@ for _ in $(seq 1 60); do
 done
 echo "/health: ${antwort:-keine Antwort}"
 [ "${antwort%% *}" = "200" ] || { docker logs "$name" 2>&1 | tail -30; exit 1; }
-echo "Startprobe bestanden: $abbild antwortet, läuft als $(docker exec "$name" id -u):$(docker exec "$name" id -g)."
+uid="$(docker exec "$name" id -u)"
+gid="$(docker exec "$name" id -g)"
+[ "$uid" != "0" ] || { echo "Panel läuft als root (uid 0) — USER im Dockerfile fehlt"; exit 1; }
+docker exec "$name" test -s /auth/tinysesam.db \
+  || { echo "/auth/tinysesam.db fehlt — /auth im Abbild für uid $uid nicht schreibbar?"; docker logs "$name" 2>&1 | tail -30; exit 1; }
+echo "Startprobe bestanden: $abbild antwortet, läuft als $uid:$gid."
