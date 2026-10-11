@@ -26,4 +26,12 @@ _b = ev.bericht(_neu, _alt)
 r.check("Bericht: Quote, Abweichung, Verbesserung und Rückschritt gegenüber dem alten Lauf",
         _b["quote"]["typ"] == "1/2" and len(_b["abweichungen"]) == 1
         and _b["verbesserungen"] == ["1 typ: jetzt richtig ('A')"] and _b["rueckschritte"] == ["2 typ: war richtig, jetzt 'C'"], str(_b))
+r.check("Wiederholen: immer richtig, immer falsch, schwankend",
+        ev.zusammenfassen([{"typ": True, "datum": False}, {"typ": True, "datum": False}]) == {"typ": True, "datum": False}
+        and ev.zusammenfassen([{"typ": True}, {"typ": False}]) == {"typ": "schwankend"})
+_bs = ev.bericht([{"id": 3, "soll": {"typ": "A"}, "ist": {"typ": "A"}, "ist_alle": [{"typ": "A"}, {"typ": "B"}],
+                   "vergleich": {"typ": "schwankend"}}], [{"id": 3, "vergleich": {"typ": True}}])
+r.check("Bericht: schwankend ist kein Rückschritt, zählt aber nicht als Treffer",
+        _bs["rueckschritte"] == [] and _bs["quote"]["typ"] == "0/1" and len(_bs["schwankend"]) == 1, str(_bs))
+
 sys.exit(r.done())
