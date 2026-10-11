@@ -89,11 +89,13 @@ import contextlib as _ctx, io as _io
 
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
-          dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None):
+          dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None,
+          datei=None, hinzu=None):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": [],
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
-                                "correspondent": korr, "owner": 3 if besitzer else None},
+                                "correspondent": korr, "owner": 3 if besitzer else None,
+                                "original_file_name": datei, "added": hinzu},
               "/users/3/": besitzer or {},
               "/tags/": {"results": []}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
@@ -1357,5 +1359,19 @@ r.check("Mistral: nach allen Versuchen kommt der Fehler durch", _senden_mit([429
 r.check("Mistral: 401 wird nicht wiederholt", _senden_mit([401]) == (401, 1))
 r.check("Prompt: Lohnunterlagen stammen vom Arbeitgeber, Krankenkasse ist nur Angabe",
         "ARBEITGEBER" in classify.KORRESPONDENT_ANWEISUNG and "Krankenkasse" in classify.KORRESPONDENT_ANWEISUNG)
+
+# ---- Office-Datei: ein Datum gleich dem Importtag stammt aus einem automatischen Datumsfeld.
+_of = _lauf([{**_ok, "document_date": "2026-07-01"}], dry=False, text=_gut + " Hamburg, 01.07.2026",
+            datei="Bewerbung.docx", hinzu="2026-07-01T09:00:00Z")
+_op = _lauf([{**_ok, "document_date": "2026-07-01"}], dry=False, text=_gut + " Hamburg, 01.07.2026",
+            datei="Brief.pdf", hinzu="2026-07-01T09:00:00Z")
+r.check("Schreibstelle: Importtag einer Word-Datei wird nicht geschrieben, bei einem PDF schon",
+        [p.get("created") for p in _of.get("patch", [])] == [None]
+        and [p.get("created") for p in _op.get("patch", [])] == ["2026-07-01T12:00:00+00:00"],
+        f"{_of.get('patch')} {_op.get('patch')}")
+r.check("Office-Importtag: Word-Datei mit Datum = Importtag zählt nicht, sonst schon",
+        classify.office_importtag("2026-07-01", {"original_file_name": "Bewerbung.DOCX", "added": "2026-07-01T10:00:00Z"})
+        and not classify.office_importtag("2017-04-17", {"original_file_name": "Bewerbung.docx", "added": "2026-07-01T10:00:00Z"})
+        and not classify.office_importtag("2026-07-01", {"original_file_name": "scan.pdf", "added": "2026-07-01T10:00:00Z"}))
 
 sys.exit(r.done())
