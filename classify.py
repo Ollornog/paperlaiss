@@ -1071,6 +1071,18 @@ def datum_belegt(iso, text):
         formen |= {f"{ti}.jänner{j}", f"{t}.jänner{j}"}
     return any(re.sub(r"\s+", "", x).lower() in roh for x in formen)
 
+
+OFFICE_ENDUNGEN = (".doc", ".docx", ".docm", ".odt", ".rtf", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp")
+
+
+def office_importtag(datum, doc):
+    """Ist das Datum der Importtag einer Office-Datei? Dann kommt es aus einem automatischen
+    Datumsfeld (Word: „Datum, automatisch aktualisieren“), das beim Umwandeln in PDF das Tagesdatum
+    einsetzt — nicht der Tag, an dem das Dokument entstand (PO 2026-10-11: eine Bewerbung von 2017
+    bekam so den Importtag 01.07.2026)."""
+    name = str(doc.get("original_file_name") or "").lower()
+    return name.endswith(OFFICE_ENDUNGEN) and str(doc.get("added") or "")[:10] == datum
+
 def is_null(raw):
     return raw is None or (isinstance(raw, str) and raw.strip().lower() in ("", "null", "none", "-", "—", "n/a", "kein", "unbekannt"))
 
@@ -2163,6 +2175,9 @@ def main():
     datum = dokument_datum(prop)
     if datum and not datum_belegt(datum, content):
         TRACE["datum_ohne_beleg"] = datum
+        datum = None
+    if datum and office_importtag(datum, doc):
+        TRACE["datum_importtag_office"] = datum
         datum = None
     if datum and (doc.get("created") or "")[:10] != datum:
         patch["created"] = f"{datum}T12:00:00+00:00"

@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Datumsfeld in Office-Dateien
+
+- `office_importtag()`: Bei Word-, Excel- und ähnlichen Dateien zählt ein KI-Datum nicht, das dem
+  Importtag entspricht. Ein automatisches Datumsfeld setzt beim Umwandeln das Tagesdatum ein. Eine
+  Bewerbung von 2017 bekam so den Importtag als Dokumentdatum.
+
 ### Behoben — Ratenbegrenzung, erfundene Daten, Lohnunterlagen
 
 - **Mistral-Anfragen werden bei 429/5xx und Netzfehlern wiederholt** (`mistral_senden()`: 5, 15, 30 und
