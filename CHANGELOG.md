@@ -32,6 +32,9 @@ eine `PRÜFEN`-Zeile und erscheint im Panel im Kasten „Prüfen“.
 
 ### Hinzugefügt — Testsammlung (Eval)
 
+- **`eval.py --wiederholen N`:** N Läufe je Dokument. Ein Feld, das mal richtig und mal falsch ist,
+  heißt „schwankend“ und zählt nicht als Rückschritt (Temperatur > 0: 950 einmal falsch, dann 3 von 3
+  richtig).
 - **`eval.py`:** Lässt `classify.py` für jedes Dokument einer Sollliste im Trockenlauf laufen und
   vergleicht Korrespondent, Dokumenttyp und Datum. Ergebnis sind Trefferquote je Feld und
   Abweichungen. Mit `--vergleich` werden Verbesserungen und Rückschritte gegenüber einem früheren
