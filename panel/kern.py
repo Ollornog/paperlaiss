@@ -322,6 +322,10 @@ def auth_einstellungen(env):
         # PocketID-Gruppe bzw. PANEL_ADMIN_USER), und TinySesam schrieb ihn bei jedem Start ohne
         # Admin ins Container-Log (2026-09-27, PO: „einfach entfernen").
         "admin_claim_ttl_min": 0,
+        # Eigene Cookie-Namen (TinySesam 0.24.12): Vor dem Panel steht ein TinySesam-Gate, dessen Proxy jedes
+        # tinysesam_*-Cookie vor der App entfernt — auch das OIDC-Flow-Cookie des Panels. Der Rückweg von PocketID
+        # scheiterte dann („ohne passendes Flow-Cookie“), man landete wieder auf der Anmeldeseite (2026-10-10).
+        "cookie_prefix": "paperlaiss_",
     }
     if oidc:
         cfg.update({"oidc_issuer": issuer, "oidc_client_id": client_id,

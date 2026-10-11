@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Panel-Anmeldung hinter dem TinySesam-Gate (TinySesam 0.24.12)
+
+- **Anmeldung über PocketID endete wieder auf der Anmeldeseite**, wenn ein TinySesam-Gate vor dem Panel stand: Dessen
+  Proxy entfernt jedes `tinysesam_*`-Cookie vor der App, auch das OIDC-Flow-Cookie des Panels, und TinySesam wies den
+  Rückweg ab („ohne passendes Flow-Cookie“). Das Panel nennt seine Cookies jetzt `paperlaiss_*`
+  (`cookie_prefix`, neu in TinySesam 0.24.12). `panel/requirements.txt`: TinySesam 0.23.0 → 0.24.12. Der erste Start
+  hebt die Benutzer-DB auf Schema 14 (Tabelle `gate_link`) — vorher `tinysesam.db` und `tinysesam.db.key` sichern.
+  Neue Cookie-Namen: einmal neu anmelden.
+
 ### Behoben — Datumsfeld in Office-Dateien
 
 - `office_importtag()`: Bei Word-, Excel- und ähnlichen Dateien zählt ein KI-Datum nicht, das dem
