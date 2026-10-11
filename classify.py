@@ -781,10 +781,10 @@ def get(path, raw=False):
     return r.read() if raw else json.load(r)
 
 
-def send(path, data, method="PATCH"):
+def send(path, data, method="PATCH", timeout=45):
     req = urllib.request.Request(BASE + path, data=json.dumps(data).encode("utf-8"),
         headers={"Authorization": f"Token {TOK}", "Content-Type": "application/json"}, method=method)
-    return json.load(urllib.request.urlopen(req, timeout=45))
+    return json.load(urllib.request.urlopen(req, timeout=timeout))
 
 
 # Cache-Schlüssel für Mistrals Prompt-Caching (`prompt_cache_key`): zwischengespeicherte
@@ -1261,17 +1261,55 @@ def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_fld
     return cfs, flog
 
 
-def patch_doc(did, patch):
+# Zeitüberschreitung beim Speichern: kein Feldfehler, keine Reparatur (2026-10-11). Eine abgebrochene
+# Anfrage läuft beim Server weiter; jeder sofort nachgeschickte PATCH auf dasselbe Dokument stapelte
+# sich dahinter — fünf gleichzeitige Änderungen verklemmten Paperless, bis der Webserver neu startete.
+ZEIT = "ZEITUEBERSCHREITUNG: "
+PATCH_FRIST_S = (90, 240)
+PATCH_PAUSE_S = 30
+
+
+def patch_angekommen(did, patch):
+    """Steht der PATCH schon am Dokument? (Titel, Korrespondent, Typ, Datum; Tags als Teilmenge)"""
     try:
-        send(f"/documents/{did}/", patch, "PATCH")
-        return True, None
-    except urllib.error.HTTPError as e:
+        d = get(f"/documents/{did}/")
+    except Exception:
+        return False
+    for k, v in patch.items():
+        if k == "custom_fields":
+            continue
+        if k == "tags":
+            if not set(v) <= set(d.get("tags") or []):
+                return False
+        elif k == "created":
+            if str(d.get("created") or "")[:10] != str(v)[:10]:
+                return False
+        elif d.get(k) != v:
+            return False
+    return True
+
+
+def patch_doc(did, patch, pause=None):
+    """Ein Dokument ändern. HTTP-Fehler (400 & Co.) kommen als Text zurück, damit die Reparatur sie
+    der KI zeigen kann. Bei Zeitüberschreitung oder Netzfehler: warten, nachsehen, ob die Änderung
+    doch ankam, und höchstens EINMAL mit längerer Frist neu senden — nie mehrere zugleich."""
+    pause = PATCH_PAUSE_S if pause is None else pause
+    for versuch, frist in enumerate(PATCH_FRIST_S):
         try:
-            return False, e.read().decode("utf-8", "replace")[:900]
-        except Exception:
-            return False, repr(e)
-    except Exception as e:
-        return False, repr(e)
+            send(f"/documents/{did}/", patch, "PATCH", timeout=frist)
+            return True, None
+        except urllib.error.HTTPError as e:
+            try:
+                return False, e.read().decode("utf-8", "replace")[:900]
+            except Exception:
+                return False, repr(e)
+        except Exception as e:
+            fehler = repr(e)
+        log(f"patch-zeit {did} V{versuch + 1}: {fehler[:80]}")
+        __import__("time").sleep(pause)
+        if patch_angekommen(did, patch):
+            return True, None
+    return False, ZEIT + fehler
 
 
 def resolve_tag(tagid_by_norm, name):
@@ -2192,7 +2230,7 @@ def main():
 
     ok, err = patch_doc(did, patch)
     TRACE["repair"] = []; rounds = 0
-    while not ok and rounds < 4:
+    while not ok and not str(err).startswith(ZEIT) and rounds < 4:
         rounds += 1
         set_stage(did, f"Feld-Korrektur {rounds}")
         log(f"patch-fail {did} R{rounds}: {err[:100]}")
@@ -2212,8 +2250,11 @@ def main():
     if rounds:
         repair_note = f"repariert(R{rounds})" if ok else "repair-fehlgeschlagen"
         log(f"repariert {did} nach {rounds} Runde(n)" if ok else f"repair-fehlgeschlagen {did}")
-    if not ok:   # nach allen Runden weiter Fehler → wenigstens ohne custom_fields speichern
+    if not ok and not str(err).startswith(ZEIT):   # nach allen Runden Feldfehler → wenigstens ohne custom_fields
         patch.pop("custom_fields", None); patch_doc(did, patch)
+    if not ok and str(err).startswith(ZEIT):
+        TRACE["writeback"]["fehler"] = err
+        raise RuntimeError(f"Speichern nach Paperless nicht möglich: {err[:200]}")
 
     log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}"
         + (f" | datum {date_note}" if date_note else "")
