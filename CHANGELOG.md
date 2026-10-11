@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Dependabot-Auto-Merge aus der repokit-Vorlage (Kit 0.30.1)
+
+- Updates mergen selbst, sobald die Pflicht-Checks grün sind — **auch Majors** (PO 2026-10-11).
+  Von Hand bleiben nur fremde Commits, ein Ökosystem ohne Abnahme, eine Action, die auf dem PR
+  nicht läuft, und ein roter Pflicht-Workflow; dann steht ein Kommentar am PR.
+- Gemergt wird erst, wenn jeder Pflicht-Workflow für genau diesen Kopf gelaufen und grün ist.
+- Der Workflow kommt aus einer Vorlage; `tests/_kit/manifest.py` prüft ihn mit.
+
 ### Sicherheit — Panel: TinySesam 0.24.13
 
 - `panel/requirements.txt`: TinySesam 0.24.12 → 0.24.13. Die CSP der Anmeldeseite trägt `form-action` (DAST-Befund
