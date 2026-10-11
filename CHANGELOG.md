@@ -22,13 +22,22 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   angelegt hat, gehört root, teils mit Modus 0600 (`classify-config.json`, `correspondents.json`,
   `traces/`, `running/`, die TinySesam-DB samt `.key`). Als uid 1000 scheitert der Start dann mit
   `sqlite3.OperationalError: unable to open database file`, das Lesen mit `PermissionError`. Einmal
-  vor dem Neustart, im Ordner der Compose-Datei (neues Abbild schon gebaut bzw. gezogen):
+  vor dem Neustart, auf dem Host, im Ordner der Compose-Datei. `<panel>` ist der Dienstname des Panels
+  in eurer Compose-Datei (in der Vorlage `panel`), `<container>` dessen laufender Container:
 
   ```sh
-  docker compose run --rm --no-deps --user 0:0 panel \
-    find /scripts /auth -xdev -user 0 -exec chown 1000:1000 {} +
-  docker compose up -d panel
+  # 1. Die Quellen auf dem Host, die im Panel unter /scripts und /auth hängen — auch tiefere Mounts
+  #    wie /scripts/paperlaiss, in die ein find im Container mit -xdev nicht hinabsteigt:
+  docker inspect -f '{{range .Mounts}}{{println .Destination .Source}}{{end}}' <container> \
+    | awk '$1 ~ "^/(scripts|auth)" {print $2}'
+  # 2. Je Quelle nur die Dateien umschreiben, die root gehören:
+  sudo find <quelle> -xdev -user 0 -exec chown 1000:1000 {} +
+  # 3. Nur das Panel neu starten (Paperless bleibt):
+  docker compose up -d --no-deps <panel>
   ```
+
+  Korrigiert am selben Tag: Die erste Fassung dieser Anleitung lief `find` im Container mit `-xdev`
+  und fand dadurch nichts in tiefer eingehängten Ordnern, und sie nahm den Dienstnamen `panel` an.
 
   Das ändert nur die Dateien, die root gehören; was der Paperless-Worker angelegt hat, bleibt, wie es
   ist. Ohne Volume auf `/auth` lag die Benutzerdatenbank bisher im Container und geht beim Neuanlegen
