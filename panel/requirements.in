@@ -6,6 +6,6 @@
 fastapi==0.142.2
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
-tinysesam[oidc,argon2]==0.24.12
+tinysesam[oidc,argon2]==0.24.13
 pypdf[crypto]==6.19.0
 reportlab==5.0.1

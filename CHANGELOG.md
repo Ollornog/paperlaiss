@@ -6,6 +6,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit — Panel: TinySesam 0.24.13
+
+- `panel/requirements.txt`: TinySesam 0.24.12 → 0.24.13. Die CSP der Anmeldeseite trägt `form-action` (DAST-Befund
+  2026-10-11). Kein Schema-Wechsel.
+
 ### Hinzugefügt — Eingangsordner (`deploy/eingang/`)
 
 - `eingang.py` lädt jede fertig geschriebene Datei aus einem Eingangsordner je Konto mit dessen

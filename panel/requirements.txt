@@ -842,9 +842,9 @@ starlette==1.7.0 \
     --hash=sha256:67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e \
     --hash=sha256:c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d
     # via fastapi
-tinysesam==0.24.12 \
-    --hash=sha256:2f9805bc5e0329e66661809152c22904e316a13c57dfafe134b2fdc2d5f23531 \
-    --hash=sha256:96df00922c6704d58b03d082da1a72ec1dc9e1f7abc9a1e2bdab6e0f18b07053
+tinysesam==0.24.13 \
+    --hash=sha256:bb41c7ad87cc359b12445568af8703702aded29436ef8a01c85a78dc6f287529 \
+    --hash=sha256:bf28c9612bc6f824ab33d09ee676fae1274a6f9a982411af50ff141ee3d543c9
     # via -r requirements.in
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
