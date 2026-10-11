@@ -1446,4 +1446,26 @@ r.check("Vorsuche: Personalnummer findet den Arbeitgeber, eine gespeicherte SV-N
 r.check("Prompt: Kennnummer umfasst Personal-/Vertragsnummer, nicht SV-Nr/Steuer-ID",
         "Personal-" in classify.ABSENDER_ANWEISUNG and "Sozialversicherungsnummer" in classify.ABSENDER_ANWEISUNG)
 
+# ---- Prüf-Befunde: Teilstück, Dublette, Sammeldokument, erfundener OCR-Text (nur markieren).
+r.check("Teilstück: „Seite 2 von 7“ bei einer Seite, nicht bei vollständigen Dokumenten",
+        classify.teilstueck("… Seite 2 von 7 …", 1) and classify.teilstueck("Seite 1/2", 2) is None
+        and classify.teilstueck("Seite 1 von 1", 1) is None and classify.teilstueck("ohne Angabe", 1) is None)
+_t1 = "Rechnung 12.03.2025 Betrag 1.234,56 Nr 4711123 Summe 99,00 fällig 30.03.2025"
+r.check("Dublette: fast gleiche Zahlen und gleiche Seitenzahl; andere Beträge oder Seiten nicht",
+        classify.dublette(_t1, 1, [{"id": 9, "title": "Alt", "content": _t1 + " x", "page_count": 1}]) == "wie Dokument 9 (Alt)"
+        and classify.dublette(_t1, 1, [{"id": 9, "content": _t1, "page_count": 2}]) is None
+        and classify.dublette(_t1, 1, [{"id": 9, "content": "Rechnung 01.01.2024 5,00 7,00 8,00 9,00 1234567", "page_count": 1}]) is None)
+r.check("Sammeldokument: ab drei anderen Korrespondenten mit Kennung",
+        classify.sammeldokument([({"id": i, "name": f"F{i}"}, ["IBAN"]) for i in (1, 2, 3)])
+        and classify.sammeldokument([({"id": i, "name": f"F{i}"}, ["IBAN"]) for i in (1, 2, 3)], ausser=3) is None)
+r.check("OCR-Verdacht: fremde Schrift und Modell-Kommentar ja, deutscher Text und leere Seite nein",
+        classify.ocr_seite_verdaechtig("1. 2017年1月1日，公司与上海浦东发展银行股份有限公司签订了") == "überwiegend fremde Schrift"
+        and classify.ocr_seite_verdaechtig("The Ground Truth image displays a single line") == "Modell-Kommentar statt Seitentext"
+        and classify.ocr_seite_verdaechtig("Sehr geehrter Herr Muster, anbei die Rechnung.") is None
+        and classify.ocr_seite_verdaechtig("") is None)
+_pb = _lauf([_ok], text=_gut + " Seite 2 von 7", dry=False)
+r.check("Verdrahtung: Teilstück landet in „Prüfen“ (Tag KI-unsicher, PRÜFEN-Zeile)",
+        "teilstueck" in (classify.TRACE.get("pruefen") or {})
+        and "PRÜFEN 5" in Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8"), str(classify.TRACE.get("pruefen")))
+
 sys.exit(r.done())
