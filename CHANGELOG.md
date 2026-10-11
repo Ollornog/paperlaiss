@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Zeitüberschreitung beim Speichern stapelte Änderungen
+
+- Die Feld-Reparatur behandelte jeden Speicherfehler als Feldfehler, auch eine Zeitüberschreitung.
+  Bei einem langsamen Server gingen so bis zu sechs PATCHes auf dasselbe Dokument raus, plus vier
+  unnötige KI-Aufrufe. Die abgebrochenen Anfragen liefen beim Server weiter und verklemmten
+  Paperless, sodass der nächste Import hing, bis der Webserver neu startete. Jetzt gilt:
+  `patch_doc()` wartet bei Zeitüberschreitung, prüft per GET, ob die Änderung angekommen ist
+  (`patch_angekommen()`), und sendet höchstens einmal mit längerer Frist neu (90, dann 240 s).
+  Die KI-Reparatur läuft nur noch bei HTTP-Fehlern. Bleibt es bei der Zeitüberschreitung, endet
+  der Lauf als Fehler statt als „OK“.
+
 ### Behoben — Panel-Anmeldung hinter dem TinySesam-Gate (TinySesam 0.24.12)
 
 - **Anmeldung über PocketID endete wieder auf der Anmeldeseite**, wenn ein TinySesam-Gate vor dem Panel stand: Dessen

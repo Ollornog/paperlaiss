@@ -90,7 +90,7 @@ import contextlib as _ctx, io as _io
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
           dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None,
-          datei=None, hinzu=None):
+          datei=None, hinzu=None, patch_ergebnis=None):
     aufrufe = {"ocr": 0, "chat": []}
     routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": [],
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
@@ -120,9 +120,9 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
         aufrufe.setdefault("send", []).append((pfad, daten))
         return {"id": 99, **(daten or {})}
 
-    def patch_doc(did, patch):
+    def patch_doc(did, patch, pause=None):
         aufrufe.setdefault("patch", []).append(dict(patch))
-        return True, ""
+        return patch_ergebnis or (True, "")
     tmp = tempfile.mkdtemp()
     alt = {n: getattr(classify, n) for n in ("get", "mistral_ocr", "mistral_chat", "TOK", "DRY", "FORCE_OCR",
                                             "send", "patch_doc", "SCRIPT_DIR", "SOURCE", "FORCE", "CFG")}
@@ -1373,5 +1373,50 @@ r.check("Office-Importtag: Word-Datei mit Datum = Importtag zählt nicht, sonst 
         classify.office_importtag("2026-07-01", {"original_file_name": "Bewerbung.DOCX", "added": "2026-07-01T10:00:00Z"})
         and not classify.office_importtag("2017-04-17", {"original_file_name": "Bewerbung.docx", "added": "2026-07-01T10:00:00Z"})
         and not classify.office_importtag("2026-07-01", {"original_file_name": "scan.pdf", "added": "2026-07-01T10:00:00Z"}))
+
+# ---- Zeitüberschreitung beim Speichern: nachsehen statt nachschießen, keine KI-Reparatur.
+import socket as _so
+
+
+def _patch_mit(folge, angekommen=False):
+    """folge: je PATCH-Versuch 'zeit', 400 oder 'ok'. Gibt (Ergebnis, Anzahl PATCHes) zurück."""
+    folge = list(folge); zaehl = []
+    def send(pfad, daten, methode="PATCH", timeout=45):
+        zaehl.append(timeout); f = folge.pop(0)
+        if f == "zeit": raise _so.timeout("timed out")
+        if f == 400: raise _ue.HTTPError("u", 400, "x", {}, io.BytesIO(b'{"custom_fields":["bad"]}'))
+        return {}
+    alt = (classify.send, classify.patch_angekommen)
+    classify.send, classify.patch_angekommen = send, (lambda did, p: angekommen)
+    try:
+        return classify.patch_doc(5, {"title": "T"}, pause=0), zaehl
+    finally:
+        classify.send, classify.patch_angekommen = alt
+
+
+_z1, _n1 = _patch_mit(["zeit", "zeit"])
+r.check("PATCH: zweimal Zeitüberschreitung → höchstens zwei Versuche, längere Frist, als ZEIT gemeldet",
+        _z1[0] is False and _z1[1].startswith(classify.ZEIT) and _n1 == list(classify.PATCH_FRIST_S), f"{_z1} {_n1}")
+_z2, _n2 = _patch_mit(["zeit"], angekommen=True)
+r.check("PATCH: nach Zeitüberschreitung schon angekommen → kein zweiter PATCH", _z2 == (True, None) and len(_n2) == 1)
+_z3, _n3 = _patch_mit([400])
+r.check("PATCH: Feldfehler (400) kommt als Text zurück, ohne Wiederholung", _z3[0] is False and "custom_fields" in _z3[1] and len(_n3) == 1)
+
+
+_lp_fehler = None
+try:
+    _lp = _lauf([_ok], dry=False, patch_ergebnis=(False, classify.ZEIT + "timeout"))
+except RuntimeError as _e:
+    _lp_fehler = str(_e)
+r.check("Schreibstelle: Zeitüberschreitung endet als Fehler (für ausfuehren), nicht als „OK“",
+        _lp_fehler and "nicht möglich" in _lp_fehler, str(_lp_fehler))
+r.check("Schreibstelle: bei Zeitüberschreitung keine KI-Reparatur (keine Korrektur-Runde)",
+        classify.TRACE.get("repair") == []
+        and (classify.TRACE.get("writeback") or {}).get("fehler", "").startswith(classify.ZEIT),
+        str(classify.TRACE.get("repair")))
+_lf = _lauf([_ok, {"fields": {}}, {"fields": {}}, {"fields": {}}, {"fields": {}}], dry=False,
+            patch_ergebnis=(False, '{"custom_fields":["bad"]}'))
+r.check("Schreibstelle: Feldfehler (400) wird weiter von der KI repariert",
+        len(_lf["chat"]) == 5, f"chat={len(_lf['chat'])}")
 
 sys.exit(r.done())
