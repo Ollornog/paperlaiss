@@ -1,0 +1,19 @@
+# Beispiel: Eingangsordner → Paperless (deploy/eingang/eingang.py)
+[Unit]
+Description=Paperless-Eingang: Dateien aus den Eingangsordnern importieren und danach entfernen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=eingang
+# Schlüssel je Konto (EINGANG_TOKEN_…), Datei 0600, nie in die Unit schreiben
+EnvironmentFile=/etc/paperless-eingang.env
+Environment=EINGANG_CONFIG=/etc/paperless-eingang.json
+Environment=TZ=Europe/Berlin
+ExecStart=/usr/bin/python3 /opt/paperless-eingang/eingang.py
+Restart=always
+RestartSec=30
+StateDirectory=paperless-eingang
+
+[Install]
+WantedBy=multi-user.target

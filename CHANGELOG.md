@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Eingangsordner (`deploy/eingang/`)
+
+- `eingang.py` lädt jede fertig geschriebene Datei aus einem Eingangsordner je Konto mit dessen
+  API-Schlüssel nach Paperless und entfernt sie danach. Dubletten gelten als erledigt; bei einem
+  Fehler wandert die Datei nach `_Fehler/` mit dem Grund daneben. Dazu eine Beispiel-Unit und eine
+  Anleitung. Gedacht für per Seafile-Client gespiegelte Bibliotheken.
+
 ### Hinzugefügt — Hinweise zum Prüfen: Teilstück, Dublette, Sammeldokument, erfundener OCR-Text
 
 Nur markieren, nichts automatisch korrigieren: Ein Befund setzt den Tag für Unsicherheit, schreibt
