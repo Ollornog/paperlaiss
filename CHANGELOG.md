@@ -6,6 +6,16 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Testsammlung (Eval)
+
+- **`eval.py`:** Lässt `classify.py` für jedes Dokument einer Sollliste im Trockenlauf laufen und
+  vergleicht Korrespondent, Dokumenttyp und Datum. Ergebnis sind Trefferquote je Feld und
+  Abweichungen. Mit `--vergleich` werden Verbesserungen und Rückschritte gegenüber einem früheren
+  Lauf ausgewiesen; Rückschritte geben Exit-Code 1. Die Sollliste mit echten Dokumenten gehört nicht
+  ins Repo.
+- Der Trockenlauf gibt jetzt aus, was tatsächlich geschrieben würde: `document_date` nach Beleg- und
+  Office-Prüfung (`wirksames_datum()`), dazu `korrespondent_ergebnis` und `datum_bisher`.
+
 ### Behoben — Zeitüberschreitung beim Speichern stapelte Änderungen
 
 - Die Feld-Reparatur behandelte jeden Speicherfehler als Feldfehler, auch eine Zeitüberschreitung.

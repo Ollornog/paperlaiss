@@ -1072,6 +1072,20 @@ def datum_belegt(iso, text):
     return any(re.sub(r"\s+", "", x).lower() in roh for x in formen)
 
 
+
+def wirksames_datum(prop, content, doc):
+    """Das Datum, das tatsächlich geschrieben würde: KI-Vorschlag, nur mit Beleg im Text und nicht
+    der Importtag einer Office-Datei. Eine Funktion für Lauf und Trockenlauf, damit der Trockenlauf
+    (und die Testsammlung) dasselbe zeigt wie ein echter Lauf."""
+    datum = dokument_datum(prop)
+    if datum and not datum_belegt(datum, content):
+        TRACE["datum_ohne_beleg"] = datum
+        return None
+    if datum and office_importtag(datum, doc):
+        TRACE["datum_importtag_office"] = datum
+        return None
+    return datum
+
 OFFICE_ENDUNGEN = (".doc", ".docx", ".docm", ".odt", ".rtf", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp")
 
 
@@ -1489,6 +1503,15 @@ def typ_zuordnen(antwort, types):
         return gefaltet[f]
     enden = [(len(n), i) for n, i in gefaltet.items() if len(n) >= 5 and f.endswith(n)]
     return max(enden)[1] if enden else None
+
+
+def korrespondent_ergebnis(corr_info, bisher=None):
+    """Der Name, der am Dokument stünde: aus „exakt='X'“, „gewählt='X'“, „NEU='X' (dry)“; bei
+    „bestehenden behalten“ der bisherige; sonst None."""
+    m = re.search(r"'(.*)'", str(corr_info or ""))
+    if m:
+        return m.group(1)
+    return bisher if str(corr_info or "").startswith("bestehenden") else None
 
 def titel_ohne_eigenen_kopf(title, korrespondent, typ=None):
     """Der Titel ohne das, was ein früherer Lauf selbst vorangestellt hat: den Korrespondenten
@@ -2189,7 +2212,8 @@ def main():
     if DRY:
         out = {"id": did, "title": titel_neu, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
-               "summary": summary, "fields": prop.get("fields"), "document_date": dokument_datum(prop),
+               "summary": summary, "fields": prop.get("fields"), "document_date": wirksames_datum(prop, content, doc),
+               "korrespondent_ergebnis": korrespondent_ergebnis(corr_info, cname), "datum_bisher": (doc.get("created") or "")[:10],
                "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}"
@@ -2210,13 +2234,7 @@ def main():
 
     flds = prop.get("fields") or {}
     date_note = None
-    datum = dokument_datum(prop)
-    if datum and not datum_belegt(datum, content):
-        TRACE["datum_ohne_beleg"] = datum
-        datum = None
-    if datum and office_importtag(datum, doc):
-        TRACE["datum_importtag_office"] = datum
-        datum = None
+    datum = wirksames_datum(prop, content, doc)
     if datum and (doc.get("created") or "")[:10] != datum:
         patch["created"] = f"{datum}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {datum}"
