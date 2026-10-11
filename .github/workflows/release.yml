@@ -7,6 +7,11 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # GENERALPROBE auf jedem PR (PO 2026-10-11: „alles automatisieren ohne dass was bricht“): Der
+  # Workflow läuft durch wie beim Tag, veröffentlicht aber in eine Wegwerf-Registry auf dem Runner
+  # (.github/generalprobe/docker-compose.yml). So nimmt ein Pflicht-Check auch die Actions ab, die
+  # sonst nur am Tag laufen (Anmeldung, schiebender Bau), und ihre Dependabot-Updates mergen selbst.
+  pull_request:
   workflow_dispatch:
 
 # Oben nur Lesen; Schreibrechte bekommt allein der Job, der veröffentlicht (M6/B1, least
@@ -59,6 +64,8 @@ jobs:
           python-version: "3.12"
 
       - name: Suite fahren, bevor irgendetwas veröffentlicht wird
+        # Auf einem PR fährt ci.yml dieselbe Suite am selben Commit — hier noch einmal kostete nur Zeit.
+        if: github.event_name != 'pull_request'
         run: ./scripts/check.sh
 
   veroeffentlichen:
@@ -103,23 +110,38 @@ jobs:
       # Ohne `version` holt die Action die jeweils neueste buildx-Fassung — derselbe
       # ungepinnte Eingang wie oben, nur leiser. v0.37.1 ist die neueste stable
       # (2026-09-11). Auch dieser Pin altert ohne Dependabot.
+      # Generalprobe: Die Wegwerf-Registry lauscht auf 127.0.0.1:5000 des Runners. BuildKit läuft in
+      # einem eigenen Container und erreicht sie nur mit `network=host`.
+      - name: "Generalprobe: Wegwerf-Registry starten"
+        if: github.ref_type != 'tag'
+        run: docker compose -f .github/generalprobe/docker-compose.yml up -d --wait registry
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         with:
           version: v0.37.1
+          driver-opts: ${{ github.ref_type != 'tag' && 'network=host' || '' }}
           # Kein Binär-Cache: Ein Release-Workflow, der Werkzeuge aus dem Actions-Cache lädt,
           # kann eine vergiftete Fassung erben (zizmor `cache-poisoning`).
           cache-binary: false
 
-      # Anmelden nur, wenn auch geschoben wird — ein Trockenlauf braucht keine Registry-Sitzung.
+      # Anmelden: beim Tag an ghcr, sonst an der Wegwerf-Registry — mit DERSELBEN Action.
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         if: github.ref_type == 'tag'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: "Generalprobe: an der Wegwerf-Registry anmelden"
+        if: github.ref_type != 'tag'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: localhost:5000
+          username: generalprobe
+          password: generalprobe
 
       - name: Panel-Abbild bauen und veröffentlichen (genau ein Tag, kein latest)
         id: build
+        if: github.ref_type == 'tag'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: ./panel
@@ -127,8 +149,31 @@ jobs:
           # Bauen immer (das ist der Teil, der bisher nur beim Tag lief), schieben nur beim Tag.
           push: ${{ github.ref_type == 'tag' }}
           tags: ghcr.io/${{ env.OWNER_LC }}/paperlaiss:${{ env.ABBILD_TAG }}
+      - name: "Generalprobe: bauen und in die Wegwerf-Registry schieben"
+        id: probe
+        if: github.ref_type != 'tag'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: ./panel
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: localhost:5000/paperlaiss:generalprobe
+
+      # Angekommen ist erst, was die Registry unter dem Digest kennt — mit beiden Plattformen.
+      - name: "Generalprobe: Abbild in der Wegwerf-Registry nachlesen"
+        if: github.ref_type != 'tag'
+        env:
+          DIGEST: ${{ steps.probe.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [ -n "$DIGEST" ] || { echo "kein Digest vom Bau"; exit 1; }
+          docker buildx imagetools inspect "localhost:5000/paperlaiss@${DIGEST}" | tee "$RUNNER_TEMP/abbild.txt"
+          for plattform in linux/amd64 linux/arm64; do
+            grep -q "Platform: *${plattform}\$" "$RUNNER_TEMP/abbild.txt" || { echo "$plattform fehlt"; exit 1; }
+          done
 
       - name: Digest ins Log — wer es ernst meint, pinnt ihn
+        if: github.ref_type == 'tag'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: echo "ghcr.io/${OWNER_LC}/paperlaiss@${DIGEST}"

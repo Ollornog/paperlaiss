@@ -69,8 +69,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: Panel-Image bauen (nicht veröffentlichen)
-        run: docker build -t paperlaiss-panel:ci ./panel
+      - name: Panel-Image bauen und starten (nicht veröffentlichen)
+        # Bauen UND starten (PO 2026-10-11): Erst die Startprobe nimmt das Basis-Abbild (Dependabot
+        # `docker`) und panel/requirements.txt (`uv`) ab — ein Abbild, das baut, kann trotzdem nicht
+        # starten.
+        run: scripts/_abbild_probe.sh
 
       # Der PDF-Bau des Export-Knopfs braucht pypdf, reportlab und die Schrift — die hat nur das
       # Abbild, nicht die stdlib-only-Suite. Geprüft wird deshalb dort, wo er auch läuft.

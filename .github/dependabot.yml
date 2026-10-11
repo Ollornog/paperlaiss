@@ -89,3 +89,17 @@ updates:
       klein:
         patterns: ["*"]
         update-types: ["patch", "minor"]
+  # Die Wegwerf-Ziele der Generalprobe (release.yml auf jedem PR). Ihr Update nimmt die
+  # Generalprobe selbst ab: Startet die Registry nicht, ist release.yml rot.
+  - package-ecosystem: docker-compose
+    directory: /.github/generalprobe
+    cooldown:
+      default-days: 3
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      klein:
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
