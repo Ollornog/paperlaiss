@@ -2216,6 +2216,12 @@ _AM_TAG = re.compile(r"ref_type\s*==\s*'tag'|startsWith\(github\.ref,\s*'refs/ta
 # jedem PR ab, damit ihr Update selbst mergen darf. Erlaubt nur ohne echtes Ziel und ohne
 # Geheimnis; ein Release anzulegen ist nie eine Probe.
 _GENERALPROBE = re.compile(r"ref_type\s*!=\s*'tag'")
+
+
+def _ist_generalprobe(bedingung: str) -> bool:
+    """Läuft ein Schritt/Job NUR ohne Tag? `ref_type != 'tag'` genügt nicht, wenn ein `||` daneben
+    steht: `… || github.ref_type != 'tag'` läuft auch am Tag (TinySesam `image`, gefunden 0.30.2)."""
+    return bool(_GENERALPROBE.search(bedingung)) and "||" not in bedingung
 _ECHTES_ZIEL = re.compile(r"ghcr\.io|docker\.io|registry-1\.|pypi\.org|secrets\.|github\.token"
                           r"|subject-name\s*:|push-to-registry\s*:\s*true", re.I)
 _NIE_PROBE = ("gh release create", "twine upload")
@@ -2356,14 +2362,14 @@ def pruefe_veroeffentlichen_am_tag(root: str, dateien: list[str] | None = None) 
             continue
         for job in jobs:
             job_am_tag = bool(_AM_TAG.search(job.get("if", "")))
-            job_probe = bool(_GENERALPROBE.search(job.get("if", "")))
+            job_probe = _ist_generalprobe(job.get("if", ""))
             if job.get("environment") and not job_am_tag:
                 treffer.append(f".github/workflows/{name}:{job['name']}: `environment: "
                                f"{job['environment']}` ohne Tag-Bedingung am Job")
             for s in job["steps"]:
                 if job_am_tag or _AM_TAG.search(s.get("if", "")):
                     continue
-                probe = job_probe or bool(_GENERALPROBE.search(s.get("if", "")))
+                probe = job_probe or _ist_generalprobe(s.get("if", ""))
                 for muster, bezeichnung in _VEROEFFENTLICHT:
                     if not re.search(muster, s["text"]):
                         continue

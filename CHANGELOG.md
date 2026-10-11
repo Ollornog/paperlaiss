@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Generalprobe und Startprobe: auch Abbild-Updates mergen selbst (PO 2026-10-11)
+
+- **Generalprobe auf jedem PR:** `release.yml` läuft auch auf Pull Requests durch wie beim Tag und
+  schiebt das Panel-Abbild (beide Plattformen) in eine Wegwerf-Registry auf dem Runner
+  (`.github/generalprobe/`). Anmeldung und schiebender Bau laufen mit genau den Actions des Tags.
+- **Startprobe** (`scripts/_abbild_probe.sh`, Job `image`): das Panel im Modus `tinysesam` ohne Netz
+  starten, `/health` 200. Damit nehmen die Pflicht-Checks Basis-Abbild und `panel/requirements.txt` ab;
+  `uv`, `docker` und `docker_compose` mergen jetzt selbst.
+
 ### Geändert — Dependabot-Auto-Merge aus der repokit-Vorlage (Kit 0.30.1)
 
 - Updates mergen selbst, sobald die Pflicht-Checks grün sind — **auch Majors** (PO 2026-10-11).
