@@ -6,6 +6,36 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit — Panel läuft ohne root (uid/gid 1000) (PO 2026-10-11)
+
+- `panel/Dockerfile`: `USER 1000:1000`, dieselbe uid wie der Paperless-Worker mit seiner Vorgabe
+  `USERMAP_UID`/`USERMAP_GID`. `/auth` gehört im Abbild schon uid 1000, ein neues benanntes Volume
+  übernimmt das. Das Panel schreibt nur in `CLASSIFY_DIR` (`/scripts`), in `PANEL_AUTH_DB` (`/auth`)
+  und nach `/tmp` (`EXPORT_TMP`).
+- Die Startprobe (`scripts/_abbild_probe.sh`) verlangt jetzt eine uid ungleich 0 und eine TinySesam-DB
+  im `/auth` des Abbilds (ohne tmpfs davor). `tests/test_repo.py` prüft die `USER`-Zeile zusätzlich
+  ohne Docker.
+- Bewusst ohne Entrypoint, der als root startet und danach Rechte abgibt: Nach dem einmaligen `chown`
+  braucht der Betrieb keine root-Rechte, und eine root-Phase bei jedem Start wäre genau das, was
+  wegfallen soll. Mit `user:` in Compose lässt sich die uid trotzdem anpassen.
+- **Upgrade-Hinweis (bricht bestehende Installationen ohne diesen Schritt):** Was das Panel bisher
+  angelegt hat, gehört root, teils mit Modus 0600 (`classify-config.json`, `correspondents.json`,
+  `traces/`, `running/`, die TinySesam-DB samt `.key`). Als uid 1000 scheitert der Start dann mit
+  `sqlite3.OperationalError: unable to open database file`, das Lesen mit `PermissionError`. Einmal
+  vor dem Neustart, im Ordner der Compose-Datei (neues Abbild schon gebaut bzw. gezogen):
+
+  ```sh
+  docker compose run --rm --no-deps --user 0:0 panel \
+    find /scripts /auth -xdev -user 0 -exec chown 1000:1000 {} +
+  docker compose up -d panel
+  ```
+
+  Das ändert nur die Dateien, die root gehören; was der Paperless-Worker angelegt hat, bleibt, wie es
+  ist. Ohne Volume auf `/auth` lag die Benutzerdatenbank bisher im Container und geht beim Neuanlegen
+  ohnehin verloren; dafür ein Volume einhängen (siehe `deploy/docker-compose.example.yml`). Läuft der
+  Paperless-Worker mit einer anderen `USERMAP_UID`, statt `1000:1000` diesen Wert nehmen und beim
+  Panel `user: "<uid>:<gid>"` setzen.
+
 ### Geändert — Generalprobe und Startprobe: auch Abbild-Updates mergen selbst (PO 2026-10-11)
 
 - **Generalprobe auf jedem PR:** `release.yml` läuft auch auf Pull Requests durch wie beim Tag und

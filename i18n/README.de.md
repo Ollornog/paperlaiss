@@ -102,7 +102,8 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
     Passwort nur mit `PANEL_PASSWORD_LOGIN=1` (gedacht für ein Testsystem), erstes Konto aus
     `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`. Pflicht: `PANEL_BASE_URL` (die Adresse, unter der
     der Browser das Panel aufruft); die Benutzer liegen in `PANEL_AUTH_DB` (Vorgabe
-    `/auth/tinysesam.db`, als Volume einhängen). Eine halbe OIDC-Konfiguration oder gar kein
+    `/auth/tinysesam.db`, als Volume einhängen; ein benanntes Volume übernimmt die Rechte aus dem
+    Abbild, ein Bind-Mount muss uid 1000 gehören). Eine halbe OIDC-Konfiguration oder gar kein
     Anmeldeweg beendet den Container mit einer Meldung. Ein gesetzter `PANEL_TOKEN` gilt weiter für
     Skripte.
 - **Unter einem Unterpfad** (etwa `https://paperless.example.com/paperlaiss`, neben Paperless auf
@@ -175,7 +176,10 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
 Siehe [`deploy/docker-compose.example.yml`](../deploy/docker-compose.example.yml) und
 [`deploy/.env.example`](../deploy/.env.example): den bestehenden `paperless`-Service um das
 `./scripts`-Volume, `POST_CONSUME` und die `CLASSIFY_*`-Variablen erweitern und den `panel`-Service
-ergänzen. `scripts/` muss für beide Container schreibbar sein.
+ergänzen. `scripts/` muss für beide Container schreibbar sein. Das Panel läuft als uid/gid 1000 (nicht als
+root), wie der Paperless-Worker mit der Vorgabe von `USERMAP_UID`/`USERMAP_GID`; weicht das bei euch
+ab, bekommt das Panel dasselbe `user:`. Update von einer Fassung, deren Panel als root lief: siehe
+Upgrade-Hinweis im [Changelog](../CHANGELOG.md).
 
 ### Knöpfe in Paperless (optional)
 

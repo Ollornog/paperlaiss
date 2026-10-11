@@ -315,7 +315,7 @@ _nummern = ["+49 (0) 30 123 45", "0049 30 12345", "030 12345", "+43 0662 12345",
 r.check("Telefon: Dialog und Klassifizierer vereinheitlichen identisch",
         all(kern.norm_telefon(n) == _cl.norm_telefon(n) for n in _nummern))
 
-# ---- Sperrdatei nur lesend öffnen (2026-09-27): das Panel läuft als root; legte es die Sperre mit "a"
+# ---- Sperrdatei nur lesend öffnen (2026-09-27): das Panel lief damals als root (bis 2026-10-11); legte es die Sperre mit "a"
 # an (root, 0644), scheiterte danach jede Stammdaten-Erfassung des Klassifizierers (uid 1000).
 import fcntl as _fcntl, tempfile as _tfs
 with _tfs.TemporaryDirectory() as _sd:
