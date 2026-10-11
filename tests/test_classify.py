@@ -1428,4 +1428,22 @@ r.check("Wirksames Datum: ohne Beleg im Text keins",
         classify.wirksames_datum({"document_date": "2026-07-01"}, "kein Datum hier", {}) is None
         and classify.wirksames_datum({"document_date": "2026-07-01"}, "Hamburg, 01.07.2026", {}) == "2026-07-01")
 
+# ---- Kennnummern: Personal-/Vertragsnummer zählt, eigene Nummern (SV-Nr, Steuer-ID) nie.
+_eg = classify.eigene_kennungen({"eigene_kennungen": {"nummern": ["864 093 317 53"]}})
+r.check("Eigene Nummer: aus der Config (ohne Schreibweise) und per SV-Muster",
+        classify.eigene_nummer("86409331753", _eg) and classify.eigene_nummer("66130593 B017", _eg)
+        and not classify.eigene_nummer("782125149", _eg))
+_kn, _kg, _kv = classify.stammdaten_nachtragen({}, {"kundennummer": "66130593B017"}, "", _eg, "Test")
+_kn2, _kg2, _ = classify.stammdaten_nachtragen({}, {"kundennummer": "Pers.-Nr. 782125149"}, "", _eg, "Test")
+r.check("Erfassen: SV-Nummer wird verworfen, Personalnummer gespeichert",
+        "kundennummer" not in _kn and "eigene Nummer" in _kv.get("kundennummer", "")
+        and _kn2.get("kundennummer") == ["Pers.-Nr. 782125149"], f"{_kn} {_kv} {_kn2}")
+_tr = classify.stammdaten_treffer([{"id": 7, "name": "Arbeitgeber A"}, {"id": 8, "name": "Arbeitgeber B"}],
+                                  {7: {"kundennummer": ["782125149"]}, 8: {"kundennummer": ["66130593B017"]}}.get,
+                                  "Lohnabrechnung Pers.-Nr. 782125149 SV-Nr 66130593B017", _eg)
+r.check("Vorsuche: Personalnummer findet den Arbeitgeber, eine gespeicherte SV-Nummer zählt nicht",
+        [c["id"] for c, _ in _tr] == [7], str(_tr))
+r.check("Prompt: Kennnummer umfasst Personal-/Vertragsnummer, nicht SV-Nr/Steuer-ID",
+        "Personal-" in classify.ABSENDER_ANWEISUNG and "Sozialversicherungsnummer" in classify.ABSENDER_ANWEISUNG)
+
 sys.exit(r.done())

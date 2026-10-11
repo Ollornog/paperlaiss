@@ -297,7 +297,26 @@ def eigene_kennungen(cfg):
             # 16 Dokumenten: markiert statt ausgeschlossen füllte er fast jede Kandidatenliste, und die
             # KI griff öfter daneben; ausgeschlossen traf sie so oft wie mit Pass 0.
             "namen": [set(ctoks(n)) for n in (e.get("namen") or []) if ctoks(n)],
-            "telefon": {norm_telefon(x) for x in werte(e, "telefon")} - {""}}
+            "telefon": {norm_telefon(x) for x in werte(e, "telefon")} - {""},
+            # Nummern, die bei JEDEM Gegenüber gleich sind (Sozialversicherungsnummer, Steuer-ID) —
+            # nie Kennnummer eines Korrespondenten, sonst „gewinnt“ der erste, der sie erfasst, jedes
+            # spätere Dokument mit derselben Nummer (2026-10-11).
+            "nummern": {norm_nummer(x) for x in werte(e, "nummern")} - {""}}
+
+
+# Deutsche Renten-/Sozialversicherungsnummer: 8 Ziffern, Buchstabe, 3 Ziffern (66130593B017).
+SV_NUMMER = re.compile(r"^\d{8}[A-Z]\d{3}$")
+
+
+def norm_nummer(x):
+    """Eine Kennnummer ohne Schreibweise: nur Buchstaben und Ziffern, groß."""
+    return re.sub(r"[^0-9A-Za-z]", "", str(x or "")).upper()
+
+
+def eigene_nummer(x, eigene):
+    """Gehört die Nummer uns (eigene Liste oder Muster einer SV-Nummer)?"""
+    n = norm_nummer(x)
+    return bool(n) and (n in eigene.get("nummern", ()) or bool(SV_NUMMER.match(n)))
 
 
 
@@ -330,7 +349,7 @@ def konto_cfg(cfg, owner_id, benutzer=None):
     eigen, alle = konten.get(u["username"]) or {}, konten.get("*") or {}
     name = f"{u.get('first_name') or ''} {u.get('last_name') or ''}".strip()
     e = {}
-    for feld in ("namen", "email", "iban", "ustid", "domains", "telefon"):
+    for feld in ("namen", "email", "iban", "ustid", "domains", "telefon", "nummern"):
         e[feld] = list(dict.fromkeys(
             ([name] if feld == "namen" and name else []) + ([u["email"]] if feld == "email" and u.get("email") else [])
             + _roh_liste(eigen.get(feld)) + _roh_liste(alle.get(feld))))
@@ -395,6 +414,8 @@ def stammdaten_treffer(corrs, meta, text, eigene):
                     and re.search(r"(?:@|www\.|//)" + re.escape(d) + r"(?![a-z0-9-])", klein)):
                 gruende.append(f"Domain {d}")
         for k in werte(m, "kundennummer"):
+            if eigene_nummer(k, eigene):
+                continue
             if len(re.sub(r"\W", "", k)) >= 5 and re.search(r"(?<![0-9A-Za-z])" + re.escape(k) + r"(?![0-9A-Za-z])", str(text or "")):
                 gruende.append(f"Kundennummer {k}")
         if gruende:
@@ -584,7 +605,11 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
         else:
             setze("telefon", t)
     setze("adresse", wert("adresse")[:300])
-    setze("kundennummer", wert("kundennummer")[:60])
+    kn = wert("kundennummer")[:60]
+    if kn and eigene_nummer(kn, eigene):
+        verworfen["kundennummer"] = "eigene Nummer (gilt bei jedem Gegenüber)"
+    else:
+        setze("kundennummer", kn)
     # Was das Gegenüber ist („Kfz-Werkstatt in Salzburg“) — nur in einen leeren Kontext. Bis 2026-09-27
     # verlangten die Prompts diesen Satz schon, aber niemand speicherte ihn.
     setze("kontext", "" if is_null(kontext) else str(kontext).strip()[:300])
@@ -1662,7 +1687,9 @@ FELD_ANWEISUNG = (
 ABSENDER_ANWEISUNG = (
     "\nGib ausserdem absender = Objekt mit den Kontaktdaten des GEGENÜBERS (der Partei, die nicht wir sind), "
     "so wie sie im Dokument stehen, sonst null je Feld: ustid, iban, email, telefon, adresse (einzeilig), "
-    "kundennummer (die Kundennummer, unter der das Gegenüber UNS führt). "
+    "kundennummer (die Nummer, unter der das Gegenüber UNS führt: Kunden-, Personal-, Mitglieds-, Vertrags-, "
+    "Versicherungs- oder Aktennummer — NICHT Sozialversicherungsnummer oder Steuer-Identifikationsnummer, die "
+    "überall gleich sind). "
     "Und korrespondent_kontext = 1 kurzer Satz, was das Gegenüber ist (Art, Branche, Ort — etwa „Kfz-Werkstatt "
     "in Salzburg“), wenn es neu ist oder in den möglichen Korrespondenten kein [Kontext: …] trägt, sonst null.")
 
