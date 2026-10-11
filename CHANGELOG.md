@@ -6,6 +6,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Auto-Merge mit GitHub App (Kit 0.33.0)
+
+- Veraltete Dependabot-Zweige (Branch-Schutz „aktuell“) zieht der Auto-Merge per App-Token und Rebase nach;
+  gemergt wird mit dem App-Token, der Push startet die Workflows des Standardzweigs selbst. Ohne App unverändert.
+
 ### Sicherheit — Panel läuft ohne root (uid/gid 1000) (PO 2026-10-11)
 
 - `panel/Dockerfile`: `USER 1000:1000`, dieselbe uid wie der Paperless-Worker mit seiner Vorgabe
