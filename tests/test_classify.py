@@ -1419,4 +1419,13 @@ _lf = _lauf([_ok, {"fields": {}}, {"fields": {}}, {"fields": {}}, {"fields": {}}
 r.check("Schreibstelle: Feldfehler (400) wird weiter von der KI repariert",
         len(_lf["chat"]) == 5, f"chat={len(_lf['chat'])}")
 
+# ---- Trockenlauf zeigt, was geschrieben würde (für die Testsammlung).
+r.check("Ergebnis-Korrespondent aus der Info, bei „behalten“ der bisherige",
+        classify.korrespondent_ergebnis("exakt='O2'") == "O2" and classify.korrespondent_ergebnis("NEU='X Y' (dry)") == "X Y"
+        and classify.korrespondent_ergebnis("bestehenden behalten (Text unsicher)", "Alt") == "Alt"
+        and classify.korrespondent_ergebnis("kein") is None)
+r.check("Wirksames Datum: ohne Beleg im Text keins",
+        classify.wirksames_datum({"document_date": "2026-07-01"}, "kein Datum hier", {}) is None
+        and classify.wirksames_datum({"document_date": "2026-07-01"}, "Hamburg, 01.07.2026", {}) == "2026-07-01")
+
 sys.exit(r.done())
