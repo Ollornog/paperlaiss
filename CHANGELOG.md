@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Hinweise zum Prüfen: Teilstück, Dublette, Sammeldokument, erfundener OCR-Text
+
+Nur markieren, nichts automatisch korrigieren: Ein Befund setzt den Tag für Unsicherheit, schreibt
+eine `PRÜFEN`-Zeile und erscheint im Panel im Kasten „Prüfen“.
+- **Teilstück:** „Seite x von y“ im Text, das Dokument hat aber weniger als y Seiten.
+- **Dublette:** Unter den ähnlichsten Dokumenten laut Paperless (`more_like_id`) ist eines mit fast
+  denselben Beträgen, Daten und Nummern (Jaccard ≥ 0,85) und gleicher Seitenzahl.
+- **Sammeldokument:** Die Vorsuche findet harte Kennungen von mindestens drei anderen
+  Korrespondenten. Beispiel: eine Beilage mit fremden Belegen.
+- **Erfundener OCR-Text:** Eine Seite aus der Mistral-OCR ist überwiegend in fremder Schrift oder
+  enthält einen Modell-Kommentar („The Ground Truth image …“). Gemessen auf leeren Seiten alter
+  Scans.
+
 ### Geändert — Kennnummern statt nur Kundennummer
 
 - Als Kennnummer eines Gegenübers zählt jetzt jede Nummer, unter der es uns führt: Kunden-,

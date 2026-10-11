@@ -938,6 +938,25 @@ def text_kuerzen(text, gesamt, ende):
     return (text[:kopf] + f"\n\n[… {weg} Zeichen ausgelassen …]\n\n" + (text[-ende:] if ende else "")).rstrip()
 
 
+
+# Mistral-OCR erfindet auf leeren oder fast leeren Seiten Text — gemessen 2026-10-11: chinesische Sätze
+# und Kommentare wie „The Ground Truth image displays a single, solid horizontal line …“. Erkannt wird
+# das nur, korrigiert nicht (PO: markieren, nicht automatisieren) → Prüfen + KI-unsicher.
+OCR_VERDACHT = []
+_FREMDE_SCHRIFT = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0600-\u06ff]")
+_MODELL_FLOSKEL = re.compile(r"ground truth|the image (shows|displays|contains)|as an ai\b|i cannot (read|see)", re.I)
+
+
+def ocr_seite_verdaechtig(text):
+    """Grund, warum der OCR-Text einer Seite erfunden aussieht — oder None."""
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", str(text or ""))
+    if _MODELL_FLOSKEL.search(t):
+        return "Modell-Kommentar statt Seitentext"
+    buchstaben = [c for c in t if c.isalpha()]
+    if len(buchstaben) >= 10 and len(_FREMDE_SCHRIFT.findall(t)) / len(buchstaben) > 0.2:
+        return "überwiegend fremde Schrift"
+    return None
+
 def mistral_ocr(did):
     pdf = get(f"/documents/{did}/download/", raw=True)  # Archiv = immer PDF (auch bei Bild-Originalen)
     b64 = base64.b64encode(pdf).decode()
@@ -945,7 +964,9 @@ def mistral_ocr(did):
     req = urllib.request.Request(MISTRAL_OCR, data=json.dumps(body).encode("utf-8"),
         headers={"Authorization": f"Bearer {KEY_OCR}", "Content-Type": "application/json"})
     resp = mistral_senden(req, 180)
-    return "\n\n".join(p.get("markdown", "") for p in resp.get("pages", [])).strip()
+    seiten = [p.get("markdown", "") for p in resp.get("pages", [])]
+    OCR_VERDACHT[:] = [(n, g) for n, g in ((i, ocr_seite_verdaechtig(t)) for i, t in enumerate(seiten, 1)) if g]
+    return "\n\n".join(seiten).strip()
 
 
 def norm(s):
@@ -1530,6 +1551,31 @@ def typ_zuordnen(antwort, types):
     return max(enden)[1] if enden else None
 
 
+
+def pruef_befunde(did, doc, content, treffer, corr_id):
+    """Hinweise zum Prüfen (PO 2026-10-11: markieren, nicht automatisch korrigieren): Teilstück,
+    Dublette, Sammeldokument, erfundener OCR-Text. Jeder Fehler hier bricht den Lauf nicht ab."""
+    b = {}
+    try:
+        t = teilstueck(content, doc.get("page_count"))
+        if t:
+            b["teilstueck"] = t
+        try:
+            r = get(f"/documents/?more_like_id={did}&page_size=5&fields=id,title,content,page_count")
+            d = dublette(content, doc.get("page_count"), [x for x in r.get("results", []) if x.get("id") != did])
+        except Exception:
+            d = None
+        if d:
+            b["dublette"] = d
+        sd = sammeldokument(treffer, corr_id)
+        if sd:
+            b["sammeldokument"] = sd
+        if OCR_VERDACHT:
+            b["ocr_erfunden"] = "; ".join(f"Seite {n}: {g}" for n, g in OCR_VERDACHT)
+    except Exception as e:
+        log(f"befunde-fail {did}: {e!r}")
+    return b
+
 def korrespondent_ergebnis(corr_info, bisher=None):
     """Der Name, der am Dokument stünde: aus „exakt='X'“, „gewählt='X'“, „NEU='X' (dry)“; bei
     „bestehenden behalten“ der bisherige; sonst None."""
@@ -1537,6 +1583,42 @@ def korrespondent_ergebnis(corr_info, bisher=None):
     if m:
         return m.group(1)
     return bisher if str(corr_info or "").startswith("bestehenden") else None
+
+
+_KENNZAHL = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d{1,2}\.\d{1,2}\.(?:19|20)?\d{2}\b|\b\d{5,}\b")
+
+
+def kennzahlen(text):
+    """Beträge, Daten und lange Ziffernfolgen — was zwei Fassungen desselben Dokuments gemeinsam haben."""
+    return set(_KENNZAHL.findall(str(text or "")))
+
+
+def teilstueck(text, seiten):
+    """„Seite x von y“ im Text, das Dokument hat aber weniger als y Seiten → Hinweis, sonst None."""
+    angaben = [(int(a), int(b)) for a, b in re.findall(r"(?:Seite|Blatt|Page)\s*:?\s*(\d{1,2})\s*(?:von|/|of)\s*(\d{1,2})\b",
+                                                        str(text or ""), re.I) if 1 < int(b) <= 50 and int(a) <= int(b)]
+    if not angaben:
+        return None
+    y = max(b for _, b in angaben); n = seiten or 1
+    return f"„Seite … von {y}“, das Dokument hat {n} Seite(n)" if n < y else None
+
+
+def dublette(text, seiten, aehnliche):
+    """Ein ähnliches Dokument mit fast denselben Beträgen/Daten und gleicher Seitenzahl → Hinweis."""
+    z = kennzahlen(text)
+    if len(z) < 5:
+        return None
+    for d in aehnliche or ():
+        zd = kennzahlen(d.get("content"))
+        if len(zd) >= 5 and len(z & zd) / len(z | zd) >= 0.85 and (d.get("page_count") or 1) == (seiten or 1):
+            return f"wie Dokument {d.get('id')} ({str(d.get('title') or '')[:50]})"
+    return None
+
+
+def sammeldokument(treffer, ausser=None):
+    """Harte Kennungen von mindestens drei verschiedenen Korrespondenten → Zusammenstellung."""
+    namen = [c["name"] for c, _ in treffer if c.get("id") != ausser]
+    return f"Belege von {len(namen)} Absendern ({', '.join(namen[:4])})" if len(namen) >= 3 else None
 
 def titel_ohne_eigenen_kopf(title, korrespondent, typ=None):
     """Der Titel ohne das, was ein früherer Lauf selbst vorangestellt hat: den Korrespondenten
@@ -1927,6 +2009,7 @@ def main():
     if not CFG["enabled"] and not DRY:
         log(f"skip {did}: Klassifizierer im Panel deaktiviert"); return
 
+    OCR_VERDACHT.clear()
     doc = get(f"/documents/{did}/")
     global CFG_LAUF
     CFG_LAUF = konto_cfg(CFG, doc.get("owner"))
@@ -2219,6 +2302,8 @@ def main():
         except Exception as e:
             log(f"stammdaten-fail {did}: {e!r}")   # Klassifizierung läuft weiter
             TRACE["stammdaten"] = {"fehler": repr(e)}
+    pruefen.update(pruef_befunde(did, doc, content, treffer, corr_id))
+    TRACE["pruefen"] = pruefen or None
 
     # --- Titel: „Korrespondent – Dokumentart Kennung“, mit dem Korrespondenten und Typ, die tatsächlich
     # am Dokument stehen werden; überschrieben nur, wo auch der Typ überschrieben werden darf.
@@ -2241,6 +2326,7 @@ def main():
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
                "summary": summary, "fields": prop.get("fields"), "document_date": wirksames_datum(prop, content, doc),
                "korrespondent_ergebnis": korrespondent_ergebnis(corr_info, cname), "datum_bisher": (doc.get("created") or "")[:10],
+               "pruefen": pruefen or None,
                "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}"
