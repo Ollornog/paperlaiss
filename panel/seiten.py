@@ -695,6 +695,9 @@ EINSTELLUNGEN = {
                               "Eigene IBANs (etwa bei Lastschriften). Zählen nie als Absender. Eine je Zeile."),
     "eigene_kennungen.domains": ("Korrespondenten", "Eigene Mail-Domains",
                                  "Mail von hier ist eine Weiterleitung und ordnet nichts zu; nie als Absender erfasst. Eine je Zeile."),
+    "eigene_kennungen.nummern": ("Korrespondenten", "Eigene Nummern",
+                                 "Nummern, die bei jedem Gegenüber gleich sind (Sozialversicherungsnummer, Steuer-ID). "
+                                 "Werden nie als Kennnummer eines Korrespondenten gespeichert. Eine je Zeile."),
     "eigene_kennungen.namen": ("Korrespondenten", "Eigene Namen",
                                "Firma oder Personen des Haushalts. Stehen im Empfängerblock jedes Dokuments. Korrespondenten mit "
                                "diesem Namen sind bei der Namenssuche keine Kandidaten, und Pass 1 erfährt, wer „wir“ sind — "

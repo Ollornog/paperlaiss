@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Kennnummern statt nur Kundennummer
+
+- Als Kennnummer eines Gegenübers zählt jetzt jede Nummer, unter der es uns führt: Kunden-,
+  Personal-, Mitglieds-, Vertrags-, Versicherungs- oder Aktennummer. Gespeichert wird sie wie
+  bisher als `kundennummer`; die Vorsuche findet den Korrespondenten darüber auch dann, wenn sein
+  Name nur im Logo steht (Lohnabrechnungen).
+- **Eigene Nummern** (`eigene_kennungen.nummern`, auch je Konto) und deutsche SV-Nummern (Muster)
+  werden nie als Kennnummer gespeichert und zählen in der Vorsuche nicht. Sie sind bei jedem
+  Gegenüber gleich, und sonst würde der erste Korrespondent, der sie erfasst, jedes spätere Dokument
+  bekommen.
+
 ### Hinzugefügt — Testsammlung (Eval)
 
 - **`eval.py`:** Lässt `classify.py` für jedes Dokument einer Sollliste im Trockenlauf laufen und
