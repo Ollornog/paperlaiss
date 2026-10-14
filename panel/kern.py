@@ -390,7 +390,7 @@ def eintrag_lesen(zeile):
     art = "trockenlauf" if rest.startswith("DRY") else (log_art(rest) or "hinweis")
     m = re.match(r"^(?:DRY\s+)?\S+\s+(\d+)\b", rest)
     doc = int(m.group(1)) if m else None
-    korr = re.search(r"(exakt|NEU|kandidat\w*)='([^']*)'", rest)
+    korr = re.search(r"(exakt|NEU|zuweisung|kandidat\w*)='([^']*)'", rest)
     typ = re.search(r"\btyp=(\d+|[^|\s][^|]*?)\s*(?:\||$)", rest)
     ocr = re.search(r"(OCR-[a-z]+\((\d+)\))", rest)
     return {"ts": zeile[:19], "tag": zeile[:10], "art": art, "doc": doc,

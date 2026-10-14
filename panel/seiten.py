@@ -315,7 +315,7 @@ async function lauf(doc){
   if(o.nach_pass1) L.push({phase:'Analysieren',art:'entscheidung',titel:'OCR-Nachlauf',ergebnis:o.nachlauf_fehler?'Fehler':o.nachlauf_verworfen?'verworfen':'nachgeholt',
     variante:o.nachlauf_fehler?'destructive':'info',text:txt(o.nach_pass1.join('; '))+(o.nachlauf_verworfen?' · '+txt(o.nachlauf_verworfen):'')});
   const kname=((k.ergebnis||'').match(/'([^']*)'/)||[])[1]||k.vorschlag||'—';
-  const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'—');
+  const kart=(k.ergebnis||'').startsWith('NEU')?'neu angelegt':(k.ergebnis||'').startsWith('exakt')?'bekannt':(k.ergebnis||'').startsWith('zuweisung')?'feste Zuweisung (KI: '+(k.vorschlag||'—')+')':(k.ergebnis||'—');
   if(t.correspondent) L.push({phase:'Korrespondent zuordnen',art:'entscheidung',titel:'Abgleich mit den Korrespondenten',
     text:'Ergebnis: <b>'+txt(kart)+'</b>'+(kname!=='—'?' — '+txt(kname):''),
     klappen:k.pass2&&k.pass2.uebersprungen?[['Pass 2 nicht gefragt — '+txt(k.pass2.uebersprungen),prosa((k.pass2.abgelehnt||[]).join('\n'))]]:
@@ -454,7 +454,8 @@ function zeichnen(){
       stand:[['bei KI-Meldung',an(o.nach_ki_meldung)],['ohne Typ',an(o.wenn_kein_typ)],['ohne Korrespondent',an(o.wenn_kein_korrespondent)]]},
     {phase:'Korrespondent zuordnen',art:'entscheidung',id:'abgleich',titel:'Abgleich mit den Korrespondenten',knopf:knopf('abgleich'),
       was:'Ordnet den Absender aus Pass 1 einem Korrespondenten in Paperless zu — oder legt einen neuen an.',
-      regeln:[['der Name aus Pass 1 passt exakt zu einem Korrespondenten','zuordnen'],
+      regeln:[['ein Korrespondent mit Zuweisung „Exakt“ oder „Regulärer Ausdruck“ trifft den Text','ihn nehmen — vor der KI, ohne Stammdaten'],
+              ['der Name aus Pass 1 passt exakt zu einem Korrespondenten','zuordnen'],
               ['ähnliche Korrespondenten, die die Namensregel bestehen','Pass 2: die KI wählt einen davon oder keinen'],
               ['kein ähnlicher Name besteht die Namensregel','ohne zweiten KI-Aufruf neu anlegen'],
               ['Namensregel','Name steckt im anderen (Tippfehler nur bei langen Wörtern) · Personen: Nach- und Vorname gleich · sonst ein seltenes gemeinsames Wort ab 6 Zeichen']],

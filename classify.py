@@ -393,6 +393,12 @@ def stammdaten_treffer(corrs, meta, text, eigene):
     tel_im_text = {norm_telefon(t) for t in TELEFON_IM_TEXT.findall(str(text or ""))} - {""}
     aus = []
     for c in corrs:
+        # Die eigene Firma ist nie ein Kandidat: ihre Kennungen (Telefon, Adresse, Kundennummer bei uns)
+        # stehen im Briefkopf jeder eigenen Ausgangsrechnung. Fehlte eine davon in eigene_kennungen,
+        # schlug die Vorsuche „wir“ als harten Treffer vor, und die KI nahm ihn — statt des Kunden
+        # (2026-10-14, Seite Nacharbeit: jede eigene Rechnung bei der eigenen Firma). Wie namens_treffer.
+        if any(n <= set(ctoks(c["name"])) for n in eigene.get("namen", ())):
+            continue
         m = meta(c["id"])
         gruende = []
         for u in {norm_ustid(x) for x in werte(m, "ustid")} - {""}:
@@ -1558,7 +1564,23 @@ FESTE_ZUWEISUNG = {3, 4}
 
 
 def typ_aus_regel(types_roh, text):
-    """Der Dokumenttyp, den eine genaue Zuweisung in Paperless festlegt, sonst None.
+    """Der Dokumenttyp, den eine genaue Zuweisung in Paperless festlegt, sonst None (feste_zuweisung)."""
+    return feste_zuweisung(types_roh, text)
+
+
+def korrespondent_aus_regel(corrs, text):
+    """Der Korrespondent, den eine genaue Zuweisung in Paperless festlegt, sonst None.
+
+    Gleiche Regel wie beim Typ (feste_zuweisung) und ebenso vor der KI. Anlass (2026-10-14, Seite
+    Nacharbeit): Rechnungen über einen Marktplatz nennen den einzelnen Händler als Verkäufer, das
+    Archiv führt sie aber unter der Plattform, über die bezahlt wurde. Die KI nimmt verlässlich den
+    Verkäufer — der steht ja im Briefkopf. Die Plattform erkennt man an einem festen Satz („Auf das
+    Konto von … eingezahlt“, eine Kontaktadresse), und genau dafür ist die Zuweisung „Exakt“ da."""
+    return feste_zuweisung(corrs, text)
+
+
+def feste_zuweisung(objekte, text):
+    """Das Objekt (Typ oder Korrespondent), das eine genaue Zuweisung in Paperless festlegt, sonst None.
 
     Nur „Exakt“ und „Regulärer Ausdruck“ (Paperless-Doku: Exakt = der Text steht genau so, in dieser
     Reihenfolge, im Dokument). Sie gelten vor der KI: eine eigene Vorlage, die sich selbst anders nennt
@@ -1568,7 +1590,7 @@ def typ_aus_regel(types_roh, text):
     Rechnung, die eine Mahnung erwähnt, eine Mahnung. Bei Exakt zählt jeder Leerraum als Leerraum
     (das OCR bricht Zeilen). Treffen mehrere, gewinnt die längste Zuweisung."""
     treffer = []
-    for t in types_roh or ():
+    for t in objekte or ():
         m = str(t.get("match") or "").strip()
         if t.get("matching_algorithm") not in FESTE_ZUWEISUNG or not m:
             continue
@@ -2321,7 +2343,14 @@ def main():
     set_stage(did, "Korrespondent")
     corr_name = ohne_tabellenrest(prop.get("correspondent"))
     corr_id = None; corr_info = "kein"
-    if corr_name:
+    regel_k = korrespondent_aus_regel(corrs, content)
+    if regel_k:
+        # Feste Zuweisung gewinnt, VOR dem Abgleich — sonst legte der Lauf den Händler erst als neuen
+        # Korrespondenten an. Was die KI vorschlug, bleibt im Trace.
+        corr_id = regel_k["id"]; corr_info = f"zuweisung='{regel_k['name']}'"
+        TRACE["correspondent"] = {"vorschlag": corr_name, "ergebnis": corr_info, "zuweisung": regel_k.get("match")}
+        corr_name = regel_k["name"]
+    elif corr_name:
         at = ctoks(corr_name); ak = " ".join(at)
         def cscore(c):
             bt = ctoks(c["name"])
@@ -2405,7 +2434,10 @@ def main():
     # --- Stammdaten nachtragen: nur leere Felder, nur bei belastbarer Zuordnung ---
     stamm_info = ""
     pruefen = {}
-    if CFG.get("stammdaten_erfassen", True) and not corr_info.startswith("bestehenden behalten"):
+    # Nicht bei fester Zuweisung: die KI beschreibt dann den Händler im Briefkopf, nicht die Plattform —
+    # seine USt-ID und IBAN landeten sonst bei der Plattform.
+    if (CFG.get("stammdaten_erfassen", True) and not corr_info.startswith("bestehenden behalten")
+            and not corr_info.startswith("zuweisung")):
         quelle = f"KI · {datetime.date.today():%Y-%m-%d} · Dokument {did}"
         _mail = mail_from if mail_bestaetigt(mail_from, corr_id, mail_corr, _text, prop.get("absender")) else ""
         _anh = corr_info.startswith("exakt")
