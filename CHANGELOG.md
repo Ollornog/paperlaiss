@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Nacharbeit: was Menschen nach der KI geändert haben (T-6)
+
+- Neue Panel-Seite **Nacharbeit** (`/nacharbeit`): Quote je Feld, je Korrespondent, je Dokumenttyp und je
+  Woche, dazu jeder einzelne Fall (Feld · KI-Wert → jetzt · wer · wann) mit Link zum Dokument und zum Lauf.
+- Quelle ist die Änderungshistorie von Paperless, verglichen mit dem Trace des letzten Laufs. Es zählen
+  Änderungen eines angemeldeten Benutzers nach dem Lauf; Workflows (ohne Benutzer) und die Schreibvorgänge
+  des Laufs selbst (Gnadenfrist 15 s) nicht. Hin und zurück geänderte Werte und Felder, die die KI nicht
+  gesetzt hat (etwa Bezahlt-Am), sind keine Korrektur.
+- Abgleich im Hintergrund beim Öffnen der Seite (älter als 30 min) oder per Knopf; das Ergebnis liegt in
+  `nacharbeit.json` und überlebt so das Überschreiben eines Traces durch einen späteren Lauf.
+- Der Trace trägt zusätzlich `ts_utc`. `ts` steht in der Ortszeit des Klassifizierers, die je nach
+  Container eine andere ist; alte Traces werden mit `PAPERLESS_TIME_ZONE` umgerechnet.
+
 ### Geändert — Kennungen, die nicht im Text stehen, verankern die KI nicht mehr
 
 - Ein bisheriger Wert eines Text- oder Ganzzahlfelds mit mindestens drei Ziffern, der im Dokumenttext

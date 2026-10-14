@@ -83,6 +83,15 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
 - **Activity** (`/`) — five counters and a 30-day chart that **filter** the list (the filter lives in
   the address, so *Back* undoes it), 100 entries per page. A row opens the **run**: decision tree,
   prompt, AI output, and the OCR text rendered as Markdown.
+- **Rework** (`/nacharbeit`) — what people changed after an AI run, read from the Paperless change
+  history (`/api/documents/<id>/history/`) and compared with what the run wrote (trace `writeback`).
+  Counted are changes by a signed-in user after the run (changes without a user, e.g. workflows,
+  and the run's own writes are not). Rate per field, per correspondent, per document type and per
+  week, plus every single case with a link to the document and the run. Documents nobody touched
+  count as correct, so the rate is a lower bound. The comparison runs in the background when the
+  page is opened and the last one is older than 30 minutes (or via *Neu abgleichen*); results are
+  kept in `nacharbeit.json` next to the traces, so a run survives when its trace is overwritten.
+  The token user needs to see the document history (admin or owner).
 - **Flow & prompt** (`/ablauf`) — every step a document goes through, each with its input and output
   to expand; for the AI calls the prompt and the answer format. The Pass-1 prompt is editable in
   place and also shown exactly as it is sent (`CLASSIFY_PROMPT_VORSCHAU=1`). A run in the activity
@@ -91,7 +100,7 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
 - **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
   saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
-- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
+- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/nacharbeit` (POST `/api/nacharbeit/abgleichen`), `/api/running`, `/api/trace/{id}`,
   `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST with a draft for the live preview while editing).
 - **Sign-in** (`PANEL_AUTH`):
   - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.

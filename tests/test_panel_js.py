@@ -26,7 +26,7 @@ r = Report("Fachtest — JavaScript der Panel-Seiten")
 node = shutil.which("node")
 r.check("node vorhanden (sonst ist dieser Test wertlos)", bool(node))
 if node:
-    for name in ("aktivitaet", "ablauf", "einstellungen"):
+    for name in ("aktivitaet", "nacharbeit", "ablauf", "einstellungen"):
         html = getattr(seiten, name)()
         skripte = re.findall(r"<script>(.*?)</script>", html, re.S)
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
