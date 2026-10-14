@@ -1684,6 +1684,66 @@ def titel_ohne_eigenen_kopf(title, korrespondent, typ=None):
         t = t[len(ty):].strip()
     return t
 
+
+# Unbelegte Altwerte (2026-10-14): ein Wert mit Ziffern, der im Text nicht vorkommt, stammt nicht
+# sichtbar aus dem Dokument. Stand er als „aktuell“ im Prompt oder als Kennung im Titel, behielt die KI ihn —
+# auch gegen frische OCR und einen ausdrücklichen Hinweis (eine Rechnung hieß „Rechnung 1205“, weil
+# die ID ihres Ausgangsdokuments im Titel und im Feld stand). Geprüft werden nur Text- und
+# Ganzzahlfelder mit mindestens drei Ziffern: Kennungen. Beträge und Datumsfelder stehen im Text in
+# anderer Schreibweise, Wörter ohne Ziffern („VW Polo“) dürfen hergeleitet sein.
+# Hart leeren wäre zu viel: gemessen an zwei Installationen fehlen je ~20 vermutlich richtige Nummern
+# im OCR-Text (von Hand nachgetragen, anders gelesen). Deshalb: aus dem Titel der Nachricht nehmen,
+# im Feld kennzeichnen, die Entscheidung bleibt bei der KI.
+KENNUNG_FELDTYPEN = ("string", "longtext", "integer")
+UNBELEGT_HINWEIS = ("(steht so NICHT im Text — vermutlich falsch; nur behalten, wenn er sich eindeutig aus dem "
+                    "Dokument ergibt, sonst den Wert aus dem Text oder null)")
+
+
+def text_schluessel(s):
+    """Text ohne Schreibweise: nur Kleinbuchstaben und Ziffern, Umlaute gefaltet."""
+    return norm(s).replace(" ", "")
+
+
+def ist_kennung(wert):
+    return len(re.findall(r"\d", str(wert or ""))) >= 3
+
+
+def im_text_belegt(wert, schluessel):
+    """Steht der Wert im Text (`schluessel` = text_schluessel(Inhalt))? Ein Lesefehler je acht
+    Zeichen ist erlaubt — die OCR liest „J“ als „9“, und ein von Hand berichtigter Wert soll nicht
+    als unbelegt gelten, nur weil der Text die Fehllesung trägt."""
+    w = text_schluessel(str(wert or ""))
+    if not w or w in schluessel:
+        return True
+    erlaubt, n = len(w) // 8, len(w)
+    if not erlaubt:
+        return False
+    for i in range(len(schluessel) - n + 1):
+        fehler = 0
+        for a, b in zip(w, schluessel[i:i + n]):
+            if a != b:
+                fehler += 1
+                if fehler > erlaubt:
+                    break
+        else:
+            return True
+    return False
+
+
+def unbelegte_werte(cfields, cur_vals, fids, content):
+    """{fid: wert} der Kennungsfelder unter `fids`, deren bisheriger Wert nicht im Text steht."""
+    s = text_schluessel(content)
+    typ = {f["id"]: f["data_type"] for f in cfields}
+    return {fid: v for fid, v in cur_vals.items()
+            if fid in fids and typ.get(fid) in KENNUNG_FELDTYPEN and ist_kennung(v) and not im_text_belegt(v, s)}
+
+
+def titel_ohne_unbelegtes(title, content):
+    """Der Titel für die Nachricht an Pass 1 ohne Kennungen, die im Text nicht vorkommen."""
+    s = text_schluessel(content)
+    teile = [t for t in str(title or "").split() if not (ist_kennung(t) and not im_text_belegt(t, s))]
+    return re.sub(r"\s+", " ", " ".join(teile)).strip(" -–—:·|")
+
 def titel_bilden(korrespondent, typ, kennung):
     """Der Titel aus dem Muster „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27), etwa
     „Beispiel GmbH – Rechnung 12/2026“. Fehlt ein Teil, fällt er weg; ohne Dokumentart UND Kennung
@@ -2184,6 +2244,12 @@ def main():
 
     # KI-gesteuerte Felder (alles ausser documentlink + den optionalen Sonderfeldern)
     ai_flds = [f for f in cfields if f["id"] not in skip_fids and f["data_type"] != "documentlink"]
+    # Kennungen, die nicht im Text stehen, als solche kennzeichnen (titel_ohne_unbelegtes). Sie bleiben
+    # stehen, wenn die KI „BEHALTEN“ sagt: von Hand eingetragene Nummern fehlen oft im OCR-Text.
+    unbelegt = unbelegte_werte(cfields, cur_vals, {f["id"] for f in ai_flds}, content)
+    if unbelegt:
+        _fname = {f["id"]: f["name"] for f in cfields}
+        TRACE["unbelegt"] = {_fname[fid]: v for fid, v in unbelegt.items()}
     def fspec(f):
         t = f["data_type"]
         if t == "select":
@@ -2192,7 +2258,8 @@ def main():
             th = {"string": "Text", "longtext": "Text", "integer": "Ganzzahl", "float": "Zahl",
                   "monetary": "Betrag z.B. EUR12.34", "boolean": "true/false", "date": "YYYY-MM-DD", "url": "URL"}.get(t, t)
         cur = cur_vals.get(f["id"]); cur = sel_label(f, cur) if t == "select" else cur
-        return f"- {f['name']} ({th}), aktuell: {cur if cur not in (None, '') else '—'}"
+        zusatz = f" {UNBELEGT_HINWEIS}" if f["id"] in unbelegt else ""
+        return f"- {f['name']} ({th}), aktuell: {cur if cur not in (None, '') else '—'}{zusatz}"
     fieldspec = "\n".join(fspec(f) for f in ai_flds)
 
     set_stage(did, "Pass 1")
@@ -2207,7 +2274,7 @@ def main():
     user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
         (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], dateiname_fuer_prompt(doc.get('original_file_name')),
-        fieldspec, titel_ohne_eigenen_kopf(title, cname, _typ_bisher) or "—",
+        fieldspec, titel_ohne_unbelegtes(titel_ohne_eigenen_kopf(title, cname, _typ_bisher), content) or "—",
         text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000)),
         typ_vorschlag=_typ_bisher))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
