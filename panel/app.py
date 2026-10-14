@@ -879,6 +879,15 @@ def api_nacharbeit_abgleichen(request: Request):
     return {"gestartet": _nacharbeit_anstossen(), "laeuft": True}
 
 
+@app.get("/api/nacharbeit/sollliste")
+def api_nacharbeit_sollliste(request: Request, tage: int = 0):
+    # Nachgearbeitete Dokumente als Sollliste für eval.py (Download).
+    guard(request)
+    liste = nacharbeit.sollliste(list((_nacharbeit_lesen().get("laeufe") or {}).values()),
+                                 datetime.datetime.now(datetime.timezone.utc), tage=max(tage, 0))
+    return JSONResponse(liste, headers={"Content-Disposition": 'attachment; filename="soll-nacharbeit.json"'})
+
+
 @app.get("/nacharbeit", response_class=HTMLResponse)
 def nacharbeit_seite(request: Request):
     guard(request)

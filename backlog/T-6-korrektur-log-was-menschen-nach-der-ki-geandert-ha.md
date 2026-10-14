@@ -1,7 +1,7 @@
 ---
 type: Task
 title: 'Korrektur-Log: was Menschen nach der KI geändert haben'
-status: in-arbeit
+status: erledigt
 id: T-6
 milestone: M-1
 tags: [panel, auswertung, eval]
@@ -27,4 +27,4 @@ Woche sowie der Fallliste (`panel/nacharbeit.py`, Test `tests/test_nacharbeit.py
 - Tags: nur das Entfernen eines Tags, den die KI gesetzt hat, ist eine Korrektur; Workflow-Tags zählen nicht.
 - Felder, die die KI nicht gesetzt hat (Bezahlt-Am), zählen nicht. Leer → Wert heißt „ergänzt“, Wert → leer „geleert“.
 
-**Offen:** Export der Fälle als Sollliste für `eval.py`; danach erledigt.
+**Stand 2026-10-15 — erledigt:** Export als Sollliste für `eval.py` (Knopf „Sollliste“, `/api/nacharbeit/sollliste`, `nacharbeit.sollliste`). Je Dokument der jüngste Lauf; nur Korrekturen an Korrespondent, Typ oder Datum; nicht korrigierter Korrespondent/Typ gilt als bestätigt.

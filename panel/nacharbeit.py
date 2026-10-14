@@ -240,6 +240,52 @@ def auswertung(laeufe: list, jetzt: datetime.datetime, tage: int = 90, feld: str
     }
 
 
+# Felder, die eval.py prüft: Anzeigename hier → Schlüssel der Sollliste.
+EVAL_FELDER = {"Korrespondent": "korrespondent", "Dokumenttyp": "typ", "Datum": "datum"}
+
+
+def sollliste(laeufe: list, jetzt: datetime.datetime, tage: int = 0) -> list:
+    """Nachgearbeitete Läufe → Sollliste für eval.py: [{"id", "korrespondent", "typ", "datum", "notiz"}].
+
+    Je Dokument zählt nur der jüngste Lauf: Ist das Dokument danach noch einmal gelaufen, gilt der
+    neue Stand, eine ältere Korrektur ist dann überholt. Aufgenommen wird ein Dokument nur, wenn ein
+    Mensch mindestens eines der drei geprüften Felder korrigiert hat. Korrespondent und Typ kommen
+    aus dem Stand beim letzten Abgleich (was der Mensch beim Korrigieren stehen ließ, gilt als
+    bestätigt), das Datum nur, wenn es korrigiert wurde — der Lauf speichert es sonst nicht.
+    Ein von Hand geleerter Korrespondent oder Typ wird null („keiner erwartet“).
+    """
+    if tage > 0:
+        ab = jetzt - datetime.timedelta(days=tage)
+        laeufe = [l for l in laeufe if (_utc(l.get("ts") or "") or ab) >= ab]
+    juengster: dict = {}
+    for l in laeufe:
+        alt = juengster.get(l["doc"])
+        if alt is None or (l.get("ts") or "") > (alt.get("ts") or ""):
+            juengster[l["doc"]] = l
+    aus = []
+    for doc, l in sorted(juengster.items()):
+        korr = {k["feld"]: k for k in l.get("korrekturen") or [] if k["feld"] in EVAL_FELDER}
+        if not korr:
+            continue
+        soll: dict = {"id": doc}
+        for feld, schluessel in (("Korrespondent", "korrespondent"), ("Dokumenttyp", "typ")):
+            k = korr.get(feld)
+            if k and k["art"] == "geleert":
+                soll[schluessel] = None
+            elif l.get(schluessel):
+                soll[schluessel] = l[schluessel]
+        datum = str((korr.get("Datum") or {}).get("neu") or "")[:10]
+        if len(datum) == 10 and datum[4] == "-" and datum[7] == "-":
+            soll["datum"] = datum
+        if len(soll) == 1:
+            continue                    # nichts, was eval.py prüfen könnte
+        soll["notiz"] = "; ".join(
+            f"{f}: {'?' if k['ki'] is None else k['ki'] or 'leer'} → {k['neu'] or 'leer'} ({k['wer']}, {str(k['wann'])[:10]})"
+            for f, k in korr.items())
+        aus.append(soll)
+    return aus
+
+
 def zusammenfuehren(alt: dict, neu: dict, behalten: int = 20000) -> dict:
     """Gespeicherte Läufe mit frisch berechneten mischen.
 

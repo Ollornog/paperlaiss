@@ -150,6 +150,48 @@ r.check("tage=0: alles", na.auswertung(LAEUFE, JETZT, tage=0)["laeufe"] == 5)
 r.check("Leere Liste: Nullen statt Teilen durch null",
         na.auswertung([], JETZT)["quote"] == 0.0 and na.auswertung([], JETZT)["je_feld"] == [])
 
+# ---- Sollliste für eval.py
+def k_(feld, ki, neu, art="geändert"):
+    return {"feld": feld, "ki": ki, "neu": neu, "art": art, "wer": "Meli", "wann": "2026-10-14T16:00:00+00:00"}
+
+
+SL = [
+    {**lauf(10, "2026-10-14T10:00:00+00:00", "Finanzamt"), "typ": "Steuererklaerung",
+     "korrekturen": [k_("Korrespondent", "Starlink", "Finanzamt"), k_("Datum", "2025-06-30", "2026-09-23"),
+                     k_("Titel", "a", "b")]},
+    {**lauf(11, "2026-10-14T10:00:00+00:00", "Post"), "korrekturen": [k_("Titel", "a", "b")]},       # nur Titel
+    {**lauf(12, "2026-10-13T10:00:00+00:00", "Uniqa"), "korrekturen": []},     # später neu gelaufen …
+    {**lauf(12, "2026-10-01T10:00:00+00:00", "Uniqa"), "korrekturen": [k_("Korrespondent", "A", "Uniqa")]},  # … steht hinten
+    {**lauf(13, "2026-10-14T10:00:00+00:00", None), "typ": None,
+     "korrekturen": [k_("Korrespondent", "Amazon", "", "geleert"), k_("Dokumenttyp", None, "", "geleert")]},
+    {**lauf(14, "2026-10-14T10:00:00+00:00", None), "typ": None,
+     "korrekturen": [k_("Datum", "2026-01-01", "kaputt")]},                  # nichts Prüfbares
+    {**lauf(15, "2026-01-01T10:00:00+00:00", "Alt"), "korrekturen": [k_("Dokumenttyp", "A", "Rechnung")]},
+]
+sl = {x["id"]: x for x in na.sollliste(SL, JETZT)}
+r.check("Sollliste: korrigierter Korrespondent und Datum, Typ aus dem bestätigten Stand",
+        {k2: sl.get(10, {}).get(k2) for k2 in ("korrespondent", "typ", "datum")}
+        == {"korrespondent": "Finanzamt", "typ": "Steuererklaerung", "datum": "2026-09-23"})
+r.check("Sollliste: Notiz nennt KI-Wert, neuen Wert und wer — Titel nicht (prüft eval.py nicht)",
+        "Starlink → Finanzamt (Meli" in sl.get(10, {}).get("notiz", "") and "Titel" not in sl[10]["notiz"])
+r.check("Sollliste: nur Titel korrigiert → kein Eintrag", 11 not in sl)
+r.check("Sollliste: Dokument danach neu gelaufen → alte Korrektur überholt", 12 not in sl)
+r.check("Sollliste: von Hand geleert → null („keiner erwartet“), unbekannter KI-Wert als „?“",
+        sl.get(13, {}).get("korrespondent", "x") is None and sl[13].get("typ", "x") is None
+        and "Dokumenttyp: ? → leer" in sl[13]["notiz"])
+r.check("Sollliste: kein prüfbares Feld (Datum unlesbar, kein Stand) → kein Eintrag", 14 not in sl)
+r.check("Sollliste: Datum nur, wenn korrigiert", "datum" not in sl.get(13, {"datum": 1}))
+r.check("Sollliste: tage=0 alles, tage=90 ohne alten Lauf",
+        15 in sl and 15 not in {x["id"] for x in na.sollliste(SL, JETZT, tage=90)})
+r.check("Sollliste: Form passt zu eval.py (id als Zahl, nach id sortiert)",
+        [x["id"] for x in na.sollliste(SL, JETZT)] == [10, 13, 15] and all(isinstance(x["id"], int) for x in sl.values()))
+sys.path.insert(0, str(ROOT))
+import eval as ev  # noqa: E402
+r.check("Sollliste: eval.py prüft genau die drei Felder und ignoriert die Notiz",
+        ev.vergleiche(sl[10], {"korrespondent": "Finanzamt", "typ": "Steuererklaerung", "datum": "2026-09-23"})
+        == {"korrespondent": True, "typ": True, "datum": True}
+        and ev.vergleiche(sl[13], {"korrespondent": "Amazon"}) == {"korrespondent": False, "typ": True})
+
 # ---- Speichern: ein überschriebener Trace darf seinen alten Lauf nicht mitnehmen
 _alt_l = {"1@2026-10-01T00:00:00+00:00": {"ts": "2026-10-01T00:00:00+00:00", "korrekturen": [{"feld": "Titel"}]}}
 _neu_l = {"1@2026-10-14T00:00:00+00:00": {"ts": "2026-10-14T00:00:00+00:00", "korrekturen": []}}
