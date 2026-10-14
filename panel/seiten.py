@@ -594,7 +594,9 @@ def nacharbeit() -> str:
         '<option value="30">30 Tage</option><option value="90">90 Tage</option>'
         '<option value="365">1 Jahr</option><option value="0">alles</option></select>'
         f'<button type="button" class="btn" data-variant="outline" data-size="sm" onclick="abgleichen()">'
-        f'{symbol("refresh-ccw")}Neu abgleichen</button>')
+        f'{symbol("refresh-ccw")}Neu abgleichen</button>'
+        f'<button type="button" class="btn" data-variant="outline" data-size="sm" onclick="sollliste()" '
+        f'title="Nachgearbeitete Dokumente als Sollliste für eval.py (JSON)">{symbol("arrow-down")}Sollliste</button>')
     filterleiste = (
         '<div id="filter" class="mt-6 flex flex-wrap items-center gap-2" hidden>'
         '<span class="text-muted-foreground text-sm">Gefiltert:</span><span id="filter-text" class="badge" data-variant="secondary"></span>'
@@ -674,6 +676,7 @@ async function laden(){
   clearTimeout(warten); if(d.laeuft) warten=setTimeout(laden,3000);
 }
 async function abgleichen(){ try{ await senden('/api/nacharbeit/abgleichen',{}); }catch(e){} laden(); }
+function sollliste(){ location.href=PL_BASIS+'/api/nacharbeit/sollliste?tage='+encodeURIComponent(F.tage); }
 laden();
 """
 

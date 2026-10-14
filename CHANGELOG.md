@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Nacharbeit als Sollliste für eval.py (T-6)
+
+- Knopf „Sollliste“ auf der Seite Nacharbeit (`GET /api/nacharbeit/sollliste?tage=`): je Dokument, bei dem ein
+  Mensch Korrespondent, Typ oder Datum korrigiert hat, ein Eintrag in der Form von `eval.py` — aus dem jüngsten
+  Lauf (ist das Dokument danach neu gelaufen, ist die alte Korrektur überholt). Korrespondent und Typ kommen aus
+  dem Stand, den der Mensch stehen ließ; von Hand geleert wird `null`; das Datum nur, wenn es korrigiert wurde.
+  Eine `notiz` nennt KI-Wert, neuen Wert und wer. So werden Korrekturen zu Testfällen.
+
 ### Behoben — Eigene Ausgangsrechnungen landeten bei der eigenen Firma
 
 - Nennt Pass 1 uns selbst als Korrespondenten, fragt der Lauf in derselben Unterhaltung nach dem Empfänger

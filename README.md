@@ -91,7 +91,11 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
   count as correct, so the rate is a lower bound. The comparison runs in the background when the
   page is opened and the last one is older than 30 minutes (or via *Neu abgleichen*); results are
   kept in `nacharbeit.json` next to the traces, so a run survives when its trace is overwritten.
-  The token user needs to see the document history (admin or owner).
+  The token user needs to see the document history (admin or owner). *Sollliste* downloads the
+  reworked documents as a target list for `eval.py` (`soll-nacharbeit.json`): one entry per document
+  whose correspondent, type or date was corrected, from its latest run only; the uncorrected
+  correspondent and type count as confirmed, a value cleared by hand becomes `null`, and a `notiz`
+  says what was changed. Review it before merging it into your own target list.
 - **Flow & prompt** (`/ablauf`) — every step a document goes through, each with its input and output
   to expand; for the AI calls the prompt and the answer format. The Pass-1 prompt is editable in
   place and also shown exactly as it is sent (`CLASSIFY_PROMPT_VORSCHAU=1`). A run in the activity
@@ -100,7 +104,7 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
 - **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
   saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
-- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/nacharbeit` (POST `/api/nacharbeit/abgleichen`), `/api/running`, `/api/trace/{id}`,
+- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/nacharbeit` (POST `/api/nacharbeit/abgleichen`, GET `/api/nacharbeit/sollliste?tage=`), `/api/running`, `/api/trace/{id}`,
   `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST with a draft for the live preview while editing).
 - **Sign-in** (`PANEL_AUTH`):
   - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.
