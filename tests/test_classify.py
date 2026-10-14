@@ -1342,6 +1342,38 @@ _eigtr = [c["id"] for c, _ in classify.stammdaten_treffer(_eigk, _eigm, _eigt, _
 r.check("Treffer: eigene Firma ist nie Kandidat, auch bei Kennung außerhalb eigene_kennungen",
         98 not in _eigtr and 2 in _eigtr, str(_eigtr))
 
+# ---- Rückfrage, wenn Pass 1 uns selbst nennt (2026-10-14: eigene Ausgangsrechnungen 10 von 14 bei uns).
+_eigcfg = {"eigene_kennungen": {"namen": ["Eigenfirma"], "ustid": ["ATU 1111 2222"]}}
+_ausr = "Eigenfirma - Hauptstraße 5\nRechnungs-Nr. RE-516\nHerrn Kunde Maier\nWeg 1, 5020 Salzburg\n" + _gut
+_g1 = _lauf([{**_ok, "correspondent": "Eigenfirma e.U.", "absender": {"adresse": "Hauptstraße 5", "ustid": "ATU11112222"}},
+             {"empfaenger": "Kunde Maier", "adresse": "Weg 1, 5020 Salzburg"}],
+            dry=False, text=_ausr, cfg=_eigcfg,
+            korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}, {"id": 61, "name": "Kunde Maier"}])
+r.check("Rückfrage: nennt Pass 1 uns, fragt der Lauf nach dem Empfänger und nimmt ihn",
+        len(_g1["chat"]) == 2 and "das sind WIR" in _g1["chat"][1]
+        and [p.get("correspondent") for p in _g1.get("patch", [])] == [61]
+        and (classify.TRACE.get("gegenueber") or {}).get("vorher") == "Eigenfirma e.U.", f"chat={len(_g1['chat'])} patch={_g1.get('patch')}")
+classify.TRACE.clear()
+_g2 = _lauf([{**_ok, "correspondent": "Eigenfirma e.U."}, {"empfaenger": None, "adresse": None}],
+            dry=False, text=_ausr, cfg=_eigcfg, korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}])
+r.check("Rückfrage: internes Dokument (null) → bleibt bei uns",
+        [p.get("correspondent") for p in _g2.get("patch", [])] == [98] and "vorher" not in (classify.TRACE.get("gegenueber") or {}),
+        str(_g2.get("patch")))
+_g3 = _lauf([{**_ok, "correspondent": "Eigenfirma e.U."}, {"empfaenger": "Eigenfirma", "adresse": None}],
+            dry=False, text=_ausr, cfg=_eigcfg, korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}])
+r.check("Rückfrage: antwortet die KI wieder mit uns → bleibt bei uns", [p.get("correspondent") for p in _g3.get("patch", [])] == [98])
+_g5 = _lauf([{**_ok, "correspondent": "Eigenfirma e.U."}, {"empfaenger": "Herrn Kunde Maier", "adresse": None}],
+            dry=False, text=_ausr, cfg=_eigcfg,
+            korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}, {"id": 61, "name": "Kunde Maier"}])
+r.check("Rückfrage: Anrede aus dem Adressblock fällt weg", [p.get("correspondent") for p in _g5.get("patch", [])] == [61],
+        str(_g5.get("patch")))
+_g4 = _lauf([{**_ok, "correspondent": "Kunde Maier"}], dry=False, text=_ausr, cfg=_eigcfg,
+            korrespondenten=[{"id": 61, "name": "Kunde Maier"}])
+r.check("Rückfrage: fremder Korrespondent → keine Rückfrage", len(_g4["chat"]) == 1)
+r.check("eigener Name: Token-Teilmenge, leerer Name nie",
+        classify.ist_eigener_name("Eigenfirma e.U.", _eig["namen"]) and not classify.ist_eigener_name("Kunde", _eig["namen"])
+        and not classify.ist_eigener_name("", _eig["namen"]))
+
 # ---- Kennungen je Konto: im Haushalt ist „wir" nur der Besitzer des Dokuments.
 _haus = {"kennungen_je_konto": True, "eigene_kennungen": {"namen": ["Erika Muster", "Max Muster"]},
          "konten": {"erika": {"iban": ["DE00 1111"]}, "*": {"email": ["post@example.com"]}}}
@@ -1363,7 +1395,7 @@ _kl = _lauf([{**_ok, "correspondent": "Max Muster"}], text=_gut + " Absender: Ma
 r.check("Verdrahtung: bei Erikas Dokument ist Max ein Kandidat und Erika allein „wir“",
         "Name „Max Muster“" in _kl["chat"][0] and "im Konto von Erika Muster" in _kl["system"]
         and (classify.TRACE.get("konto") == "erika"), _kl["chat"][0][:300])
-_kg = _lauf([{**_ok, "correspondent": "Max Muster"}], text=_gut + " Absender: Max Muster, Musterweg 1",
+_kg = _lauf([{**_ok, "correspondent": "Max Muster"}, {"empfaenger": None, "adresse": None}], text=_gut + " Absender: Max Muster, Musterweg 1",
             korrespondenten=[{"id": 7, "name": "Max Muster"}], besitzer=_erika, cfg={**_haus, "kennungen_je_konto": False})
 r.check("Verdrahtung: ohne Schalter bleibt Max „wir“ (kein Kandidat)", "Name „Max Muster“" not in _kg["chat"][0])
 

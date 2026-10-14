@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Eigene Ausgangsrechnungen landeten bei der eigenen Firma
+
+- Nennt Pass 1 uns selbst als Korrespondenten, fragt der Lauf in derselben Unterhaltung nach dem Empfänger
+  (Adressblock, ohne Anrede); nur bei einem internen Dokument oder ohne genannten Empfänger bleibt es bei uns.
+  Die Stammdaten aus Pass 1 beschreiben dann unseren Briefkopf und werden verworfen, übernommen wird nur die
+  Anschrift des Empfängers. Gemessen an 14 eigenen Rechnungen: vorher 0, jetzt 13 beim Kunden (die 14. ist
+  ein Barverkauf ohne Empfänger). Die Regel im Prompt allein reichte nicht — der Briefkopf wog schwerer.
+
 ### Hinzugefügt — Feste Zuweisung auch für Korrespondenten
 
 - Ein Korrespondent mit Zuweisung „Exakt“ oder „Regulärer Ausdruck“ in Paperless gewinnt vor der KI, wenn der
