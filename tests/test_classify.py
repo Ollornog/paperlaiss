@@ -1517,4 +1517,44 @@ r.check("Teil mit eigenem Lauf: Marker überspringt wie bei jedem Dokument", _s[
 _v = _teil_lauf(trace_da=True, source="knopf", force=True)
 r.check("Teil mit eigenem Lauf: KI-Knopf sieht den Bestand", _v["chat"] and "Musterauto" in _v["chat"][0])
 
+# ---- Unbelegte Altwerte (2026-10-14): eine Kennung im Bestand, die nicht im Text steht, bestätigte
+# sich beim KI-Knopf selbst (Titel und Feld trugen die ID des Ausgangsdokuments, „Rechnung 1205“).
+_sg = classify.text_schluessel(_gut)
+r.check("Beleg: Kennung im Text ja, fremde nein",
+        classify.im_text_belegt("4711", _sg) and not classify.im_text_belegt("1205", _sg))
+r.check("Beleg: ein Lesefehler je acht Zeichen gilt noch als belegt (OCR „J“ → „9“)",
+        classify.im_text_belegt("WDD2470121J074035", classify.text_schluessel("FIN: WDD 24701219074035 x"))
+        and not classify.im_text_belegt("WDD2470121J074035", classify.text_schluessel("FIN: WDD 99999999999999 x")))
+r.check("Beleg: nur Werte mit mindestens drei Ziffern sind Kennungen",
+        classify.ist_kennung("S-475TC") and not classify.ist_kennung("VW Polo") and not classify.ist_kennung("C 18"))
+r.check("Titel: unbelegte Kennung fällt weg, belegte bleibt",
+        classify.titel_ohne_unbelegtes("Rechnung 1205", _gut) == "Rechnung"
+        and classify.titel_ohne_unbelegtes("Rechnung 4711", _gut) == "Rechnung 4711")
+_uf = [{"id": 1, "name": "Rechnungsnummer", "data_type": "string"}, {"id": 2, "name": "Fahrzeug", "data_type": "string"},
+       {"id": 3, "name": "Betrag", "data_type": "monetary"}, {"id": 4, "name": "Kilometerstand", "data_type": "integer"}]
+r.check("Beleg: Beträge und Wörter werden nicht geprüft, Ganzzahlen schon",
+        classify.unbelegte_werte(_uf, {1: "1205", 2: "VW Polo", 3: "EUR11.50", 4: 82000}, {1, 2, 3, 4}, _gut) == {1: "1205", 4: 82000})
+
+
+def _beleg_lauf(nummer):
+    return _lauf([{**_ok, "fields": {"Rechnungsnummer": "BEHALTEN", "Fahrzeug": "BEHALTEN", "Betrag": "BEHALTEN"}}],
+                 dry=False, source="knopf", force=True, titel=f"X – Rechnung {nummer}", korr=7,
+                 korrespondenten=[{"id": 7, "name": "X"}], felder=_uf[:3],
+                 feldwerte=[{"field": 1, "value": nummer}, {"field": 2, "value": "VW Polo"}, {"field": 3, "value": "EUR11.50"}])
+
+
+_ub = _beleg_lauf("1205")
+_ubp = {c["field"]: c["value"] for c in (_ub.get("patch") or [{}])[0].get("custom_fields", [])}
+_ubm = (_ub["chat"] or [""])[0]
+r.check("KI-Knopf: unbelegte Kennung nicht mehr im Titel der Nachricht",
+        "TITEL: Rechnung\n" in _ubm, _ubm[-700:-500])
+r.check("KI-Knopf: unbelegte Kennung im Feld als „steht so NICHT im Text“ gekennzeichnet",
+        "aktuell: 1205 " + classify.UNBELEGT_HINWEIS in _ubm)
+r.check("KI-Knopf: bei BEHALTEN bleibt auch eine unbelegte Kennung (keine Daten verlieren)", _ubp.get(1) == "1205", str(_ubp))
+r.check("KI-Knopf: Wort und Betrag bleiben bei BEHALTEN", _ubp.get(2) == "VW Polo" and _ubp.get(3) == "EUR11.50", str(_ubp))
+_bb = _beleg_lauf("4711")
+_bbp = {c["field"]: c["value"] for c in (_bb.get("patch") or [{}])[0].get("custom_fields", [])}
+r.check("KI-Knopf: belegte Kennung ohne Kennzeichnung angeboten und behalten",
+        "aktuell: 4711\n" in _bb["chat"][0] and "TITEL: Rechnung 4711" in _bb["chat"][0] and _bbp.get(1) == "4711", str(_bbp))
+
 sys.exit(r.done())

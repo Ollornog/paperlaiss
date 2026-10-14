@@ -6,6 +6,16 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Kennungen, die nicht im Text stehen, verankern die KI nicht mehr
+
+- Ein bisheriger Wert eines Text- oder Ganzzahlfelds mit mindestens drei Ziffern, der im Dokumenttext
+  nicht vorkommt (ein Lesefehler je acht Zeichen erlaubt), steht in der Nachricht an Pass 1 jetzt mit
+  dem Zusatz „steht so NICHT im Text“; dieselben Kennungen fallen aus dem Titel der Nachricht. Anlass:
+  eine Rechnung behielt beim KI-Knopf die ID ihres Ausgangsdokuments („Rechnung 1205“), obwohl die Zahl
+  nirgends im Text stand. Der Trace hält die Werte unter `unbelegt` fest.
+- Bewusst nur Kennzeichnung, kein Leeren: gemessen fehlen je Installation rund 20 vermutlich richtige
+  Nummern im OCR-Text (von Hand nachgetragen oder anders gelesen). Sagt die KI „BEHALTEN“, bleibt der Wert.
+
 ### Behoben — Teile aus dem Aufteilen erbten die Daten des Ausgangsdokuments
 
 - Paperless kopiert beim Aufteilen (PDF-Editor oder „Aufteilen“ mit Metadaten) Titel, Korrespondent,
