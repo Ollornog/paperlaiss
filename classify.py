@@ -1462,6 +1462,52 @@ def korrespondent_behalten(bisher, ki_meldet_unlesbar, hinweis):
     return bool(bisher) and bool(ki_meldet_unlesbar) and not (hinweis or "").strip()
 
 
+# Dateinamen, unter denen Paperless die Teile eines Dokuments neu einliest: der PDF-Editor
+# `<id>_edit_<n>.pdf` (bulk_edit.edit_pdf), das Aufteilen `<id>_<von>-<bis>.pdf` (bulk_edit.split).
+TEIL_RE = re.compile(r"^(\d+)_(?:edit_\d+|\d+-\d+)\.pdf$", re.IGNORECASE)
+
+
+def teildokument_von(dateiname):
+    """ID des Ausgangsdokuments, wenn das Dokument ein Teil aus dem PDF-Editor oder dem Aufteilen
+    von Paperless ist, sonst None."""
+    m = TEIL_RE.match(str(dateiname or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def erbe_verwerfen(doc):
+    """Das Dokument ohne die Metadaten, die es beim Aufteilen von seinem Ausgangsdokument bekam.
+
+    Paperless kopiert beim Aufteilen (mit „Metadaten übernehmen“) Titel, Korrespondent, Typ, Datum,
+    Tags und alle Feldwerte des Ausgangsdokuments in JEDEN Teil (DocumentMetadataOverrides.
+    from_document). Bis 2026-10-14 sah paperlaiss darin den Bestand: das geerbte Marker-Tag liess den
+    Import-Lauf überspringen, und beim KI-Knopf standen Fahrzeug, Fahrgestell-Nr., Kennzeichen und
+    Polizze des Ausgangsdokuments als „aktuell“ im Prompt — die KI behielt sie, obwohl der Teil eine
+    ganz andere Rechnung war (42 Teile eines 50-seitigen Scans, alle „<Versicherung> – Kaufvertrag“).
+    Tags bleiben: dort mischen sich Erbe und das, was die Workflows für den Teil selbst gesetzt haben.
+    Die Felder gehen ganz, auch Mail-Kontext und Handfelder: sie gehörten zum Ausgangsdokument.
+    """
+    d = dict(doc)
+    d.update({"title": "", "correspondent": None, "document_type": None, "created": None, "custom_fields": []})
+    return d
+
+
+def dateiname_fuer_prompt(dateiname):
+    """Der Originaldateiname für die Nachricht an Pass 1 — bei einem Teil aus dem Aufteilen keiner.
+    `1205_edit_2.pdf` trägt nur die ID des Ausgangsdokuments, und die KI nahm sie als Kennung in den
+    Titel („Rechnung 1205“, 2026-10-14)."""
+    if not dateiname or teildokument_von(dateiname) is not None:
+        return "—"
+    return dateiname
+
+
+def erbe_offen(doc, trace_dir):
+    """Trägt das Dokument noch das Erbe seines Ausgangsdokuments? Ja bei einem Teil, für den
+    paperlaiss selbst noch nie gelaufen ist (kein eigener Trace)."""
+    if teildokument_von(doc.get("original_file_name")) is None:
+        return False
+    return not os.path.exists(os.path.join(trace_dir, f"{doc.get('id')}.json"))
+
+
 def typ_ueberschreibbar(source, force):
     """Darf dieser Lauf einen schon gesetzten Dokumenttyp ersetzen? Siehe typ_setzen().
 
@@ -2027,7 +2073,17 @@ def main():
     marker_id = resolve_tag(tagid_by_norm, CFG["marker_tag"])
     unsicher_id = resolve_tag(tagid_by_norm, CFG["unsicher_tag"])
 
-    if marker_id in tag_ids_on and not DRY and not FORCE and not FORCE_OCR:
+    # Ein Teil aus dem Aufteilen trägt Marker, Titel und Feldwerte seines Ausgangsdokuments (erbe_verwerfen).
+    erbe = erbe_offen(doc, TRACE_DIR)
+    if erbe:
+        TRACE["erbe"] = {"ausgangsdokument": teildokument_von(doc.get("original_file_name")),
+                         "verworfen": {"titel": title or None, "korrespondent": doc.get("correspondent"),
+                                       "typ": doc.get("document_type"), "datum": (doc.get("created") or "")[:10] or None,
+                                       "felder": len(doc.get("custom_fields") or [])}}
+        doc = erbe_verwerfen(doc)
+        title = ""
+
+    if marker_id in tag_ids_on and not DRY and not FORCE and not FORCE_OCR and not erbe:
         log(f"skip {did}: schon klassifiziert (Marker '{CFG['marker_tag']}')"); return
     mark_running(did, "Start")
 
@@ -2150,7 +2206,7 @@ def main():
     _typ_bisher = next((n for n, i in types.items() if i == doc.get("document_type")), None)
     user_msg = "".join(t for t, _, _ in pass1_nachricht_teile(
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
-        (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], doc.get('original_file_name') or '—',
+        (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], dateiname_fuer_prompt(doc.get('original_file_name')),
         fieldspec, titel_ohne_eigenen_kopf(title, cname, _typ_bisher) or "—",
         text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000)),
         typ_vorschlag=_typ_bisher))
@@ -2309,7 +2365,7 @@ def main():
     # --- Titel: „Korrespondent – Dokumentart Kennung“, mit dem Korrespondenten und Typ, die tatsächlich
     # am Dokument stehen werden; überschrieben nur, wo auch der Typ überschrieben werden darf.
     titel_neu = None
-    if CFG.get("titel_setzen", True) and typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR):
+    if CFG.get("titel_setzen", True) and (typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR) or erbe):
         _typ_id = typ_setzen(dt_id, doc.get("document_type"), True) or doc.get("document_type")
         if corr_id in _c_by_id:
             _kname = _c_by_id[corr_id]["name"]
