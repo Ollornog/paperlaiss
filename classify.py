@@ -1568,15 +1568,19 @@ def typ_aus_regel(types_roh, text):
     return feste_zuweisung(types_roh, text)
 
 
-def korrespondent_aus_regel(corrs, text):
+def korrespondent_aus_regel(corrs, text, eigene_namen=()):
     """Der Korrespondent, den eine genaue Zuweisung in Paperless festlegt, sonst None.
 
     Gleiche Regel wie beim Typ (feste_zuweisung) und ebenso vor der KI. Anlass (2026-10-14, Seite
     Nacharbeit): Rechnungen über einen Marktplatz nennen den einzelnen Händler als Verkäufer, das
     Archiv führt sie aber unter der Plattform, über die bezahlt wurde. Die KI nimmt verlässlich den
     Verkäufer — der steht ja im Briefkopf. Die Plattform erkennt man an einem festen Satz („Auf das
-    Konto von … eingezahlt“, eine Kontaktadresse), und genau dafür ist die Zuweisung „Exakt“ da."""
-    return feste_zuweisung(corrs, text)
+    Konto von … eingezahlt“, eine Kontaktadresse), und genau dafür ist die Zuweisung „Exakt“ da.
+
+    Nie die eigene Firma: ihr Name steht auf fast jedem Dokument. Eine Installation hatte „Exakt:
+    <Inhaber>“ an einem Korrespondenten — das traf 664 Dokumente und hätte jedes dorthin gelegt
+    (gemessen 2026-10-14 vor dem Ausrollen). Wie bei Namens- und Stammdaten-Vorsuche."""
+    return feste_zuweisung([c for c in corrs or () if not any(n <= set(ctoks(c["name"])) for n in eigene_namen)], text)
 
 
 def feste_zuweisung(objekte, text):
@@ -2343,7 +2347,7 @@ def main():
     set_stage(did, "Korrespondent")
     corr_name = ohne_tabellenrest(prop.get("correspondent"))
     corr_id = None; corr_info = "kein"
-    regel_k = korrespondent_aus_regel(corrs, content)
+    regel_k = korrespondent_aus_regel(corrs, content, eigene["namen"])
     if regel_k:
         # Feste Zuweisung gewinnt, VOR dem Abgleich — sonst legte der Lauf den Händler erst als neuen
         # Korrespondenten an. Was die KI vorschlug, bleibt im Trace.

@@ -1306,6 +1306,11 @@ r.check("Korrespondent-Regel: Exakt trifft, „Irgendein Wort“ nicht",
         (classify.korrespondent_aus_regel(_rk, _mk) or {}).get("name") == "Plattform"
         and classify.korrespondent_aus_regel(_rk, _gut + " Rechnung") is None)
 classify.TRACE.clear()   # main() leert den Trace nicht (ein Prozess je Dokument), die Tests laufen hintereinander
+r.check("Korrespondent-Regel: nie die eigene Firma, auch mit Zuweisung „Exakt“ auf ihren Namen",
+        classify.korrespondent_aus_regel(
+            [{"id": 50, "name": "Eigenfirma Office", "matching_algorithm": 3, "match": "Eigenfirma", "is_insensitive": True}],
+            "Rechnung an Eigenfirma, Hauptstraße 5", _eig["namen"]) is None
+        and (classify.korrespondent_aus_regel(_rk, _mk, _eig["namen"]) or {}).get("name") == "Plattform")
 _kz = _lauf([{**_ok, "correspondent": "Händler Neu UAB", "absender": {"ustid": "LT100001158219"}}, {"match": None}],
             dry=False, korrespondenten=_rk, text=_mk)
 r.check("Schreibstelle Korrespondent: Zuweisung schlägt die KI, kein neuer Korrespondent, Trace nennt beides",
@@ -1318,6 +1323,12 @@ r.check("Schreibstelle Korrespondent: keine Händler-Stammdaten bei der Plattfor
         not classify.TRACE.get("stammdaten"), str(classify.TRACE.get("stammdaten")))
 r.check("Schreibstelle Korrespondent: Titel trägt die Plattform",
         str((_kz.get("patch") or [{}])[0].get("title") or "").startswith("Plattform"), str(_kz.get("patch")))
+_ke = _lauf([{**_ok, "correspondent": "Händler GmbH"}], dry=False, text=_gut + " Rechnung von Eigenfirma",
+            korrespondenten=[{"id": 50, "name": "Eigenfirma Office", "matching_algorithm": 3, "match": "Eigenfirma",
+                              "is_insensitive": True}, {"id": 42, "name": "Händler GmbH"}],
+            cfg={"eigene_kennungen": {"namen": ["Eigenfirma"]}})
+r.check("Schreibstelle Korrespondent: Zuweisung auf den eigenen Namen greift nicht, die KI-Wahl bleibt",
+        [p.get("correspondent") for p in _ke.get("patch", [])] == [42], str(_ke.get("patch")))
 _kn = _lauf([{**_ok, "correspondent": "Händler GmbH"}], dry=False, korrespondenten=_rk, text=_gut + " Rechnung")
 r.check("Schreibstelle Korrespondent: ohne Zuweisung bleibt die KI-Wahl",
         [p.get("correspondent") for p in _kn.get("patch", [])] == [42], str(_kn.get("patch")))
