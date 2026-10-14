@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 3/5 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 3/6 erledigt
 
 ## Aufgaben
 
@@ -16,6 +16,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-3](T-3-python-untergrenze-bewusst-setzen.md)** Python-Untergrenze bewusst setzen statt von der Testmatrix schieben lassen · M-1
 * ✗ **[T-4](T-4-erneut-verarbeiten-gegen-ki.md)** Paperless' „Erneut verarbeiten" überschreibt den OCR-Text des KI-Knopfs · M-1
 * ☐ **[T-5](T-5-automatischer-export.md)** Automatischer Export nach Regeln (Filter, Turnus, Auslöser) · M-1
+* ☐ **[T-6](T-6-korrektur-log-was-menschen-nach-der-ki-geandert-ha.md)** Korrektur-Log: was Menschen nach der KI geändert haben · M-1
 
 ## Entscheidungen (ADR)
 
