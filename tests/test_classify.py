@@ -90,14 +90,14 @@ import contextlib as _ctx, io as _io
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
           dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None,
-          datei=None, hinzu=None, patch_ergebnis=None):
+          datei=None, hinzu=None, patch_ergebnis=None, tags=(), alle_tags=()):
     aufrufe = {"ocr": 0, "chat": []}
-    routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": [],
+    routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": list(tags),
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
                                 "correspondent": korr, "owner": 3 if besitzer else None,
                                 "original_file_name": datei, "added": hinzu},
               "/users/3/": besitzer or {},
-              "/tags/": {"results": []}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
+              "/tags/": {"results": list(alle_tags)}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
     def get(pfad, raw=False):
@@ -1467,5 +1467,54 @@ _pb = _lauf([_ok], text=_gut + " Seite 2 von 7", dry=False)
 r.check("Verdrahtung: Teilstück landet in „Prüfen“ (Tag KI-unsicher, PRÜFEN-Zeile)",
         "teilstueck" in (classify.TRACE.get("pruefen") or {})
         and "PRÜFEN 5" in Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8"), str(classify.TRACE.get("pruefen")))
+
+# ---- Teile aus dem Aufteilen (2026-10-14): Paperless kopiert Titel, Korrespondent, Typ,
+# Datum, Tags (auch den Marker) und alle Feldwerte des Ausgangsdokuments in jeden Teil.
+r.check("Teil: PDF-Editor und Aufteilen erkannt, andere Dateien nicht",
+        classify.teildokument_von("1205_edit_3.pdf") == 1205 and classify.teildokument_von("1164_2-4.pdf") == 1164
+        and classify.teildokument_von("Gescannt_20261014-1511.pdf") is None and classify.teildokument_von(None) is None
+        and classify.teildokument_von("Rechnung_1205_edit_3.pdf") is None)
+r.check("Teil: Dateiname geht nicht in den Prompt (die KI nahm die ID als Kennung)",
+        classify.dateiname_fuer_prompt("1205_edit_2.pdf") == "—" and classify.dateiname_fuer_prompt("a.pdf") == "a.pdf")
+_td = tempfile.mkdtemp()
+r.check("Teil: Erbe offen, solange paperlaiss selbst nie lief",
+        classify.erbe_offen({"id": 5, "original_file_name": "1205_edit_3.pdf"}, _td)
+        and not classify.erbe_offen({"id": 5, "original_file_name": "scan.pdf"}, _td))
+Path(_td, "5.json").write_text("{}", encoding="utf-8")
+r.check("Teil: mit eigenem Trace gilt der Bestand wieder", not classify.erbe_offen({"id": 5, "original_file_name": "1205_edit_3.pdf"}, _td))
+
+
+def _teil_lauf(trace_da=False, **kw):
+    _alt_td = classify.TRACE_DIR
+    classify.TRACE_DIR = tempfile.mkdtemp()
+    if trace_da:
+        Path(classify.TRACE_DIR, "5.json").write_text("{}", encoding="utf-8")
+    try:
+        return _lauf([{**_ok, "correspondent": "Reifen Muster GmbH"}], dry=False, datei="1205_edit_3.pdf",
+                     titel="Versicherung Muster AG – Kaufvertrag 5031907", korr=177, typ=2,
+                     korrespondenten=[{"id": 177, "name": "Versicherung Muster AG"}, {"id": 18, "name": "Reifen Muster GmbH"}],
+                     felder=[{"id": 4, "name": "Fahrzeug", "data_type": "string"}],
+                     feldwerte=[{"field": 4, "value": "Musterauto X1"}],
+                     tags=[50], alle_tags=[{"id": 50, "name": "ai-processed"}], **kw)
+    finally:
+        classify.TRACE_DIR = _alt_td
+
+
+_t = _teil_lauf()
+_p = (_t.get("patch") or [{}])[0]
+r.check("Teil beim Import: geerbter Marker überspringt den Lauf nicht", len(_t["chat"]) == 1, str(len(_t["chat"])))
+r.check("Teil: kein geerbter Feldwert, Titel, Korrespondent oder Dateiname im Prompt",
+        _t["chat"] and not any(x in _t["chat"][0] for x in ("Musterauto", "Versicherung Muster", "Kaufvertrag", "1205_edit")),
+        (_t["chat"] or [""])[0][:400])
+r.check("Teil: geerbter Feldwert wird nicht zurückgeschrieben",
+        "Musterauto X1" not in str(_p.get("custom_fields")), str(_p.get("custom_fields")))
+r.check("Teil: Typ und Titel aus dem eigenen Lauf", _p.get("document_type") == 1 and "Reifen Muster" in str(_p.get("title")), str(_p))
+_k = _teil_lauf(source="knopf", force=True)
+r.check("Teil beim KI-Knopf: ohne eigenen Lauf ebenso ohne Erbe",
+        _k["chat"] and "Musterauto" not in _k["chat"][0] and "Versicherung Muster" not in _k["chat"][0])
+_s = _teil_lauf(trace_da=True)
+r.check("Teil mit eigenem Lauf: Marker überspringt wie bei jedem Dokument", _s["chat"] == [], str(len(_s["chat"])))
+_v = _teil_lauf(trace_da=True, source="knopf", force=True)
+r.check("Teil mit eigenem Lauf: KI-Knopf sieht den Bestand", _v["chat"] and "Musterauto" in _v["chat"][0])
 
 sys.exit(r.done())

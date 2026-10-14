@@ -6,6 +6,22 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben — Teile aus dem Aufteilen erbten die Daten des Ausgangsdokuments
+
+- Paperless kopiert beim Aufteilen (PDF-Editor oder „Aufteilen“ mit Metadaten) Titel, Korrespondent,
+  Typ, Datum, Tags und alle Feldwerte des Ausgangsdokuments in jeden Teil — auch das Marker-Tag. Der
+  Import-Lauf übersprang deshalb jeden Teil als „schon klassifiziert“, und beim KI-Knopf standen die
+  Feldwerte des Ausgangsdokuments als „aktuell“ im Prompt. Die KI behielt sie, obwohl der Teil eine
+  ganz andere Rechnung war (Fahrzeug, Fahrgestell-Nr., Kennzeichen und Polizze eines Kaufvertrags
+  auf 40 Werkstattrechnungen).
+- Ein Teil (`<id>_edit_<n>.pdf`, `<id>_<von>-<bis>.pdf`), für den paperlaiss noch keinen eigenen
+  Trace hat, gilt jetzt als neu: Marker, Titel, Korrespondent, Typ, Datum und Feldwerte werden
+  verworfen, der Lauf entscheidet alles aus dem Text des Teils. Tags bleiben. Der Trace hält unter
+  `erbe` fest, was verworfen wurde. Nach dem ersten eigenen Lauf gilt der Bestand wie bei jedem
+  Dokument.
+- Der Dateiname eines Teils geht nicht mehr in den Prompt: die KI nahm die ID darin als Kennung in
+  den Titel („Rechnung 1205“).
+
 ### Geändert — Auto-Merge mit GitHub App (Kit 0.33.0)
 
 - Veraltete Dependabot-Zweige (Branch-Schutz „aktuell“) zieht der Auto-Merge per App-Token und Rebase nach;
