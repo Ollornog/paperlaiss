@@ -1,7 +1,7 @@
 ---
 type: Task
 title: 'Korrektur-Log: was Menschen nach der KI geändert haben'
-status: offen
+status: in-arbeit
 id: T-6
 milestone: M-1
 tags: [panel, auswertung, eval]
@@ -20,3 +20,11 @@ created: '2026-10-14'
 - Abholen per Zeitplan oder beim Öffnen des Panels?
 - Tags trennen: Workflow-Tags und Hand-Tags.
 - Was zählt als Korrektur, was als Ergänzung (z. B. Bezahlt-Am)?
+
+**Stand 2026-10-14 — Stufe 1 gebaut:** Panel-Seite „Nacharbeit“ mit Quote je Feld, Korrespondent, Typ und
+Woche sowie der Fallliste (`panel/nacharbeit.py`, Test `tests/test_nacharbeit.py`). Entschieden:
+- Abholen beim Öffnen der Seite (älter als 30 min) oder per Knopf, kein Zeitplan; Ergebnis in `nacharbeit.json`.
+- Tags: nur das Entfernen eines Tags, den die KI gesetzt hat, ist eine Korrektur; Workflow-Tags zählen nicht.
+- Felder, die die KI nicht gesetzt hat (Bezahlt-Am), zählen nicht. Leer → Wert heißt „ergänzt“, Wert → leer „geleert“.
+
+**Offen:** Export der Fälle als Sollliste für `eval.py`; danach erledigt.

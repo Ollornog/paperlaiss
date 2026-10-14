@@ -60,6 +60,7 @@ _ICONS = {
 # Navigation: gleiche Leiste auf jeder Seite, die aktive ist über aria-current hinterlegt.
 NAVIGATION: list[tuple[str, str, str]] = [
     ("Aktivität", "/", "chart-column"),
+    ("Nacharbeit", "/nacharbeit", "pencil"),
     ("Ablauf & Prompt", "/ablauf", "git-branch"),
     ("Einstellungen", "/einstellungen", "settings"),
     ("Info", "/info", "info"),

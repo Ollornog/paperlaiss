@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 # app.py (FastAPI) und die reine Logik in kern.py und exportlogik.py (ohne Abhaengigkeiten —
 # getrennt, weil die stdlib-only-Testsuite sie importieren koennen muss); exportpdf.py baut die PDFs.
-COPY app.py kern.py huelle.py seiten.py exportlogik.py exportpdf.py paperlaiss.png ./
+COPY app.py kern.py huelle.py seiten.py nacharbeit.py exportlogik.py exportpdf.py paperlaiss.png ./
 # Aussehen: vendortes C22 (scripts/vendor-c22.sh)
 COPY static ./static
 # Ohne root (PO 2026-10-11): uid/gid 1000 wie der Paperless-Worker (USERMAP_UID/USERMAP_GID,

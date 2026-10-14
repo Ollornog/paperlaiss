@@ -571,6 +571,112 @@ laden();
 
 
 
+# ---------------------------------------------------------------- Nacharbeit
+# Was Menschen nach einem KI-Lauf geändert haben (Backlog T-6). Rechnet nichts: Quoten, Gruppen und
+# Fälle kommen fertig aus nacharbeit.auswertung() über /api/nacharbeit.
+NACHARBEIT_KZ = [
+    ("laeufe", "KI-Läufe", "bot"),
+    ("nachgearbeitet", "Nachgearbeitet", "pencil"),
+    ("korrekturen", "Korrekturen", "list"),
+    ("angefasst", "Von Hand angefasst", "eye"),
+]
+
+
+def nacharbeit() -> str:
+    karten = "".join(
+        f'<div class="card min-w-0 flex-1" data-size="sm">'
+        f'<header><h2 class="flex items-center gap-2">{symbol(sym, "size-4")}{titel}</h2></header>'
+        f'<section><span class="text-2xl font-semibold tabular-nums" id="na-{k}">…</span></section></div>'
+        for k, titel, sym in NACHARBEIT_KZ)
+    zeitraum = (
+        '<select class="select w-fit" id="na-tage" aria-label="Zeitraum" onchange="setzeFilter({...F,tage:this.value})">'
+        '<option value="30">30 Tage</option><option value="90">90 Tage</option>'
+        '<option value="365">1 Jahr</option><option value="0">alles</option></select>'
+        f'<button type="button" class="btn" data-variant="outline" data-size="sm" onclick="abgleichen()">'
+        f'{symbol("refresh-ccw")}Neu abgleichen</button>')
+    filterleiste = (
+        '<div id="filter" class="mt-6 flex flex-wrap items-center gap-2" hidden>'
+        '<span class="text-muted-foreground text-sm">Gefiltert:</span><span id="filter-text" class="badge" data-variant="secondary"></span>'
+        f'<button type="button" class="btn" data-variant="ghost" data-size="sm" onclick="setzeFilter({{tage:F.tage}})">'
+        f'{symbol("funnel-x")}Filter aufheben</button></div>')
+
+    def tab(kennung: str, spalten: list[str]) -> str:
+        return ('<div class="overflow-x-auto"><table class="table"><thead><tr>'
+                + "".join(f"<th>{s}</th>" for s in spalten)
+                + f'</tr></thead><tbody id="{kennung}"><tr><td colspan="{len(spalten)}" '
+                  f'class="text-muted-foreground">lädt…</td></tr></tbody></table></div>')
+    return (
+        kopf("Nacharbeit", "Was Menschen nach einem KI-Lauf geändert haben — laut Änderungshistorie von "
+             "Paperless. Nie angefasste Dokumente zählen als richtig.", zeitraum)
+        + '<p id="na-stand" class="text-muted-foreground text-sm mb-4"></p>'
+        + f'<div class="flex gap-4">{karten}</div>'
+        + filterleiste
+        + abschnitt("Je Feld — Klick filtert die Fälle", tab("na-felder", ["Feld", "Korrigiert", "von Läufen", "Quote", "Art"]))
+        + abschnitt("Je Korrespondent (ab 2 Läufen)", tab("na-korr", ["Korrespondent", "Läufe", "Nachgearbeitet", "Quote"]))
+        + abschnitt("Je Dokumenttyp", tab("na-typ", ["Dokumenttyp", "Läufe", "Nachgearbeitet", "Quote"]))
+        + abschnitt("Je Woche", tab("na-woche", ["Woche", "Läufe", "Nachgearbeitet", "Quote"]))
+        + abschnitt("Fälle", tab("na-faelle", ["Geändert", "Dokument", "Feld", "KI", "Jetzt", "Wer"]),
+                    '<span id="na-anzahl" class="text-muted-foreground text-sm"></span>')
+        + "<script>" + _JS_GRUND + _JS_NACHARBEIT + "</script>"
+    )
+
+
+_JS_NACHARBEIT = r"""
+let F=Object.fromEntries(new URLSearchParams(location.search)); if(!F.tage) F.tage='90';
+function setzeFilter(neu){
+  const q=new URLSearchParams(Object.entries(neu).filter(([k,v])=>v!=null&&v!=='')).toString();
+  history.pushState(neu,'',q?'?'+q:location.pathname); F={tage:'90',...neu}; laden();
+}
+window.addEventListener('popstate',()=>{F=Object.fromEntries(new URLSearchParams(location.search)); if(!F.tage) F.tage='90'; laden()});
+// Filterwert aus data-Attributen: ein Name mit Apostroph bräche ein onclick mit eingesetztem Text.
+function filterAus(el){ setzeFilter({...F,[el.dataset.k]:el.dataset.v}); }
+const ART={'geändert':'warning','ergänzt':'info','geleert':'destructive','entfernt':'destructive'};
+const leer=n=>'<tr><td colspan="'+n+'" class="text-muted-foreground">Keine Einträge.</td></tr>';
+const zahl=v=>'<td class="tabular-nums">'+txt(v)+'</td>';
+const quote=v=>'<td class="tabular-nums font-medium">'+txt(v)+' %</td>';
+const wert=v=>v===null||v===undefined?'<span class="text-muted-foreground">(unbekannt)</span>':(v===''?'<span class="text-muted-foreground">leer</span>':txt(v));
+function gruppe(id,zeilen,schluessel){
+  document.getElementById(id).innerHTML=zeilen.length?zeilen.map(z=>
+    '<tr class="cursor-pointer hover:bg-muted" data-k="'+schluessel+'" data-v="'+txt(z.name)+'" onclick="filterAus(this)">'+
+    '<td>'+txt(z.name)+'</td>'+zahl(z.laeufe)+zahl(z.nachgearbeitet)+quote(z.quote)+'</tr>').join(''):leer(4);
+}
+let warten=null;
+async function laden(){
+  document.getElementById('na-tage').value=F.tage;
+  let d; try{ d=await holen('/api/nacharbeit?'+new URLSearchParams(F)); }
+  catch(e){ document.getElementById('na-stand').textContent=e.message; return; }
+  for(const k of ['laeufe','nachgearbeitet','korrekturen','angefasst']){
+    const el=document.getElementById('na-'+k); el.textContent=d[k]+(k==='nachgearbeitet'&&d.laeufe?' ('+d.quote+' %)':''); }
+  document.getElementById('na-stand').textContent=(d.laeuft?'Abgleich mit Paperless läuft … ':'')+
+    (d.stand?'Stand '+d.stand.replace('T',' ').slice(0,16):'Noch kein Abgleich.')+(d.fehler?' · Letzter Abgleich fehlgeschlagen: '+d.fehler:'');
+  const teile=[]; if(F.feld) teile.push('Feld '+F.feld); if(F.korrespondent) teile.push(F.korrespondent); if(F.typ) teile.push(F.typ);
+  document.getElementById('filter').hidden=!teile.length; document.getElementById('filter-text').textContent=teile.join(' · ');
+  // Felder ohne Korrektur nur als Zeile am Ende: sonst verdecken zwanzig Nullen die drei Treffer.
+  const mit=d.je_feld.filter(z=>z.korrigiert), ohne=d.je_feld.filter(z=>!z.korrigiert);
+  const rest=ohne.length?'<tr><td colspan="5" class="text-muted-foreground text-sm">Ohne Korrektur: '+ohne.map(z=>txt(z.feld)+' ('+z.basis+')').join(', ')+'</td></tr>':'';
+  document.getElementById('na-felder').innerHTML=(mit.length||rest)?mit.map(z=>
+    '<tr class="cursor-pointer hover:bg-muted" data-k="feld" data-v="'+txt(z.feld)+'" onclick="filterAus(this)">'+
+    '<td class="font-medium">'+txt(z.feld)+'</td>'+zahl(z.korrigiert)+zahl(z.basis)+quote(z.quote)+
+    '<td><span class="flex flex-wrap gap-1">'+Object.entries(z.arten).map(([a,n])=>'<span class="badge" data-variant="'+(ART[a]||'outline')+'">'+txt(a)+' '+n+'</span>').join('')+'</span></td></tr>').join('')+rest:leer(5);
+  gruppe('na-korr',d.je_korrespondent,'korrespondent'); gruppe('na-typ',d.je_typ,'typ');
+  document.getElementById('na-woche').innerHTML=d.je_woche.length?d.je_woche.map(z=>
+    '<tr><td class="tabular-nums">'+txt(z.woche)+'</td>'+zahl(z.laeufe)+zahl(z.nachgearbeitet)+quote(z.quote)+'</tr>').join(''):leer(4);
+  const basis=d.paperless||location.origin;
+  document.getElementById('na-anzahl').textContent=d.faelle_gesamt+' Fälle'+(d.faelle_gesamt>d.faelle.length?' (die neuesten '+d.faelle.length+')':'');
+  document.getElementById('na-faelle').innerHTML=d.faelle.length?d.faelle.map(f=>
+    '<tr><td class="whitespace-nowrap tabular-nums text-muted-foreground">'+txt((f.wann||'').replace('T',' ').slice(0,16))+'</td>'+
+    '<td class="whitespace-nowrap"><a class="underline" href="'+txt(basis)+'/documents/'+f.doc+'/details" target="_blank" rel="noopener">#'+f.doc+'</a> · '+
+    '<a class="underline" href="'+txt(PL_BASIS)+'/?doc='+f.doc+'">Lauf</a>'+
+    '<div class="text-muted-foreground text-xs">'+txt(f.korrespondent||'')+(f.typ?' · '+txt(f.typ):'')+'</div></td>'+
+    '<td><span class="badge" data-variant="'+(ART[f.art]||'outline')+'">'+txt(f.feld)+'</span></td>'+
+    '<td>'+wert(f.ki)+'</td><td>'+wert(f.neu)+'</td><td class="text-muted-foreground">'+txt(f.wer)+'</td></tr>').join(''):leer(6);
+  clearTimeout(warten); if(d.laeuft) warten=setTimeout(laden,3000);
+}
+async function abgleichen(){ try{ await senden('/api/nacharbeit/abgleichen',{}); }catch(e){} laden(); }
+laden();
+"""
+
+
 # ---------------------------------------------------------------- Info
 def info() -> str:
     def link(href: str, text: str) -> str:
@@ -594,6 +700,8 @@ def info() -> str:
                 'Mehrfachauswahl: optional ein Hinweis, dann liest paperlaiss das Dokument per OCR neu und '
                 'klassifiziert es neu.</li>'
                 '<li><b>Aktivität</b> — was lief; eine Zeile zeigt den Lauf mit Prompt und Antwort der KI.</li>'
+                '<li><b>Nacharbeit</b> — was Menschen nach der KI geändert haben: Quote je Feld, '
+                'Korrespondent und Typ, dazu jeder einzelne Fall.</li>'
                 '<li><b>Ablauf &amp; Prompt</b> — jeder Schritt mit Eingabe und Ausgabe; der Prompt ist dort bearbeitbar.</li>'
                 '<li><b>Einstellungen</b> — alle Werte mit Erklärung.</li></ul>'))
             + abschnitt("Bausteine und Lizenzen", (

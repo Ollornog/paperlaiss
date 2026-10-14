@@ -719,6 +719,9 @@ def save_trace(did, extra=None):
     try:
         os.makedirs(TRACE_DIR, exist_ok=True)
         t = dict(TRACE); t["id"] = did; t["ts"] = f"{datetime.datetime.now():%F %T}"
+        # ts in Ortszeit (lesbar), ts_utc eindeutig — die Nacharbeit im Panel vergleicht ihn mit der
+        # Paperless-Historie (UTC); die Ortszeit des Containers ist nicht überall dieselbe.
+        t["ts_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
         if extra:
             t.update(extra)
         schreibe_json(os.path.join(TRACE_DIR, f"{did}.json"), t)

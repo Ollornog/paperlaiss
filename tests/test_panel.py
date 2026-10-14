@@ -393,4 +393,13 @@ r.check("Knopf-Endpunkt: nimmt Dokumente nur über die Sperre an (knopf_annehmen
         _knopf is not None and any(isinstance(w, _ast2.With) and "_JOBS_LOCK" in _ast2.unparse(w.items[0].context_expr)
                                    and "knopf_annehmen" in _ast2.unparse(w) for w in _ast2.walk(_knopf)))
 
+# Nacharbeit: die Seite zeigt Feldwerte aus Dokumenten (Beträge, IBAN) — jeder Zugang hinter guard().
+_app = _ast2.parse((ROOT / "panel/app.py").read_text(encoding="utf-8"))
+_na_routen = {f.name: f for f in _ast2.walk(_app) if isinstance(f, _ast2.FunctionDef)
+              and f.name in ("api_nacharbeit", "api_nacharbeit_abgleichen", "nacharbeit_seite")}
+r.check("Nacharbeit: alle drei Zugänge rufen guard() zuerst",
+        len(_na_routen) == 3 and all(
+            isinstance(f.body[0], _ast2.Expr) and getattr(getattr(f.body[0].value, "func", None), "id", None) == "guard"
+            for f in _na_routen.values()))
+
 sys.exit(r.done())

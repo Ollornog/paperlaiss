@@ -32,6 +32,7 @@ from kern import (KORR_FELDER, sperre_oeffnen, korr_anzeige, knopf_annehmen, kno
 import exportlogik
 import exportpdf
 import huelle
+import nacharbeit
 import seiten
 
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
@@ -763,6 +764,125 @@ def api_verlauf(request: Request, tage: int = 30):
     return {"verlauf": verlauf(zeilen, tage=tage, heute=_jetzt().date().isoformat()),
             "auffaelligkeiten": auff[:60],
             "offen": sum(1 for a in auff if not a["geloest"])}
+
+
+# ---------- Nacharbeit: was Menschen nach der KI geändert haben (T-6) ----------
+# Logik in nacharbeit.py; hier nur Holen (Trace + Paperless-Historie) und Speichern. Gespeichert
+# wird, weil ein Trace beim nächsten Lauf desselben Dokuments überschrieben wird — der alte Lauf
+# und seine Korrekturen bleiben so erhalten.
+NACHARBEIT = os.path.join(CLASSIFY_DIR, "nacharbeit.json")
+NACHARBEIT_FRISCH_S = 1800      # älter → beim Öffnen der Seite im Hintergrund neu abgleichen
+_NA_SPERRE = threading.Lock()
+_NA = {"laeuft": False, "fehler": None}
+
+
+def _zone():
+    return (os.environ.get("PAPERLESS_TIME_ZONE") or os.environ.get("TZ") or "").strip()
+
+
+def _alle(pfad):
+    """Alle Seiten einer Paperless-Liste; `next` ist eine volle Adresse, gebraucht wird der Pfad."""
+    aus, weiter = [], pfad
+    while weiter:
+        d = api_get(weiter)
+        aus += d.get("results") or []
+        nxt = d.get("next") or ""
+        weiter = nxt[nxt.index("/api/") + 4:] if "/api/" in nxt else None
+    return aus
+
+
+def _nacharbeit_lesen():
+    try:
+        return json.load(open(NACHARBEIT, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _nacharbeit_lauf():
+    try:
+        zone = _zone()
+        namen = {"correspondent": {str(c["id"]): c["name"] for c in _alle("/correspondents/?page_size=1000&fields=id,name")},
+                 "document_type": {str(t["id"]): t["name"] for t in _alle("/document_types/?page_size=1000&fields=id,name")}}
+        traces = []
+        for p in glob.glob(os.path.join(TRACE_DIR, "*.json")):
+            try:
+                t = json.load(open(p, encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            did = str(t.get("id") or os.path.basename(p)[:-5])
+            if did.isdigit() and nacharbeit.ki_lauf(t):
+                traces.append((int(did), t))
+        doks = {}
+        ids = sorted({d for d, _ in traces})
+        for i in range(0, len(ids), 100):
+            teil = ",".join(map(str, ids[i:i + 100]))
+            for d in _alle(f"/documents/?id__in={teil}&page_size=100&fields=id,title,correspondent,document_type"):
+                doks[d["id"]] = d
+        neu = {}
+        for did, t in traces:
+            d, ende = doks.get(did), nacharbeit.lauf_zeit(t, zone)
+            if not d or not ende:
+                continue            # gelöscht, ohne Leserecht oder Trace ohne Zeit
+            try:
+                hist = api_get(f"/documents/{did}/history/")
+            except Exception:
+                continue
+            ts = ende.isoformat(timespec="seconds")
+            neu[f"{did}@{ts}"] = {
+                "doc": did, "ts": ts, "quelle": t.get("trigger") or "automatisch (Post-Consume)",
+                "titel": d.get("title"),
+                "korrespondent": namen["correspondent"].get(str(d.get("correspondent"))),
+                "typ": namen["document_type"].get(str(d.get("document_type"))),
+                **nacharbeit.korrekturen(t, hist if isinstance(hist, list) else [], namen, zone)}
+        alt = _nacharbeit_lesen().get("laeufe") or {}
+        schreibe_json(NACHARBEIT, {"stand": _jetzt().isoformat(timespec="seconds"),
+                                   "laeufe": nacharbeit.zusammenfuehren(alt, neu)})
+        _NA["fehler"] = None
+    except Exception as e:
+        _NA["fehler"] = repr(e)[:300]
+    finally:
+        _NA["laeuft"] = False
+        _NA_SPERRE.release()
+
+
+def _nacharbeit_anstossen():
+    """Abgleich im Hintergrund starten; läuft schon einer, nichts tun."""
+    if not _NA_SPERRE.acquire(blocking=False):
+        return False
+    _NA["laeuft"] = True
+    threading.Thread(target=_nacharbeit_lauf, daemon=True).start()
+    return True
+
+
+@app.get("/api/nacharbeit")
+def api_nacharbeit(request: Request, tage: int = 90, feld: str = "", korrespondent: str = "", typ: str = ""):
+    guard(request)
+    daten = _nacharbeit_lesen()
+    stand = daten.get("stand")
+    try:
+        alt = (_jetzt() - datetime.datetime.fromisoformat(stand)).total_seconds() if stand else None
+    except (TypeError, ValueError):
+        alt = None
+    if alt is None or alt > NACHARBEIT_FRISCH_S:
+        _nacharbeit_anstossen()
+    erg = nacharbeit.auswertung(list((daten.get("laeufe") or {}).values()),
+                                datetime.datetime.now(datetime.timezone.utc), tage=max(tage, 0),
+                                feld=feld, korrespondent=korrespondent, typ=typ)
+    erg.update({"stand": stand, "laeuft": _NA["laeuft"], "fehler": _NA["fehler"],
+                "paperless": exportlogik.paperless_basis(PAPERLESS_PUBLIC_URL, "", "")})
+    return erg
+
+
+@app.post("/api/nacharbeit/abgleichen", status_code=202)
+def api_nacharbeit_abgleichen(request: Request):
+    guard(request)
+    return {"gestartet": _nacharbeit_anstossen(), "laeuft": True}
+
+
+@app.get("/nacharbeit", response_class=HTMLResponse)
+def nacharbeit_seite(request: Request):
+    guard(request)
+    return seite("Nacharbeit", "/nacharbeit", seiten.nacharbeit())
 
 
 @app.get("/api/config/schema")
