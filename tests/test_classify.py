@@ -1294,6 +1294,43 @@ _rw = _lauf([{**_ok, "document_type": "Rechnung"}], dry=False, typen=_rt, text=_
 r.check("Schreibstelle: ohne feste Zuweisung bleibt die KI-Wahl",
         [p.get("document_type") for p in _rw.get("patch", [])] == [1], str(_rw.get("patch")))
 
+# ---- Feste Zuweisung auch für Korrespondenten (2026-10-14, Seite Nacharbeit): Marktplatz-Rechnungen
+# nennen den Händler, das Archiv führt sie unter der Plattform. Die Zuweisung gewinnt VOR dem Abgleich —
+# sonst legte der Lauf den Händler erst neu an —, und Stammdaten des Händlers landen nicht bei der Plattform.
+_rk = [{"id": 40, "name": "Plattform", "matching_algorithm": 3, "match": "Auf das Konto von Plattform eingezahlt",
+        "is_insensitive": True},
+       {"id": 41, "name": "Grob", "matching_algorithm": 1, "match": "Rechnung", "is_insensitive": True},
+       {"id": 42, "name": "Händler GmbH"}]
+_mk = _gut + " Verkäufer Händler GmbH, UID LT100001158219. Auf das Konto von Plattform\neingezahlt."
+r.check("Korrespondent-Regel: Exakt trifft, „Irgendein Wort“ nicht",
+        (classify.korrespondent_aus_regel(_rk, _mk) or {}).get("name") == "Plattform"
+        and classify.korrespondent_aus_regel(_rk, _gut + " Rechnung") is None)
+classify.TRACE.clear()   # main() leert den Trace nicht (ein Prozess je Dokument), die Tests laufen hintereinander
+_kz = _lauf([{**_ok, "correspondent": "Händler Neu UAB", "absender": {"ustid": "LT100001158219"}}, {"match": None}],
+            dry=False, korrespondenten=_rk, text=_mk)
+r.check("Schreibstelle Korrespondent: Zuweisung schlägt die KI, kein neuer Korrespondent, Trace nennt beides",
+        [p.get("correspondent") for p in _kz.get("patch", [])] == [40]
+        and not any(x[0] == "/correspondents/" for x in _kz.get("send", []))
+        and (classify.TRACE.get("correspondent") or {}).get("vorschlag") == "Händler Neu UAB"
+        and (classify.TRACE.get("correspondent") or {}).get("ergebnis") == "zuweisung='Plattform'",
+        f"patch={_kz.get('patch')} send={_kz.get('send')}")
+r.check("Schreibstelle Korrespondent: keine Händler-Stammdaten bei der Plattform",
+        not classify.TRACE.get("stammdaten"), str(classify.TRACE.get("stammdaten")))
+r.check("Schreibstelle Korrespondent: Titel trägt die Plattform",
+        str((_kz.get("patch") or [{}])[0].get("title") or "").startswith("Plattform"), str(_kz.get("patch")))
+_kn = _lauf([{**_ok, "correspondent": "Händler GmbH"}], dry=False, korrespondenten=_rk, text=_gut + " Rechnung")
+r.check("Schreibstelle Korrespondent: ohne Zuweisung bleibt die KI-Wahl",
+        [p.get("correspondent") for p in _kn.get("patch", [])] == [42], str(_kn.get("patch")))
+
+# Eigene Firma nie als Stammdaten-Kandidat — auch wenn eine ihrer Kennungen in eigene_kennungen fehlt
+# (Telefon im Briefkopf jeder eigenen Ausgangsrechnung; 2026-10-14 landete jede bei der eigenen Firma).
+_eigk = [{"id": 98, "name": "Eigenfirma e.U."}, {"id": 2, "name": "Nord Autoteile"}]
+_eigm = lambda c: {"telefon": "0664 1234567"} if c == 98 else {"telefon": "0662 999888"}
+_eigt = "Eigenfirma - Hauptstraße 5 - Tel. 0664 1234567\nRechnung RE-516 an Kunde Nord Autoteile, Tel. 0662 999888"
+_eigtr = [c["id"] for c, _ in classify.stammdaten_treffer(_eigk, _eigm, _eigt, _eig)]
+r.check("Treffer: eigene Firma ist nie Kandidat, auch bei Kennung außerhalb eigene_kennungen",
+        98 not in _eigtr and 2 in _eigtr, str(_eigtr))
+
 # ---- Kennungen je Konto: im Haushalt ist „wir" nur der Besitzer des Dokuments.
 _haus = {"kennungen_je_konto": True, "eigene_kennungen": {"namen": ["Erika Muster", "Max Muster"]},
          "konten": {"erika": {"iban": ["DE00 1111"]}, "*": {"email": ["post@example.com"]}}}

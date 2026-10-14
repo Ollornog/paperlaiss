@@ -6,6 +6,20 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt — Feste Zuweisung auch für Korrespondenten
+
+- Ein Korrespondent mit Zuweisung „Exakt“ oder „Regulärer Ausdruck“ in Paperless gewinnt vor der KI, wenn der
+  Text im Dokument steht — wie schon beim Dokumenttyp. Kein neuer Korrespondent, keine Stammdaten der KI
+  (sie beschreiben dann den Händler, nicht die Plattform); der Vorschlag der KI bleibt im Trace. Anlass: die
+  Seite Nacharbeit zeigte Marktplatz-Rechnungen, die von Hand vom Händler auf die Plattform umgestellt wurden.
+
+### Behoben — Eigene Firma als Treffer der Vorsuche
+
+- Die Stammdaten-Vorsuche schlug die eigene Firma als harten Kandidaten vor, wenn eine ihrer Kennungen (etwa die
+  Telefonnummer) beim Korrespondenten der eigenen Firma stand, aber nicht in `eigene_kennungen`. Die KI nahm ihn,
+  jede eigene Ausgangsrechnung landete bei der eigenen Firma statt beim Kunden. Ein Korrespondent, dessen Name
+  einen eigenen Namen enthält, ist jetzt nie Kandidat — wie schon bei der Namenssuche.
+
 ### Hinzugefügt — Nacharbeit: was Menschen nach der KI geändert haben (T-6)
 
 - Neue Panel-Seite **Nacharbeit** (`/nacharbeit`): Quote je Feld, je Korrespondent, je Dokumenttyp und je

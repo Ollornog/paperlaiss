@@ -177,6 +177,13 @@ classifier uses it in three ways:
   the `unsicher_tag` on the document if set. The origin (`erfasst`, per value for list fields) is shown in
   the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
+- **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
+  *Exact* or *Regular expression* wins over the model when its text occurs in the document (longest
+  match wins; *Any word*, *All words*, *Fuzzy* and *Auto* stay with the model — they are too coarse).
+  Meant for what the model reliably gets "wrong" by the archive's own convention, e.g. marketplace
+  invoices that name the individual seller but are filed under the platform ("Paid to the account of
+  …"). With a fixed correspondent no new correspondent is created and the model's sender data are not
+  stored with it (they describe the seller). The trace keeps what the model proposed.
 - **Matching the name.** If the name from the analysis matches no correspondent exactly, a second
   message in the same conversation ("Pass 2") asks which similar correspondent is meant — only for
   similar names that pass a fixed name rule (the name is contained in the other, typos only in long
