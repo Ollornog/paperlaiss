@@ -183,7 +183,8 @@ classifier uses it in three ways:
   Meant for what the model reliably gets "wrong" by the archive's own convention, e.g. marketplace
   invoices that name the individual seller but are filed under the platform ("Paid to the account of
   …"). With a fixed correspondent no new correspondent is created and the model's sender data are not
-  stored with it (they describe the seller). The trace keeps what the model proposed.
+  stored with it (they describe the seller). The trace keeps what the model proposed. A correspondent
+  whose name contains one of your own names is never assigned this way — your name is on nearly every document.
 - **Matching the name.** If the name from the analysis matches no correspondent exactly, a second
   message in the same conversation ("Pass 2") asks which similar correspondent is meant — only for
   similar names that pass a fixed name rule (the name is contained in the other, typos only in long

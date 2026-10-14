@@ -12,6 +12,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   Text im Dokument steht — wie schon beim Dokumenttyp. Kein neuer Korrespondent, keine Stammdaten der KI
   (sie beschreiben dann den Händler, nicht die Plattform); der Vorschlag der KI bleibt im Trace. Anlass: die
   Seite Nacharbeit zeigte Marktplatz-Rechnungen, die von Hand vom Händler auf die Plattform umgestellt wurden.
+- Nie die eigene Firma (Name enthält einen eigenen Namen): eine Zuweisung „Exakt: <Inhaber>“ hätte auf einer
+  Installation 664 Dokumente zu diesem Korrespondenten gelegt — gemessen vor dem Ausrollen.
 
 ### Behoben — Eigene Firma als Treffer der Vorsuche
 
