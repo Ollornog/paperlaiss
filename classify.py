@@ -928,6 +928,27 @@ def pass1_schema(typen, feldnamen, mit_tags, mit_absender, mit_summary, mit_tite
     return {"type": "object", "properties": props, "required": pflicht, "additionalProperties": True}
 
 
+def gegenueber_schema():
+    """Rückfrage, wenn Pass 1 uns selbst als Korrespondenten nennt: wer ist der Empfänger?"""
+    return {"type": "object", "properties": {"empfaenger": _NULLBAR("string"), "adresse": _NULLBAR("string")},
+            "required": ["empfaenger", "adresse"], "additionalProperties": False}
+
+
+GEGENUEBER_FRAGE = (
+    "Du hast {NAME} als correspondent genannt — das sind WIR. Steht unser Briefkopf oben, ist das ein Dokument "
+    "VON uns an jemanden (Ausgangsrechnung, Angebot, Gutschrift, Kaufvertrag, Lieferschein): dann ist der "
+    "correspondent der EMPFÄNGER aus dem Adressblock (Person oder Firma, ohne Anrede wie Herrn/Frau). "
+    "Nur bei einem internen Dokument ohne externes Gegenüber (Lohnabrechnung, Überweisungsliste, interne "
+    "Aufstellung) oder wenn kein Empfänger genannt ist (z. B. „Barverkauf“), antworte null. Antworte NUR JSON "
+    "{{\"empfaenger\": <Name oder null>, \"adresse\": <Anschrift des Empfängers oder null>}}.")
+
+
+def ist_eigener_name(name, eigene_namen):
+    """Enthält der Name einen eigenen Namen (Token-Teilmenge, wie bei der Vorsuche)?"""
+    t = set(ctoks(name or ""))
+    return bool(t) and any(n <= t for n in eigene_namen)
+
+
 def pass2_schema(kandidaten):
     """Pass 2 darf nur einen der Kandidaten nennen — oder null."""
     return {"type": "object", "properties": {"match": {"type": ["string", "null"], "enum": list(kandidaten) + [None]}},
@@ -2342,6 +2363,25 @@ def main():
             TRACE["ocr"]["nachlauf_fehler"] = repr(e)
             log(f"OCR-nachgeholt-fail {did}: {e!r}")
     TRACE["pass1"] = {"system": system, "user": user_msg[:4000], "response": prop}
+
+    # --- Wir selbst als Korrespondent? Dann nach dem Empfänger fragen (2026-10-14) ---
+    # Die eingebaute Regel sagt es schon („bei unseren Dokumenten an Kunden der Empfänger“), trotzdem nahm
+    # die KI bei eigenen Ausgangsrechnungen 10 von 14 Mal uns selbst — der Briefkopf wiegt schwerer als die
+    # Regel. Eine gezielte Rückfrage in derselben Unterhaltung trifft. Nur in diesem Fall, ein Aufruf mehr.
+    if ist_eigener_name(prop.get("correspondent"), eigene["namen"]):
+        frage = GEGENUEBER_FRAGE.format(NAME=prop.get("correspondent"))
+        messages.append({"role": "assistant", "content": assistant_raw})
+        messages.append({"role": "user", "content": frage})
+        antwort, assistant_raw = mistral_chat(messages, 200, gegenueber_schema(), "gegenueber")
+        # Die Anrede aus dem Adressblock („Herrn Max Muster“) gehört nicht zum Namen — die KI liess sie trotz
+        # Anweisung einmal von 14 stehen, und „Frau X“ wäre ein zweiter Korrespondent neben „X“.
+        emp = re.sub(r"^(?:Herrn?|Frau|Firma)\s+", "", ohne_tabellenrest(antwort.get("empfaenger")) or "").strip() or None
+        TRACE["gegenueber"] = {"user": frage, "response": antwort}
+        if emp and not ist_eigener_name(emp, eigene["namen"]):
+            TRACE["gegenueber"]["vorher"] = prop.get("correspondent")
+            prop["correspondent"] = emp
+            # Der Absender aus Pass 1 beschreibt dann UNS (Briefkopf) — nie beim Kunden ablegen.
+            prop["absender"] = {"adresse": antwort.get("adresse")} if antwort.get("adresse") else {}
 
     # --- Korrespondent-Feedback-Loop ---
     set_stage(did, "Korrespondent")
