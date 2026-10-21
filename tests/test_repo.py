@@ -419,6 +419,13 @@ r.check("Worker-Zahl paralleler Läufe aus CI_KERNE", not _pw, " | ".join(_pw[:3
 _aw = hygiene.pruefe_audit_workflow(str(ROOT), DATEIEN)
 r.check("Schwachstellen-Tor existiert und ist scharf", not _aw, " | ".join(_aw[:3]))
 
+# Kit 0.35.0 (T-16): Textprüfung (tote Links und Anker, Frontmatter) und der Text-Schnellweg
+# (verdrahtet in scripts/check.sh, Erlaubnisliste nur verengt).
+_tx = hygiene.pruefe_texte(str(ROOT), [d for d in DATEIEN if d.endswith(".md")])
+r.check("Texte: Links, Anker, Frontmatter", not _tx, " | ".join(_tx[:3]))
+_nt = hygiene.pruefe_nur_text(str(ROOT))
+r.check("Text-Schnellweg verdrahtet, Erlaubnisliste nur verengt", not _nt, " | ".join(_nt[:3]))
+
 _ng = hygiene.pruefe_kit_prueffunktionen_gerufen(str(ROOT), ausgenommen={
     "pruefe_extras_imports":
         "kein CI-Job ohne Extras (`minimal`) — die Suite läuft immer mit allen Extras, ein ungeschützter Extra-Import kann hier nicht brechen (Kit 0.24.0, T-9)",

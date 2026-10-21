@@ -6,6 +6,24 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit
+
+- pypdf 6.19.0 → 6.21.1: fünf bekannte Lücken (CVE-2026-113786, -113792 bis -113795; pip-audit im Pflicht-Check `audit` war seit 2026-10-21 rot und blockierte jeden PR).
+
+### Geändert — Testkit 0.36.3: Text-Schnellweg, Textprüfung, Pins der Auto-Merge-Vorlage
+
+- Ändert ein Stand nur Text von der Erlaubnisliste des Kits (`*.md` in der Wurzel, `docs/`, `backlog/`,
+  `changelog.d/`), fährt `scripts/check.sh` nur `tests/test_repo.py` (Hygiene, Links, Anker, Frontmatter) statt der
+  vollen Suite; die Pflicht-Checks laufen weiter und melden grün. Entscheidung: `scripts/_nur_text.sh`, im Zweifel
+  volle Suite.
+- Neue Prüfung auf tote Links und Anker sowie kaputtes Frontmatter in Markdown.
+- Dependabot hebt `actions/create-github-app-token` hier nicht mehr (`ignore`): Den Pin besitzt die Vorlage, er
+  kommt mit `repokit sync`. Vorher wurde jeder solche PR nie grün.
+- Audit-Werkzeuge: certifi 2026.10.19 und uv 0.13.4 (PYSEC-2026-4320/-4321). Die Dependabot-PRs hoben je nur eines
+  der beiden, der Pflicht-Check `audit` blieb auf jedem rot.
+- Boden von pypdf in pyproject auf `>=6.21.1`: Das Audit prüft auch die niedrigste erlaubte Fassung.
+- Panel-Abbild: Pillow 12.3.0 → 13.0.0 (18 CVEs) und certifi 2026.10.19 im Hash-Lock; die Dependabot-PRs dazu blieben am roten Audit hängen.
+
 ### Hinzugefügt — Nacharbeit als Sollliste für eval.py (T-6)
 
 - Knopf „Sollliste“ auf der Seite Nacharbeit (`GET /api/nacharbeit/sollliste?tage=`): je Dokument, bei dem ein
