@@ -6,6 +6,10 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit
+
+- pypdf 6.19.0 → 6.21.1: fünf bekannte Lücken (CVE-2026-113786, -113792 bis -113795; pip-audit im Pflicht-Check `audit` war seit 2026-10-21 rot und blockierte jeden PR).
+
 ### Geändert — Testkit 0.36.3: Text-Schnellweg, Textprüfung, Pins der Auto-Merge-Vorlage
 
 - Ändert ein Stand nur Text von der Erlaubnisliste des Kits (`*.md` in der Wurzel, `docs/`, `backlog/`,
