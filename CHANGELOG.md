@@ -19,6 +19,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - Neue Prüfung auf tote Links und Anker sowie kaputtes Frontmatter in Markdown.
 - Dependabot hebt `actions/create-github-app-token` hier nicht mehr (`ignore`): Den Pin besitzt die Vorlage, er
   kommt mit `repokit sync`. Vorher wurde jeder solche PR nie grün.
+- Audit-Werkzeuge: certifi 2026.10.19 und uv 0.13.4 (PYSEC-2026-4320/-4321). Die Dependabot-PRs hoben je nur eines
+  der beiden, der Pflicht-Check `audit` blieb auf jedem rot.
 
 ### Hinzugefügt — Nacharbeit als Sollliste für eval.py (T-6)
 
