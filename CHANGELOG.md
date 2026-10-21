@@ -21,6 +21,7 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   kommt mit `repokit sync`. Vorher wurde jeder solche PR nie grün.
 - Audit-Werkzeuge: certifi 2026.10.19 und uv 0.13.4 (PYSEC-2026-4320/-4321). Die Dependabot-PRs hoben je nur eines
   der beiden, der Pflicht-Check `audit` blieb auf jedem rot.
+- Boden von pypdf in pyproject auf `>=6.21.1`: Das Audit prüft auch die niedrigste erlaubte Fassung.
 
 ### Hinzugefügt — Nacharbeit als Sollliste für eval.py (T-6)
 

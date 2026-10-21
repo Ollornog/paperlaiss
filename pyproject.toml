@@ -23,7 +23,7 @@ panel = [
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.31",
     # Export-Knopf: Zusammenfügen/Links/Lesezeichen und die Seiten des Inhaltsverzeichnisses.
-    "pypdf>=6.19",
+    "pypdf>=6.21.1",
     "reportlab>=5.0",
 ]
 
