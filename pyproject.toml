@@ -7,7 +7,7 @@ readme = "README.md"
 # werden die drei neuesten stable Python-Reihen, wie in allen Projekten des Hauses. Mit einer
 # neuen Python-Reihe steigt die Untergrenze mit — gewollt, nicht versehentlich. Gemessen läuft
 # classify.py auch unter 3.8 (T-3), zugesagt wird das nicht.
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 keywords = ["paperless", "paperless-ngx", "document-classification", "mistral", "ocr", "self-hosted"]
 
