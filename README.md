@@ -7,7 +7,7 @@
 <p align="right">
 <a href="https://github.com/Ollornog/paperlaiss/actions/workflows/ci.yml"><img src="https://github.com/Ollornog/paperlaiss/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-informational.svg" alt="License: MIT"></a>
-<img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python">
+<img src="https://img.shields.io/badge/python-3.13%2B-blue.svg" alt="Python">
 </p>
 
 > 🚧 **Work in progress** — under active development; interfaces and structure may still change before a stable `1.0` release.
@@ -56,7 +56,7 @@ tenant-specific.
    PAPERLESS_POST_CONSUME_SCRIPT=/path/to/classify.py
    ```
    (Paperless sets `DOCUMENT_ID`.) The Python standard library is enough — no extra packages.
-   Supported are the three most recent stable Python releases (currently 3.12–3.14); the minimum
+   Supported are the three most recent stable Python releases (currently 3.13–3.15); the minimum
    rises with each new Python release on purpose.
 
 ## Manual runs and testing

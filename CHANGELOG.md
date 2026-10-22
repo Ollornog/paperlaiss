@@ -6,6 +6,10 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert — Python 3.13–3.15 (Testkit 0.37.0)
+
+- Die Matrix fährt 3.13/3.14/3.15, `requires-python` ist `>=3.13` (die letzten drei stable Python-Reihen; 3.15.0 erschien am 2026-10-09).
+
 ### Sicherheit
 
 - pypdf 6.19.0 → 6.21.1: fünf bekannte Lücken (CVE-2026-113786, -113792 bis -113795; pip-audit im Pflicht-Check `audit` war seit 2026-10-21 rot und blockierte jeden PR).
