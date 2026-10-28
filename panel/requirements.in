@@ -7,5 +7,7 @@ fastapi==0.146.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 tinysesam[oidc,argon2]==0.24.13
-pypdf[crypto]==6.21.1
+# authlib kommt über tinysesam (verlangt nur >=1.6.12); 1.8.x trägt bekannte Lücken.
+authlib==1.9.1
+pypdf[crypto]==6.21.3
 reportlab==5.0.1
