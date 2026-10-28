@@ -14,6 +14,7 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 - pypdf 6.21.1 → 6.21.3, Boden in pyproject `>=6.21.2`: drei bekannte Lücken (CVE-2026-115572, -115580, -115585;
   Pflicht-Check `audit` war rot).
+- authlib 1.8.0 → 1.9.1 (kommt über tinysesam): sechs bekannte Lücken, ebenfalls im `audit`.
 - pypdf 6.19.0 → 6.21.1: fünf bekannte Lücken (CVE-2026-113786, -113792 bis -113795; pip-audit im Pflicht-Check `audit` war seit 2026-10-21 rot und blockierte jeden PR).
 
 ### Geändert — Testkit 0.36.3: Text-Schnellweg, Textprüfung, Pins der Auto-Merge-Vorlage
