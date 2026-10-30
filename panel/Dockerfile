@@ -1,7 +1,7 @@
 # Per DIGEST gepinnt, nicht per Tag: `python:3.14-slim` zeigt heute hierhin und morgen woanders —
 # zwei Bauläufe desselben Commits ergäben verschiedene Abbilder. Dependabot (docker, /panel) hebt
 # den Digest; ein Basisabbild-Wechsel wird von Hand gemergt.
-FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
+FROM python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8
 # Schrift für das Inhaltsverzeichnis des Export-Knopfs: DejaVu Sans deckt Umlaute, €, Ost- und
 # Südosteuropäisches, Griechisch und Kyrillisch ab (ohne sie fällt exportpdf.py auf Helvetica zurück,
 # die nur Windows-1252 kann).
