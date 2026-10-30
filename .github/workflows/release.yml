@@ -2,8 +2,14 @@ name: Release
 
 # Ein Tag löst aus. Die Reihenfolge ist Absicht: erst prüfen, dann testen, dann bauen,
 # dann veröffentlichen. Ein Release mit falscher Nummer ist schlimmer als keins —
-# es ist unauffällig falsch. Veröffentlicht wird das Panel-Image; der Klassifizierer
-# selbst ist eine stdlib-only Datei, die man einhängt, kein Abbild.
+# es ist unauffällig falsch. Veröffentlicht werden das Panel-Abbild und die Skripte, die man in
+# Paperless einhängt (classify.py, Vorab-Schritte, Knöpfe), als Release-Anhänge mit SHA256SUMS.
+# Abbild und Anhänge sind über Sigstore BEGLAUBIGT (Provenance: wer hat es wann aus welchem Commit
+# gebaut). Prüfen:
+#   gh attestation verify oci://ghcr.io/ollornog/paperlaiss:vX.Y.Z --owner Ollornog
+#   sha256sum -c SHA256SUMS && gh attestation verify classify.py --owner Ollornog
+# Aufteilung wie in TinySesam: Wer eine Identität hält (`id-token`, `contents: write`), checkt nichts
+# aus und startet keinen fremden Code — er lädt nur fertige Artefakte bzw. kennt nur den Digest.
 on:
   push:
     tags: ["v*"]
@@ -72,8 +78,10 @@ jobs:
     needs: pruefen
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # gh release create
+      contents: read
       packages: write   # Panel-Abbild nach ghcr
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -149,6 +157,13 @@ jobs:
           # Bauen immer (das ist der Teil, der bisher nur beim Tag lief), schieben nur beim Tag.
           push: ${{ github.ref_type == 'tag' }}
           tags: ghcr.io/${{ env.OWNER_LC }}/paperlaiss:${{ env.ABBILD_TAG }}
+          # BuildKits eigene Provenance ist UNSIGNIERT und beweist nicht, worauf es ankommt; die
+          # beglaubigte kommt aus `abbild-beglaubigen`. Das Label verknüpft das Paket mit dem Repo.
+          provenance: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.ABBILD_TAG }}
+            org.opencontainers.image.licenses=MIT
       - name: "Generalprobe: bauen und in die Wegwerf-Registry schieben"
         id: probe
         if: github.ref_type != 'tag'
@@ -158,6 +173,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: localhost:5000/paperlaiss:generalprobe
+          provenance: false
 
       # Angekommen ist erst, was die Registry unter dem Digest kennt — mit beiden Plattformen.
       - name: "Generalprobe: Abbild in der Wegwerf-Registry nachlesen"
@@ -178,17 +194,126 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: echo "ghcr.io/${OWNER_LC}/paperlaiss@${DIGEST}"
 
-      # ⚠️ NUR beim Tag. Bis 2026-09-24 hing das allein an `--verify-tag`, einem Nebeneffekt.
+  # Die Skripte, die man in Paperless einhängt, als einzelne Release-Anhänge. Nur Lesen: Dieser Job
+  # checkt aus, also hält er keine Identität. Die Dateien kommen aus dem Commit des Tags, unverändert.
+  skripte:
+    needs: pruefen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Skripte zusammenstellen und Prüfsummen bilden
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp classify.py deploy/vorab/vorab.py deploy/vorab/leerseiten.py deploy/vorab/mailbilder.py \
+             deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh deploy/paperless-knoepfe/paperlaiss-knoepfe.js dist/
+          # Namen ohne ./ — so stehen sie auch als Subjekt in der Beglaubigung.
+          cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - name: Skripte weitergeben
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: skripte
+          path: dist/
+          if-no-files-found: error
+
+  # Die Anhänge so, wie `release` sie bekommt: heruntergeladen und gegen die Prüfsummen gehalten —
+  # dieselbe Prüfung wie beim Nutzer (`sha256sum -c`), auch auf jedem PR.
+  pruefsummen:
+    needs: skripte
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: skripte
+          path: dist
+      - name: Prüfsummen gegen die heruntergeladenen Dateien
+        run: |
+          cd dist
+          [ "$(grep -c . SHA256SUMS)" = "6" ] || { echo "SHA256SUMS nennt nicht genau sechs Dateien"; exit 1; }
+          sha256sum -c SHA256SUMS
+
+  # ⚠️ NUR beim Tag. Kein Checkout, kein pip: lädt die fertigen Anhänge, beglaubigt sie, legt das
+  # Release an. Bis 2026-09-24 hing das allein an `--verify-tag`, einem Nebeneffekt.
+  release:
+    needs: [veroeffentlichen, pruefsummen]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # Release anlegen, Dateien anhängen
+      id-token: write      # Sigstore-Identität für die Beglaubigung
+      attestations: write  # Beglaubigung an GitHub übergeben
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: skripte
+          path: dist
+      # Beglaubigt VOR dem Veröffentlichen, genau über die Bytes aus `skripte` (die Liste in SHA256SUMS).
+      - name: Herkunft der Anhänge beglaubigen
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
       - name: Release anlegen
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ needs.veroeffentlichen.outputs.digest }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag \
+          set -euo pipefail
+          [ -n "$DIGEST" ] || { echo "kein Digest vom Bau"; exit 1; }
+          OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes "Panel-Abbild: \`ghcr.io/${OWNER_LC}/paperlaiss:${GITHUB_REF_NAME}\`
 
-          Digest: \`${DIGEST}\`
+          Digest: \`${DIGEST}\` (unveränderlich pinnen: \`ghcr.io/${OWNER_LC}/paperlaiss@${DIGEST}\`)
+
+          Skripte zum Einhängen in Paperless: die Anhänge, geprüft mit \`sha256sum -c SHA256SUMS\`.
+          Herkunft: \`gh attestation verify <datei> --owner ${GITHUB_REPOSITORY_OWNER}\` bzw.
+          \`gh attestation verify oci://ghcr.io/${OWNER_LC}/paperlaiss:${GITHUB_REF_NAME} --owner ${GITHUB_REPOSITORY_OWNER}\`.
 
           Änderungen: siehe [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)"
+
+  # Beglaubigung des Abbilds — getrennt vom Bau aus demselben Grund: die Identität lebt nur in einem
+  # Job, der weder auscheckt noch baut. Er kennt nur den Digest. Die Beglaubigung liegt danach auch
+  # in der Registry neben dem Abbild.
+  abbild-beglaubigen:
+    needs: veroeffentlichen
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write      # Beglaubigung neben das Abbild in die Registry legen
+      id-token: write      # Sigstore-Identität
+      attestations: write  # Beglaubigung an GitHub übergeben
+    steps:
+      - name: Registry-Namen kleinschreiben
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Herkunft des Abbilds beglaubigen
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ env.OWNER_LC }}/paperlaiss
+          subject-digest: ${{ needs.veroeffentlichen.outputs.digest }}
+          push-to-registry: true
+
+  # Generalprobe der Beglaubigung: dieselbe Action wie am Tag, nur über eine Probedatei. Kein
+  # Checkout, kein fremder Code außer der Action selbst; so nimmt ein Pflicht-Check auch ihre
+  # Dependabot-Updates ab.
+  generalprobe-beglaubigen:
+    needs: pruefsummen
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write      # Sigstore-Identität wie am Tag
+      attestations: write  # Probe-Beglaubigung an GitHub übergeben
+    steps:
+      - name: "Generalprobe: Probedatei"
+        run: echo "paperlaiss Generalprobe ${GITHUB_SHA} — kein Artefakt" > generalprobe.txt
+      - name: "Generalprobe: Herkunft beglaubigen"
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: generalprobe.txt

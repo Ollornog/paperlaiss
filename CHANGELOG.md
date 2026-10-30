@@ -6,6 +6,45 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
+Erster veröffentlichter Stand. Die Versionsnummer 0.1.0 stand seit dem Bootstrap (2026-07-12) in
+`pyproject.toml`, wurde aber nie getaggt; dieser Release nimmt alles seitdem auf. In `0.x` darf
+MINOR brechen — die Brüche gegenüber dem Bootstrap stehen unter „Upgrade-Hinweise“.
+
+### Hinzugefügt — Überblick
+
+- **Klassifizierer** (`classify.py`, stdlib-only, `POST_CONSUME_SCRIPT`): eine KI-Unterhaltung für
+  Typ, Titel, Datum, Felder und Korrespondent, geerdet gegen den Bestand; JSON-Schema-Antwort,
+  Prompt-Caching, OCR-Fallback mit Regeln, Stammdaten der Korrespondenten, eigene Firma und
+  Kennnummern, feste Zuweisungen aus Paperless.
+- **Panel** (FastAPI, Abbild `ghcr.io/ollornog/paperlaiss`): Aktivität, Ablauf & Prompt,
+  Stammdaten, Nacharbeit mit Sollliste für `eval.py`, Anmeldung über TinySesam (OIDC), unter einem
+  Unterpfad (`PANEL_PFAD`), ohne root (uid 1000).
+- **Knöpfe in Paperless** ohne Fork: KI, OCR, Export (ein PDF oder einzeln, mit
+  Inhaltsverzeichnis), Stammdaten im Korrespondenten-Dialog, Link zum Panel.
+- **Vorab-Schritte** (`PRE_CONSUME_SCRIPT`): weiße Seiten entfernen, Mails als Dokument mit Kopf
+  und großen Bildern.
+
+### Geändert — Upgrade-Hinweise
+
+- Python **≥ 3.13** für `classify.py` und die Vorab-Skripte (Matrix 3.13–3.15).
+- Das Panel läuft als uid/gid 1000: root-eigene Dateien in `scripts/` und `auth/` einmal auf
+  1000 umschreiben (Abschnitt „Panel läuft ohne root“ unten).
+- Der Vorschlagsmodus ist entfernt; „Neu klassifizieren“ schreibt direkt.
+
+### Hinzugefügt — Release-Weg: Abbild, Skripte als Anhänge, Prüfsummen, Beglaubigung
+
+- Ein Tag `v*` veröffentlicht das Panel-Abbild `ghcr.io/ollornog/paperlaiss:<tag>` für
+  `linux/amd64` und `linux/arm64` (genau ein Tag, kein `latest`, Digest in den Release-Notizen).
+- Die Skripte, die man in Paperless einhängt (`classify.py`, `vorab.py`, `leerseiten.py`,
+  `mailbilder.py`, `10-paperlaiss-knoepfe.sh`, `paperlaiss-knoepfe.js`), hängen als einzelne Dateien
+  am Release, mit `SHA256SUMS`.
+- Abbild und Anhänge sind über Sigstore beglaubigt (`gh attestation verify … --owner Ollornog`).
+  Wer die Identität hält, checkt nicht aus und startet keinen fremden Code (Prüfung in
+  `tests/test_repo.py`). Auf jedem Pull Request laufen Bau, Prüfsummen und eine Probe-Beglaubigung
+  als Generalprobe.
+
 ### Geändert — Python 3.13–3.15 (Testkit 0.37.0)
 
 - Die Matrix fährt 3.13/3.14/3.15, `requires-python` ist `>=3.13` (die letzten drei stable Python-Reihen; 3.15.0 erschien am 2026-10-09).
@@ -1121,14 +1160,7 @@ Verworfene Entscheidungen werden nicht gelöscht, sondern bekommen `status: verw
   `Icon: … PNG Image by … - flaticon.com`. `flaticon.com` ist damit ein erlaubter Attributions-Host
   in der Hygiene.
 
-## [0.1.0] - 2026-07-12
-
-> **Nicht veröffentlicht.** Diese Version beschreibt den Stand vom 2026-07-12 und entspricht der
-> Versionsnummer in `pyproject.toml`, aber es wurde **kein Tag und kein Release gezogen** — das ist
-> Absicht, solange das Projekt den WIP-Banner trägt. Der erste Tag folgt, wenn es etwas Releasbares
-> gibt; bis dahin ist `main` der Stand.
-
-### Hinzugefügt
+### Hinzugefügt — Grundstock vom 2026-07-12 (Bootstrap)
 
 - **Klassifizierer** (`classify.py`): grounded Dokumenten-Klassifizierer für Paperless-ngx als
   Ersatz für paperless-ai. Stdlib-only, mandantenunabhängig (Feld-/Tag-Auflösung per Name).

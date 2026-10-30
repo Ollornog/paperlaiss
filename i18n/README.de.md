@@ -181,6 +181,14 @@ root), wie der Paperless-Worker mit der Vorgabe von `USERMAP_UID`/`USERMAP_GID`;
 ab, bekommt das Panel dasselbe `user:`. Update von einer Fassung, deren Panel als root lief: siehe
 Upgrade-Hinweis im [Changelog](../CHANGELOG.md).
 
+**Releases** ([GitHub-Releases](https://github.com/Ollornog/paperlaiss/releases)): Jeder Tag
+veröffentlicht das Panel-Abbild `ghcr.io/ollornog/paperlaiss:<tag>` (`linux/amd64`, `linux/arm64`;
+kein `latest`, den Digest aus den Release-Notizen pinnen) und hängt die Skripte an, die man in
+Paperless einhängt (`classify.py`, die Vorab-Schritte, die Knopf-Dateien), samt `SHA256SUMS`. Beides
+ist beglaubigt: `sha256sum -c SHA256SUMS`, dann `gh attestation verify classify.py --owner Ollornog`
+bzw. `gh attestation verify oci://ghcr.io/ollornog/paperlaiss:<tag> --owner Ollornog`. Abbild und
+Skripte aus demselben Release nehmen.
+
 ### Knöpfe in Paperless (optional)
 
 Ein Knopf **KI** (Zauberstab: optional ein Hinweis, dann liest paperlaiss das Dokument per

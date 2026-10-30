@@ -203,6 +203,56 @@ r.check("repository_owner steht nicht in der tags-Zeile",
 r.check("Release prüft den Tag gegen die Paketversion", "Tag und Paketversion" in release)
 r.check("Release nutzt gh release create --verify-tag", "--verify-tag" in release)
 
+
+def _release_jobs(text: str) -> dict[str, str]:
+    """Job-Name → Text des Jobs (ohne Kommentare), textuell wie das Kit (kein PyYAML im ci-Abbild)."""
+    jobs: dict[str, str] = {}
+    name = None
+    in_jobs = False
+    for ln in text.splitlines():
+        code = re.sub(r"(^|\s)#.*$", "", ln)
+        if re.match(r"^jobs:", code):
+            in_jobs = True
+            continue
+        if not in_jobs:
+            continue
+        m = re.match(r"^  ([A-Za-z_][\w-]*):\s*$", code)
+        if m:
+            name = m.group(1)
+            jobs[name] = ""
+        elif name:
+            jobs[name] += code + "\n"
+    return jobs
+
+
+def identitaet_mit_fremdcode(text: str) -> list[str]:
+    """Jobs, die eine Identität halten (id-token/contents: write) UND auschecken oder Code starten."""
+    befunde = []
+    for name, rumpf in _release_jobs(text).items():
+        if re.search(r"id-token:\s*write|contents:\s*write", rumpf) and \
+                re.search(r"actions/checkout|\bpip\b|\bpython3?\b|check\.sh", rumpf):
+            befunde.append(name)
+    return befunde
+
+
+# Seit 0.1.0: Anhänge mit SHA256SUMS und Beglaubigung (Muster TinySesam). Wer eine Identität hält,
+# checkt nicht aus und startet keinen fremden Code — sonst könnte jede Abhängigkeit eine
+# Beglaubigung für ein beliebiges Artefakt fälschen.
+_idf = identitaet_mit_fremdcode(release)
+r.check("kein Job mit Identität checkt aus oder startet Code", not _idf, str(_idf))
+r.check("Selbsttest — ein Job mit id-token und Checkout fiele auf",
+        identitaet_mit_fremdcode("jobs:\n  x:\n    permissions:\n      id-token: write\n"
+                                 "    steps:\n      - uses: actions/checkout@abc\n") == ["x"])
+_rj = _release_jobs(release)
+r.check("Release beglaubigt die Anhänge über SHA256SUMS",
+        "subject-checksums: dist/SHA256SUMS" in _rj.get("release", ""))
+r.check("Abbild wird beglaubigt und die Beglaubigung liegt in der Registry",
+        "attest-build-provenance" in _rj.get("abbild-beglaubigen", "")
+        and "push-to-registry: true" in _rj.get("abbild-beglaubigen", ""))
+r.check("Prüfsummen werden auf jedem Lauf gegen die Dateien gehalten",
+        "sha256sum -c SHA256SUMS" in _rj.get("pruefsummen", "")
+        and "if:" not in _rj.get("pruefsummen", ""))
+
 # ---- Jede Suite läuft im Sammellauf mit
 sammel = hygiene.pruefe_run_all_sammelt_automatisch(str(ROOT))
 r.check("run_all.py findet die Suiten automatisch", not sammel, " | ".join(sammel))

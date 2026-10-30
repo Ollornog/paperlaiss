@@ -31,6 +31,8 @@ services:
 
   panel:
     build: ./panel
+    # Oder das fertige Abbild eines Releases (Tag = Release, kein latest; Digest aus den Notizen):
+    # image: ghcr.io/ollornog/paperlaiss:<tag>@sha256:<digest>
     container_name: paperlaiss-panel
     restart: unless-stopped
     ports:
