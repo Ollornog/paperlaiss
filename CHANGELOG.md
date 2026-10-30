@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-30
+
+### Sicherheit
+
+- Panel-Abbild auf `python:3.14-slim` mit Python 3.14.10 (vorher 3.14.8): CVE-2026-115557 (kritisch, CPython).
+  Sonst unverändert; die Skripte als Anhänge sind byte-gleich mit 0.1.0.
+
 ## [0.1.0] - 2026-10-30
 
 Erster veröffentlichter Stand. Die Versionsnummer 0.1.0 stand seit dem Bootstrap (2026-07-12) in
