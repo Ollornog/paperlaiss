@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-04
+
 ### Geändert
 
 - Testkit 0.40.0: Text-Schnellweg im pre-push vor ci-local, Auto-Merge-Vorlage mit `create-github-app-token` v3.3.0.
