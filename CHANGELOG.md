@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit
+
+- pypdf 6.21.4 (Panel-Abbild) und Boden `pypdf>=6.21.4` in `pyproject.toml`: 6.21.2 und 6.21.3 tragen
+  CVE-2026-119203 bis -119209, das Schwachstellen-Tor (`audit`) war rot.
+- joserfc 1.7.6 im Panel-Abbild (kam über tinysesam/authlib als 1.7.5): CVE-2026-119284.
+
 ## [0.1.1] - 2026-10-30
 
 ### Sicherheit
