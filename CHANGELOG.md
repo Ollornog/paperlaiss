@@ -6,6 +6,10 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert
+
+- Testkit 0.40.0: Text-Schnellweg im pre-push vor ci-local, Auto-Merge-Vorlage mit `create-github-app-token` v3.3.0.
+
 ### Sicherheit
 
 - pypdf 6.21.4 (Panel-Abbild) und Boden `pypdf>=6.21.4` in `pyproject.toml`: 6.21.2 und 6.21.3 tragen
