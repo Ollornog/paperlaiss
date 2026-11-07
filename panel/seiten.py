@@ -89,7 +89,7 @@ function tabelle(obj,kopf){
       if(v&&typeof v==='object'&&!Array.isArray(v)) rein(v,vor+k+' · '); else zeilen.push([vor+k,v]); } };
   rein(obj,'');
   if(!zeilen.length) return '<p class="text-muted-foreground">—</p>';
-  return '<div class="overflow-x-auto"><table class="table"><thead><tr><th>'+txt((kopf||['Feld','Wert'])[0])+'</th><th>'+txt((kopf||['Feld','Wert'])[1])+'</th></tr></thead><tbody>'+
+  return '<div class="overflow-x-auto"><table class="table" data-wrap><thead><tr><th>'+txt((kopf||['Feld','Wert'])[0])+'</th><th>'+txt((kopf||['Feld','Wert'])[1])+'</th></tr></thead><tbody>'+
     zeilen.map(([k,v])=>'<tr><td class="whitespace-nowrap font-medium">'+txt(k)+'</td><td>'+wertText(v)+'</td></tr>').join('')+'</tbody></table></div>';
 }
 // Eingabe und Ausgabe als eigene, abgesetzte Kästen mit farbigem Etikett — wie die Input-/Output-
@@ -97,32 +97,12 @@ function tabelle(obj,kopf){
 function klapp(titel,inhalt,offen){
   const m=/^(Eingabe|Ausgabe)(?: — )?(.*)$/.exec(titel), art=m?m[1]:'', rest=m?m[2]:titel;
   const etikett=art?'<span class="badge" data-variant="'+(art==='Eingabe'?'info':'success')+'">'+art+'</span>':'';
-  // Die ersten drei Zeilen stehen immer da; ist mehr Text da, blendet er nach unten aus
-  // (Maske statt Farbverlauf: kommt ohne Farbwert aus) und „… mehr anzeigen" klappt ihn auf.
-  // Sonderweg: C22 hat weder line-clamp noch eine Ausblende-Klasse (C22-Backlog T-9).
-  const klemme=offen?'':' data-klemme style="'+KLEMME+'"';
+  // Die ersten drei Zeilen stehen immer da; ist mehr Text da, blendet C22 ihn nach unten aus und zeigt den Knopf.
   return '<div class="min-w-0 rounded-lg border bg-background/70">'+
     '<div class="flex items-center gap-3 px-4 py-3 font-medium">'+etikett+'<span>'+txt(rest)+'</span></div>'+
-    '<div class="grid min-w-0 gap-2 border-t p-4">'+
-    // Klemme als Block, der Inhalt als Grid darin: Wäre die Klemme selbst ein Grid, schrumpfte ein
-    // innerer Scrollbereich auf ihre Höhe — dann gäbe es nie einen Überhang zu messen.
-    '<div class="min-w-0 overflow-hidden leading-relaxed"'+klemme+'><div class="grid min-w-0 gap-3">'+inhalt+'</div></div>'+
-    '<button type="button" class="btn w-fit" data-variant="ghost" data-size="sm" hidden onclick="aufklemmen(this)">… mehr anzeigen</button></div></div>';
-}
-const KLEMME='max-height:5.6em;mask-image:linear-gradient(to bottom,black 60%,transparent)';
-// Nach dem Zeichnen messen: Wo alles in drei Zeilen passt, fällt die Klemme weg (kein Ausblenden,
-// kein Knopf); sonst erscheint der Knopf. Messen geht erst, wenn die Kästen im Dokument stehen.
-function klemmen(wurzel){
-  for(const k of wurzel.querySelectorAll('[data-klemme]')){
-    const knopf=k.nextElementSibling;
-    if(k.scrollHeight>k.clientHeight+2){ knopf.hidden=false; }
-    else { k.removeAttribute('style'); k.removeAttribute('data-klemme'); }
-  }
-}
-function aufklemmen(knopf){
-  const k=knopf.previousElementSibling, zu=k.hasAttribute('data-klemme');
-  if(zu){ k.removeAttribute('style'); k.removeAttribute('data-klemme'); knopf.textContent='weniger anzeigen'; }
-  else { k.setAttribute('style',KLEMME); k.setAttribute('data-klemme',''); knopf.textContent='… mehr anzeigen'; }
+    '<div class="text-clamp min-w-0 border-t p-4" data-lines="3"'+(offen?' data-open':'')+'>'+
+    '<div class="min-w-0 leading-relaxed" data-clamp-body><div class="grid min-w-0 gap-3">'+inhalt+'</div></div>'+
+    '<button type="button" class="btn w-fit" data-variant="ghost" data-size="sm" data-clamp-toggle aria-expanded="false" data-more="… mehr anzeigen" data-less="weniger anzeigen" hidden>… mehr anzeigen</button></div></div>';
 }
 function schritt(o){
   // Auslöser oben (jeder mit Symbol) und Ende unten (Haken oder Kreuz), mit Luft zum Rand.
@@ -135,7 +115,7 @@ function schritt(o){
   const badge=(SYMG[a[2]]||'')+'<span class="badge"'+(a[1]?' data-variant="'+a[1]+'"':'')+'>'+a[0]+'</span>';
   const erg=o.ergebnis?'<span class="badge" data-variant="'+(o.variante||'outline')+'">'+txt(o.ergebnis)+'</span>':'';
   // Regeln als Tabelle „Wenn → Dann" in normaler Schrift — Plaketten mit Text waren schwer zu lesen.
-  const regeln=(o.regeln||[]).length?'<div class="overflow-x-auto"><table class="table"><thead><tr><th>Wenn</th><th>Dann</th></tr></thead><tbody>'+
+  const regeln=(o.regeln||[]).length?'<div class="overflow-x-auto"><table class="table" data-wrap><thead><tr><th>Wenn</th><th>Dann</th></tr></thead><tbody>'+
     o.regeln.map(r=>'<tr><td>'+txt(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</tbody></table></div>':'';
   const stand=(o.stand||[]).length?'<p class="text-muted-foreground text-xs">Aktuell: '+o.stand.map(x=>txt(x[0])+' <b>'+txt(x[1])+'</b>').join(' · ')+'</p>':'';
   // min-w-0: ein Grid-Kind ist sonst so breit wie sein längster Inhalt, Code liefe aus der Karte.
@@ -254,26 +234,24 @@ function seiten(s,n){
 // Seitenverhältnis (320×180): voll breit würde es riesig hoch und die Beschriftung überlappte.
 // Sonderweg aus C22-Farben (bg-success/info/destructive/muted) — Diagramm mit einstellbarer
 // Höhe ist im C22-Backlog gemeldet. Die Höhen sind Daten (style), keine Gestaltung.
-const SERIEN=[['klassifiziert','Klassifiziert','bg-success'],['ocr','OCR','bg-info'],['fehler','Fehler','bg-destructive'],['uebersprungen','Übersprungen','bg-muted-foreground']];
+const SERIEN=[['klassifiziert','Klassifiziert','success'],['ocr','OCR','info'],['fehler','Fehler','destructive'],['uebersprungen','Übersprungen','muted-foreground']];
+// Tage ohne Aufzeichnung bleiben als leere Plätze stehen, damit die Achse immer 60 Tage zeigt.
+function verlaufDiagramm(tage){
+  return {type:'stacked',height:160,selectable:true,legend:true,
+    labels:tage.map(t=>t.tag.slice(8)+'.'+t.tag.slice(5,7)+'.'),
+    series:SERIEN.map(([k,n,c])=>({name:n,color:c,data:tage.map(t=>t[k]||0)}))};
+}
 async function verlauf(){
   let d; try{ d=await holen('/api/verlauf?tage=60'); }catch(e){ return; }
   const tage=d.verlauf||[], el=document.getElementById('verlauf');
-  const max=Math.max(1,...tage.map(t=>SERIEN.reduce((a,[k])=>a+(t[k]||0),0)));
-  const saeulen=tage.map((t,i)=>{
-    // Vor der ersten Logzeile gab es keine Aufzeichnung — leerer Platz, kein Filter.
-    if(t.vor_beginn) return '<span class="flex h-full flex-1" title="'+txt(t.tag+': vor Beginn der Aufzeichnung')+'"></span>';
-    const teile=SERIEN.filter(([k])=>t[k]).map(([k,n,c])=>'<div class="'+c+'" style="height:'+(t[k]/max*100)+'%"></div>').join('');
-    const summe=SERIEN.reduce((a,[k])=>a+(t[k]||0),0);
-    const titel=t.tag+': '+(summe?SERIEN.filter(([k])=>t[k]).map(([k,n])=>n+' '+t[k]).join(', '):'nichts');
-    return '<button type="button" class="flex h-full flex-1 cursor-pointer flex-col justify-end rounded-t-sm hover:bg-muted" title="'+txt(titel)+'" onclick="setzeFilter({...F,tag:\''+t.tag+'\'})">'+teile+'</button>';
-  }).join('');
-  const achse=tage.map((t,i)=>'<span class="flex-1 text-center text-muted-foreground text-xs">'+((i%7===0||i===tage.length-1)?t.tag.slice(8)+'.'+t.tag.slice(5,7)+'.':'')+'</span>').join('');
-  const legende=SERIEN.map(([k,n,c])=>'<span class="flex items-center gap-1"><span class="size-2 rounded-sm '+c+'"></span>'+n+'</span>').join('');
   const erster=tage.find(t=>!t.vor_beginn), seit=(erster&&tage[0].vor_beginn)
     ?'<div class="mt-1 text-center text-muted-foreground text-xs">Aufzeichnung seit '+erster.tag.slice(8)+'.'+erster.tag.slice(5,7)+'.'+erster.tag.slice(0,4)+'</div>':'';
-  el.innerHTML='<div class="flex h-40 w-full items-end gap-0.5 border-b">'+saeulen+'</div>'+
-    '<div class="mt-1 flex w-full gap-0.5">'+achse+'</div>'+seit+
-    '<div class="mt-3 flex flex-wrap justify-center gap-4 text-muted-foreground text-xs">'+legende+'</div>';
+  el.innerHTML='<div class="w-full"></div>'+seit;
+  const bild=el.firstChild;
+  bild.dataset.chart=JSON.stringify(verlaufDiagramm(tage));
+  bild.addEventListener('c22:chart-select',e=>{ const t=tage[e.detail.index]; if(t&&!t.vor_beginn) setzeFilter({...F,tag:t.tag}); });
+  // Lief c22.js (defer) noch nicht, verdrahtet es beim Start alle [data-chart] selbst.
+  if(window.C22) C22.wireChart(bild);
 }
 async function laufend(){
   try{ const d=await holen('/api/running'); const el=document.getElementById('laufend');
@@ -331,7 +309,7 @@ async function lauf(doc){
     text:(w.document_type?'Typ: '+txt(w.document_type)+' · ':'')+(felder.length?felder.length+' Felder':'')+((t.repair||[]).length?' · Korrekturrunden: '+t.repair.length:'')+(t.error?' · '+txt(t.error):''),
     klappen:[['Ausgabe — geschrieben',tabelle(w),true]]});
   L.push({art:'grenze',ende:true,fehler:!!t.error,titel:t.error?'Abgebrochen':'Ende'});
-  ziel.innerHTML=kette(L); klemmen(ziel);
+  ziel.innerHTML=kette(L);
 }
 setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterval(()=>{ if(!document.getElementById('lauf').open) laden(); },30000);
 """
@@ -482,7 +460,7 @@ function zeichnen(){
       was:'Optional: Ein eigenes Skript bekommt das Ergebnis, etwa für eine Verknüpfung in ein anderes System.',
       text:CFG.nachbearbeitung?'Eingerichtet: <b>'+txt(CFG.nachbearbeitung)+'</b>':'Nicht eingerichtet.'},
     {art:'grenze',ende:true,titel:'Ende'}];
-  const sch=document.getElementById('schritte'); sch.innerHTML=kette(L); klemmen(sch);
+  const sch=document.getElementById('schritte'); sch.innerHTML=kette(L);
 }
 async function laden(){
   try{ CFG=await holen('/api/config'); }catch(e){}
@@ -507,8 +485,8 @@ function promptEditor(){
     '<div id="p-vorschau">'+teileHtml(V.system_teile,V.platzhalter)+'</div>';
 }
 function promptAuf(){
-  const t=document.getElementById('prompt-vorlage'), k=t.closest('[data-klemme]');
-  if(k) aufklemmen(k.nextElementSibling);
+  const t=document.getElementById('prompt-vorlage'), k=t.closest('.text-clamp');
+  if(k&&!k.hasAttribute('data-open')) k.querySelector(':scope > [data-clamp-toggle]').click();
   t.value=V.vorlage||'';
   document.getElementById('p-editor').hidden=false; document.getElementById('p-titel').hidden=false;
   document.getElementById('p-auf').hidden=true; t.focus();
