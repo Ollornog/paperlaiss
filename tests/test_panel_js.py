@@ -35,6 +35,25 @@ if node:
         Path(f.name).unlink()
         r.check(f"Seite {name}: {len(skripte)} Skript(e), Syntax gültig",
                 bool(skripte) and lauf.returncode == 0, lauf.stderr.strip()[:300])
+    # Die Kette kommt als ol.flow aus C22: die Pfeile zeichnet das Stylesheet, ein Eintrag je Schritt.
+    probe = (seiten._JS_GRUND + seiten._JS_SCHRITTE_FERTIG + """
+;const html = kette([
+  {art: 'grenze', ausloeser: []},
+  {phase: 'A', art: 'code', titel: 'a1'}, {phase: 'A', art: 'code', titel: 'a2'},
+  {phase: 'B', art: 'code', titel: 'b1'},
+  {art: 'grenze', ende: true, titel: 'Ende'},
+]);
+const zahl = m => (html.match(m) || []).length;
+console.log(JSON.stringify({listen: zahl(/<ol class="flow">/g), eintraege: zahl(/<li>/g), aussen: html.startsWith('<ol class="flow"><li>'), pfeile: zahl(/arrow-down/g)}));
+""")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(probe)
+    lauf = subprocess.run([node, f.name], capture_output=True, text=True)
+    Path(f.name).unlink()
+    kette = lauf.stdout.strip()
+    # Außen 4 Einträge (Auslöser, A, B, Ende), innen 2 und 1; drei Listen.
+    r.check("Ablauf: Kette ist ol.flow ohne eigene Pfeile",
+            kette == '{"listen":3,"eintraege":7,"aussen":true,"pfeile":0}', kette or lauf.stderr.strip()[:300])
     # Das Knopf-Skript in Paperless (KI, Export, Korrespondenten-Abschnitt): reines JS ohne Bau,
     # ein Syntaxfehler nähme Paperless alle Knöpfe — Paperless selbst liefe weiter, still ohne sie.
     knoepfe = ROOT / "deploy" / "paperless-knoepfe" / "paperlaiss-knoepfe.js"

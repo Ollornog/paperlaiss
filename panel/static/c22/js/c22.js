@@ -2043,8 +2043,15 @@
     var N = labels.length;
     var grid = cfg.grid !== false;
     var axis = !!cfg.axis;
+    // Drawing box. Default: a fixed 320x180 that scales with the width, so the text scales too.
+    // With `height` (px) or `aspect` (width/height) one unit is one CSS pixel: the text keeps its
+    // size at any width, and the chart redraws itself when the width changes.
+    var inPixels = cfg.height != null || cfg.aspect != null;
+    var VB_W = inPixels ? (root.clientWidth || CH_W) : CH_W;
+    var VB_H = inPixels ? Math.round(cfg.height || VB_W / cfg.aspect) : CH_H;
+    var fs = inPixels ? 12 : 10;
     var padL = axis ? 42 : 14, padR = 14, padT = 14, padB = 26;
-    var x0 = padL, x1 = CH_W - padR, y0 = padT, y1 = CH_H - padB;
+    var x0 = padL, x1 = VB_W - padR, y0 = padT, y1 = VB_H - padB;
     var band = (x1 - x0) / N;
     function xc(i) { return x0 + band * (i + 0.5); }
 
@@ -2057,7 +2064,7 @@
     for (var t = 0; t <= ticks; t++) {
       var val = max * t / ticks, gy = yv(val);
       if (grid) s += '<line x1="' + x0 + '" y1="' + gy.toFixed(1) + '" x2="' + x1 + '" y2="' + gy.toFixed(1) + '" stroke="var(--border)" stroke-width="1"/>';
-      if (axis) s += chText(padL - 6, gy + 3, chNum(val), 'end', 10);
+      if (axis) s += chText(padL - 6, gy + 3, chNum(val), 'end', fs);
     }
     if (axis) s += '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + y1 + '" stroke="var(--muted-foreground)" stroke-width="1"/>';
 
@@ -2100,10 +2107,16 @@
       series.forEach(function (se, si) { s += '<circle data-focus-dot="' + si + '" r="4.5" fill="var(--background)" stroke="' + chCol(se.color, si) + '" stroke-width="2.5" opacity="0"/>'; });
     }
 
-    if (cfg.xLabels !== false) for (var i = 0; i < N; i++) s += chText(xc(i), y1 + 16, labels[i], 'middle', 10);
+    // In pixels the labels would collide on a narrow band, so only every n-th one is drawn.
+    var xStep = 1;
+    if (inPixels) {
+      var longest = labels.reduce(function (a, l) { return Math.max(a, String(l).length); }, 1);
+      xStep = Math.max(1, Math.ceil((longest * fs * 0.62 + 6) / band));
+    }
+    if (cfg.xLabels !== false) for (var i = 0; i < N; i += xStep) s += chText(xc(i), y1 + 16, labels[i], 'middle', fs);
     for (var i = 0; i < N; i++) s += '<rect data-hit="' + i + '" x="' + (x0 + band * i).toFixed(1) + '" y="' + y0 + '" width="' + band.toFixed(1) + '" height="' + (y1 - y0) + '" fill="transparent"/>';
 
-    var m = chMount(root, cfg, '<svg viewBox="0 0 ' + CH_W + ' ' + CH_H + '" style="display:block;width:100%" fill="none">' + s + '</svg>');
+    var m = chMount(root, cfg, '<svg viewBox="0 0 ' + VB_W + ' ' + VB_H + '" style="display:block;width:100%" fill="none">' + s + '</svg>');
     var svgEl = m.svgEl, tip = m.tip;
     var catRects = [].slice.call(svgEl.querySelectorAll('rect[data-cat]'));
     var focusLine = svgEl.querySelector('[data-focus-line]');
@@ -2116,7 +2129,7 @@
       var topVal = type === 'stacked'
         ? series.reduce(function (a, se) { return a + (se.data[i] || 0); }, 0)
         : Math.max.apply(null, series.map(function (se) { return se.data[i] || 0; }));
-      chPlace(tip, svgEl, root, xc(i), yv(topVal), CH_W, CH_H);
+      chPlace(tip, svgEl, root, xc(i), yv(topVal), VB_W, VB_H);
       catRects.forEach(function (r) { r.style.opacity = (+r.getAttribute('data-cat') === i) ? '1' : '0.3'; });
       if (focusLine) { focusLine.setAttribute('x1', xc(i)); focusLine.setAttribute('x2', xc(i)); focusLine.setAttribute('opacity', '0.5'); }
       focusDots.forEach(function (d, si) { d.setAttribute('cx', xc(i)); d.setAttribute('cy', yv(series[si].data[i] || 0)); d.setAttribute('opacity', '1'); });
@@ -2128,6 +2141,42 @@
       focusDots.forEach(function (d) { d.setAttribute('opacity', '0'); });
     }
     chHover(svgEl, show, hide, cfg);
+    if (cfg.selectable) chSelectable(root, svgEl, labels, series);
+    if (inPixels) chRedrawOnWidth(root, cfg, VB_W);
+  }
+
+  // `selectable: true`: a category is a button. Click, Enter or Space send `c22:chart-select` with
+  // { index, label, values } from the chart element; the app decides what follows.
+  function chSelectable(root, svgEl, labels, series) {
+    function melde(i) {
+      root.dispatchEvent(new CustomEvent('c22:chart-select', {
+        bubbles: true,
+        detail: { index: i, label: labels[i], values: series.map(function (se) { return { name: se.name, value: se.data[i] }; }) },
+      }));
+    }
+    [].slice.call(svgEl.querySelectorAll('[data-hit]')).forEach(function (h, i) {
+      h.setAttribute('tabindex', '0');
+      h.setAttribute('role', 'button');
+      h.setAttribute('aria-label', String(labels[i]));
+      h.style.cursor = 'pointer';
+      h.addEventListener('click', function () { melde(i); });
+      h.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        melde(i);
+      });
+    });
+  }
+  // One observer per chart element, however often it redraws. A hidden tab panel has width 0: the
+  // chart draws at the default width and redraws as soon as the panel opens.
+  function chRedrawOnWidth(root, cfg, drawnAt) {
+    root.c22ChartWidth = drawnAt;
+    if (root.c22ChartObserver || !window.ResizeObserver) return;
+    root.c22ChartObserver = new ResizeObserver(function () {
+      var w = root.clientWidth;
+      if (w && Math.abs(w - root.c22ChartWidth) >= 1) chartCartesian(root, cfg);
+    });
+    root.c22ChartObserver.observe(root);
   }
 
   // Zeichenkasten runder Charts: so groß, wie die Geometrie WIRKLICH reicht. Ein angeschnittener
@@ -3060,4 +3109,367 @@ document.addEventListener('basecoat:initialized', function (e) {
 
   window.C22 = window.C22 || {};
   window.C22.initTocs = wireAlle;
+})();
+
+/* ============================================================================
+ * Application frame, filter bar, table with levels, closable alerts, countdown, confirm
+ *
+ * Everything below is delegated from the document (works for markup that htmx swaps in later and
+ * needs no initialisation), and every state lives in an attribute the CSS reads, so a redesign
+ * does not touch this file. Markup contracts are documented in the matching partials:
+ * sidebar.html, filter-bar.html, blocks/tables/merge-table.html, alert.html, alert-dialog.html.
+ * ========================================================================== */
+(function () {
+  'use strict';
+
+  function store(key, value) {
+    try {
+      if (value === undefined) return localStorage.getItem(key);
+      localStorage.setItem(key, value);
+    } catch (e) { /* private window or blocked storage: the frame still works, it just forgets */ }
+    return null;
+  }
+
+  // ---- Panel next to the rail -----------------------------------------------
+  // <aside class="sidebar" data-variant="panel" [data-panel-persist="key"]> uses the open/close API
+  // Basecoat's sidebar.js registers. [data-panel-toggle] flips it; `data-panel-toggle="#id"` names
+  // the panel, otherwise the one inside the same .app-frame counts. Below md the panel is a sheet.
+  var PANEL = '.sidebar[data-variant="panel"]';
+  var MOBILE = window.matchMedia ? window.matchMedia('(max-width: 47.999rem)') : { matches: false };
+
+  function panelOf(btn) {
+    var sel = btn.getAttribute('data-panel-toggle');
+    if (sel) return document.querySelector(sel);
+    var frame = btn.closest('.app-frame');
+    return frame ? frame.querySelector(PANEL) : btn.closest(PANEL);
+  }
+  function panelKey(panel) {
+    var key = panel.getAttribute('data-panel-persist');
+    return key ? 'c22-panel:' + key : null;
+  }
+  function syncToggles(panel) {
+    var offen = panel.getAttribute('aria-hidden') !== 'true';
+    document.querySelectorAll('[data-panel-toggle]').forEach(function (btn) {
+      if (panelOf(btn) === panel) btn.setAttribute('aria-expanded', String(offen));
+    });
+  }
+  // The stored state must be in place before Basecoat initialises the panel on DOMContentLoaded;
+  // this deferred script runs just before that, so the panel does not open and close again.
+  function applyStored(panel) {
+    var key = panelKey(panel);
+    if (key && !MOBILE.matches && store(key) === 'closed') {
+      panel.setAttribute('data-initial-open', 'false');
+      if (typeof panel.close === 'function') panel.close();
+    }
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-panel-toggle]');
+    if (!btn) return;
+    var panel = panelOf(btn);
+    if (!panel || typeof panel.toggle !== 'function') return;
+    // A toggle INSIDE the panel only ever closes: on small screens Basecoat's own click handler has
+    // already closed it for this same click, and a blind toggle would open it right back up.
+    if (panel.contains(btn)) panel.close(); else panel.toggle();
+    var key = panelKey(panel);
+    if (key && !MOBILE.matches) store(key, panel.getAttribute('aria-hidden') === 'true' ? 'closed' : 'open');
+    syncToggles(panel);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || !MOBILE.matches) return;
+    document.querySelectorAll(PANEL + '[aria-hidden="false"]').forEach(function (panel) {
+      if (typeof panel.close === 'function') { panel.close(); syncToggles(panel); }
+    });
+  });
+  function followViewport() {
+    document.querySelectorAll(PANEL).forEach(function (panel) {
+      if (typeof panel.close !== 'function') return;
+      var key = panelKey(panel);
+      if (MOBILE.matches || (key && store(key) === 'closed')) panel.close(); else panel.open();
+      syncToggles(panel);
+    });
+  }
+  if (MOBILE.addEventListener) MOBILE.addEventListener('change', followViewport);
+  function startPanels() {
+    document.querySelectorAll(PANEL).forEach(applyStored);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startPanels, { once: true, capture: true });
+  else startPanels();
+
+  // ---- Filter bar -----------------------------------------------------------
+  // A <button aria-pressed> toggles; `data-single` on the group releases its siblings. Links
+  // (server filters) carry aria-current and are simply followed. Apps listen to `c22:filter`.
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.filter-bar button[aria-pressed]');
+    if (!btn) return;
+    var gedrueckt = btn.getAttribute('aria-pressed') !== 'true';
+    var gruppe = btn.closest('[data-single]');
+    if (gruppe && gedrueckt) {
+      gruppe.querySelectorAll('button[aria-pressed="true"]').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+    }
+    btn.setAttribute('aria-pressed', String(gedrueckt));
+    btn.dispatchEvent(new CustomEvent('c22:filter', { bubbles: true, detail: { pressed: gedrueckt, value: btn.getAttribute('data-value') } }));
+  });
+
+  // ---- Table with levels ----------------------------------------------------
+  // Selection by clicking a row: data-state="selected" on the <tr>, a click on a merged cell
+  // takes all rows it spans, shift extends. Clicks on controls inside a row stay theirs, and so
+  // does selecting text to copy it. Apps listen to `c22:selection`, values come from data-value.
+  var TABLE = '.table[data-variant="levels"][data-selectable]';
+  var anker = new WeakMap();
+
+  function zeilenVon(zelle) {
+    var tr = zelle.parentElement;
+    var alle = Array.prototype.slice.call(tr.parentElement.rows);
+    var start = alle.indexOf(tr);
+    return alle.slice(start, start + zelle.rowSpan);
+  }
+  function setze(tr, an) {
+    if (an) { tr.setAttribute('data-state', 'selected'); tr.setAttribute('aria-selected', 'true'); }
+    else { tr.removeAttribute('data-state'); tr.setAttribute('aria-selected', 'false'); }
+  }
+  function meldeAuswahl(table) {
+    table.querySelectorAll('td[data-merged]').forEach(function (td) {
+      var voll = zeilenVon(td).every(function (tr) { return tr.getAttribute('data-state') === 'selected'; });
+      if (voll) td.setAttribute('data-state', 'selected'); else td.removeAttribute('data-state');
+    });
+    var zeilen = Array.prototype.slice.call(table.querySelectorAll('tbody tr[data-state="selected"]'));
+    table.dispatchEvent(new CustomEvent('c22:selection', {
+      bubbles: true,
+      detail: { rows: zeilen, values: zeilen.map(function (tr) { return tr.getAttribute('data-value'); }) },
+    }));
+  }
+  function waehle(table, tr, zelle, erweitern) {
+    if (zelle && zelle.hasAttribute('data-merged')) {
+      var bereich = zeilenVon(zelle);
+      var alleAn = bereich.every(function (z) { return z.getAttribute('data-state') === 'selected'; });
+      bereich.forEach(function (z) { setze(z, !alleAn); });
+    } else if (erweitern && anker.get(table) && anker.get(table).parentElement === tr.parentElement) {
+      var rows = Array.prototype.slice.call(tr.parentElement.rows);
+      var von = rows.indexOf(anker.get(table)), bis = rows.indexOf(tr);
+      rows.slice(Math.min(von, bis), Math.max(von, bis) + 1).forEach(function (z) { setze(z, true); });
+    } else {
+      setze(tr, tr.getAttribute('data-state') !== 'selected');
+      anker.set(table, tr);
+    }
+    meldeAuswahl(table);
+  }
+  document.addEventListener('click', function (e) {
+    var ziel = e.target;
+    var table = ziel.closest && ziel.closest(TABLE);
+    if (!table || ziel.closest('a, button, input, select, textarea, label, summary')) return;
+    var tr = ziel.closest('tbody tr');
+    if (!tr) return;
+    var auswahl = window.getSelection && window.getSelection();
+    if (auswahl && !auswahl.isCollapsed && String(auswahl).length) return;
+    waehle(table, tr, ziel.closest('td'), e.shiftKey);
+  });
+  // Shift extends the selection of rows, not the browser's text selection (which would cancel the click).
+  document.addEventListener('mousedown', function (e) {
+    if (e.shiftKey && e.target.closest && e.target.closest(TABLE + ' tbody tr')) e.preventDefault();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    var tr = e.target;
+    if (!tr.matches || !tr.matches(TABLE + ' tbody tr')) return;
+    e.preventDefault();
+    waehle(tr.closest('table'), tr, null, e.shiftKey);
+  });
+
+  // ---- Closable alert -------------------------------------------------------
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.alert > .btn-close');
+    if (!btn) return;
+    var alert = btn.closest('.alert');
+    alert.dispatchEvent(new CustomEvent('c22:dismiss', { bubbles: true }));
+    alert.remove();
+  });
+
+  // ---- Countdown ------------------------------------------------------------
+  // <strong data-countdown="<unix seconds>" data-countdown-text="Beginn in :rest"
+  //         data-countdown-done="Jetzt" data-unit-h="Std." data-unit-m="Min." data-unit-s="Sek."></strong>
+  function restText(el, sek) {
+    var h = Math.floor(sek / 3600), m = Math.floor((sek % 3600) / 60), s = sek % 60;
+    var eh = el.getAttribute('data-unit-h') || 'h', em = el.getAttribute('data-unit-m') || 'min', es = el.getAttribute('data-unit-s') || 's';
+    if (h > 0) return h + ' ' + eh + ' ' + m + ' ' + em;
+    if (m > 0) return m + ' ' + em + ' ' + s + ' ' + es;
+    return s + ' ' + es;
+  }
+  function tick() {
+    document.querySelectorAll('[data-countdown]').forEach(function (el) {
+      var rest = Math.floor(Number(el.getAttribute('data-countdown')) - Date.now() / 1000);
+      el.textContent = rest > 0
+        ? (el.getAttribute('data-countdown-text') || ':rest').replace(':rest', restText(el, rest))
+        : (el.getAttribute('data-countdown-done') || '');
+    });
+  }
+  setInterval(tick, 1000);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick, { once: true });
+  else tick();
+
+  // ---- Confirm: a <dialog> instead of confirm() ------------------------------
+  // form[data-confirm="Text"] or any [data-confirm="Text"] button/link. Optional, on the trigger:
+  // data-confirm-title, data-confirm-ok, data-confirm-cancel, data-confirm-variant="destructive".
+  // Page-wide default labels (for the translation): the same attributes on <html>.
+  var ICON = 'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  var WARNUNG = '<svg data-icon-lu="triangle-alert" ' + ICON + '><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  var bestaetigt = new WeakSet();
+  var dialogEl = null;
+
+  function text(quelle, name, ersatz) {
+    return quelle.getAttribute(name) || document.documentElement.getAttribute(name) || ersatz;
+  }
+  function baueDialog() {
+    if (dialogEl) return dialogEl;
+    dialogEl = document.createElement('dialog');
+    dialogEl.className = 'alert-dialog';
+    dialogEl.setAttribute('data-confirm-dialog', '');
+    dialogEl.setAttribute('aria-labelledby', 'c22-confirm-title');
+    dialogEl.innerHTML = '<div><header><figure hidden>' + WARNUNG + '</figure>' +
+      '<h2 id="c22-confirm-title"></h2><p></p></header>' +
+      '<footer><button type="button" class="btn" data-variant="outline" data-confirm-no></button>' +
+      '<button type="button" class="btn" data-confirm-yes></button></footer></div>';
+    document.body.appendChild(dialogEl);
+    dialogEl.addEventListener('click', function (e) { if (e.target === dialogEl) dialogEl.close(); });
+    return dialogEl;
+  }
+  function frage(quelle, weiter) {
+    var d = baueDialog();
+    var gefahr = quelle.getAttribute('data-confirm-variant') === 'destructive';
+    d.querySelector('h2').textContent = text(quelle, 'data-confirm-title', 'Bitte bestätigen');
+    d.querySelector('header p').textContent = quelle.getAttribute('data-confirm');
+    d.querySelector('figure').hidden = !gefahr;
+    var nein = d.querySelector('[data-confirm-no]'), ja = d.querySelector('[data-confirm-yes]');
+    nein.textContent = text(quelle, 'data-confirm-cancel', 'Abbrechen');
+    ja.textContent = text(quelle, 'data-confirm-ok', 'Bestätigen');
+    if (gefahr) ja.setAttribute('data-variant', 'destructive'); else ja.setAttribute('data-variant', 'primary');
+    nein.onclick = function () { d.close(); };
+    ja.onclick = function () { d.close(); weiter(); };
+    d.showModal();
+    nein.focus();
+  }
+  // For behaviour outside the markup contract (htmx's hx-confirm, for one): the same dialog from code.
+  // options: { title, ok, cancel, variant }, empty values fall back to the defaults on <html>.
+  window.C22 = window.C22 || {};
+  window.C22.confirm = function (message, onConfirm, options) {
+    var quelle = document.createElement('div');
+    quelle.setAttribute('data-confirm', message);
+    Object.keys(options || {}).forEach(function (name) {
+      if (options[name]) quelle.setAttribute('data-confirm-' + name, options[name]);
+    });
+    frage(quelle, onConfirm);
+  };
+
+  // Capture phase: htmx and Basecoat must not see the first click or submit at all.
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('[data-confirm]');
+    if (!el || el.tagName === 'FORM' || el.tagName === 'DIALOG') return;
+    if (bestaetigt.has(el)) { bestaetigt.delete(el); return; }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    frage(el, function () { bestaetigt.add(el); el.click(); });
+  }, true);
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form.matches || !form.matches('form[data-confirm]')) return;
+    if (bestaetigt.has(form)) { bestaetigt.delete(form); return; }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    var knopf = e.submitter;
+    frage(form, function () {
+      bestaetigt.add(form);
+      if (form.requestSubmit) form.requestSubmit(knopf || undefined); else form.submit();
+    });
+  }, true);
+})();
+
+/* Text preview (components/text-clamp.html). The clamp only applies once this script has measured
+ * the block, so without JS nothing is cut off and out of reach. */
+(function () {
+  function wire(box) {
+    if (box.hasAttribute('data-ready')) return;
+    var body = box.querySelector(':scope > [data-clamp-body]');
+    if (!body) return;
+    box.setAttribute('data-ready', '');
+    var measure = function () { measureClamp(box, body); };
+    measure();
+    if (window.ResizeObserver) new ResizeObserver(measure).observe(body);
+    body.addEventListener('load', measure, true);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+  }
+  function measureClamp(box, body) {
+    if (box.hasAttribute('data-open')) return;
+    var fits = body.scrollHeight <= body.clientHeight + 1;
+    box.toggleAttribute('data-fits', fits);
+    var btn = box.querySelector(':scope > [data-clamp-toggle]');
+    if (btn) btn.hidden = fits;
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-clamp-toggle]');
+    if (!btn) return;
+    var box = btn.closest('.text-clamp');
+    var open = !box.hasAttribute('data-open');
+    box.toggleAttribute('data-open', open);
+    btn.setAttribute('aria-expanded', String(open));
+    var label = btn.getAttribute(open ? 'data-less' : 'data-more');
+    if (label) btn.textContent = label;
+    if (!open) measureClamp(box, box.querySelector(':scope > [data-clamp-body]'));
+  });
+  function wireAll(root) {
+    (root.querySelectorAll ? root : document).querySelectorAll('.text-clamp').forEach(wire);
+    if (root.matches && root.matches('.text-clamp')) wire(root);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { wireAll(document); });
+  } else {
+    wireAll(document);
+  }
+  new MutationObserver(function (muts) {
+    muts.forEach(function (m) {
+      Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) wireAll(n); });
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  window.C22 = window.C22 || {};
+  window.C22.initClamps = wireAll;
+})();
+
+/* Printable block (components/print-block.html). A copy of the block goes straight under <body>:
+ * deep in a grid, a card or a scroll container it would be cut off on paper. The dark class leaves
+ * <html> while printing, so the `dark:` rules let go as well and the sheet is black on white. */
+(function () {
+  var state = null;
+  function cleanup() {
+    if (!state) return;
+    state.copy.remove();
+    document.documentElement.removeAttribute('data-print-selection');
+    if (state.dark) document.documentElement.classList.add('dark');
+    state = null;
+  }
+  function printBlock(block) {
+    cleanup();
+    var copy = block.cloneNode(true);
+    copy.removeAttribute('id');
+    copy.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+    if (copy.tagName === 'DETAILS') copy.open = true;
+    copy.querySelectorAll('details').forEach(function (d) { d.open = true; });
+    copy.setAttribute('data-print-copy', '');
+    copy.classList.add('print-sheet');
+    document.body.appendChild(copy);
+    var html = document.documentElement;
+    state = { copy: copy, dark: html.classList.contains('dark') };
+    html.classList.remove('dark');
+    html.setAttribute('data-print-selection', '');
+    window.print();
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-print]');
+    if (!btn) return;
+    var block = btn.closest('[data-printable]');
+    if (block) printBlock(block);
+  });
+  window.addEventListener('afterprint', cleanup);
+  // afterprint does not fire everywhere, the end of the print media query does.
+  if (window.matchMedia) {
+    var media = window.matchMedia('print');
+    if (media.addEventListener) media.addEventListener('change', function (e) { if (!e.matches) cleanup(); });
+  }
 })();

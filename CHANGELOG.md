@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert
+
+- Ablauf und Lauf-Popup zeichnen die Kette mit dem C22-Baustein `ol.flow` statt mit eigenen Pfeilen.
+- C22 auf den Stand von `main` nachgezogen (Pack vega, `c22.js`).
+- `scripts/vendor-c22.sh` holt den Lizenztext der Schrift (`OFL.txt`) aus C22.
+
 ## [0.1.2] - 2026-11-04
 
 ### Geändert

@@ -27,7 +27,7 @@ done
 mkdir -p "$ziel/css" "$ziel/js" "$ziel/fonts"
 cp "$css" "$ziel/css/c22.css"
 cp "$quelle/c22/static/js/basecoat.all.min.js" "$quelle/c22/static/js/c22.js" "$ziel/js/"
-cp "$quelle/c22/static/fonts/inter.woff2" "$ziel/fonts/"
+cp "$quelle/c22/static/fonts/inter.woff2" "$quelle/c22/static/fonts/OFL.txt" "$ziel/fonts/"
 
 stand="$(git -C "$quelle" describe --tags --always)"
 sha="$(git -C "$quelle" rev-parse HEAD)"
