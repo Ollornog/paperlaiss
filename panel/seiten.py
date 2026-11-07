@@ -52,7 +52,7 @@ function md(roh){
 # Sonderformen), Titel, Regeln „wenn … → …", und zum Aufklappen Eingabe und Ausgabe — bei KI-
 # Schritten der Prompt und die Antwort.
 _JS_SCHRITTE = r"""
-const CHEV=%CHEV%, CHEVK=%CHEVK%, SYMA=%SYMA%, PFEIL_K=%PFEILK%, PFEIL_I=%PFEILI%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
+const CHEV=%CHEV%, CHEVK=%CHEVK%, SYMA=%SYMA%, SYME=%SYME%, SYM=%SYM%, SYMG=%SYMG%, SYMK=%SYMK%;
 const ART={paperless:['Paperless','info','inbox'],code:['paperlaiss','outline','settings-2'],ki:['KI','','bot'],ocr:['Mistral-OCR','','file-text'],entscheidung:['Entscheidung','outline','git-branch'],grenze:['','','']};
 // Eingesetzte Werte und Platzhalter farbig hinterlegt — so sieht man, was fest im Prompt steht
 // und was je Dokument eingesetzt wird (Muster aus Prompt-Editoren wie Langfuse).
@@ -146,18 +146,19 @@ function schritt(o){
     '<section class="grid min-w-0 gap-4">'+(o.was?'<p class="text-muted-foreground">'+o.was+'</p>':'')+(o.text?'<p>'+o.text+'</p>':'')+regeln+stand+klappen+'</section></div>';
 }
 // Ein Schritt ist ein Container um alles, was zu ihm gehört: aufeinanderfolgende Einträge mit
-// derselben Phase werden zu einem nummerierten Schritt zusammengefasst, darin kleine Pfeile.
+// derselben Phase werden zu einem nummerierten Schritt zusammengefasst. Die Pfeile zeichnet C22 (ol.flow).
 function kette(liste){
+  const liste_html=teile=>'<ol class="flow">'+teile.map(t=>'<li>'+t+'</li>').join('')+'</ol>';
   const gruppen=[];
   for(const o of liste){ const g=gruppen[gruppen.length-1];
     if(o.phase&&g&&g.phase===o.phase) g.teile.push(o); else gruppen.push({phase:o.phase,teile:[o]}); }
   let n=0;
-  return gruppen.map(g=>{
-    if(!g.phase) return g.teile.map(schritt).join(PFEIL_K);
+  return liste_html(gruppen.flatMap(g=>{
+    if(!g.phase) return g.teile.map(schritt);
     return '<div class="card shadow-md"><header><h2 class="flex items-center gap-3 text-base font-semibold">'+
       '<span class="text-muted-foreground tabular-nums">'+(++n)+'</span>'+txt(g.phase)+'</h2></header>'+
-      '<section class="grid min-w-0">'+g.teile.map(schritt).join(PFEIL_I)+'</section></div>';
-  }).join(PFEIL_K);
+      '<section class="grid min-w-0">'+liste_html(g.teile.map(schritt))+'</section></div>';
+  }));
 }
 """
 
@@ -893,10 +894,6 @@ def _json(x):
 
 _JS_SCHRITTE_FERTIG = (_JS_SCHRITTE.replace("%CHEV%", _json(symbol("chevron-down")))
                        .replace("%CHEVK%", _json(symbol("chevron-down", "size-4 shrink-0 text-muted-foreground")))
-                       .replace("%PFEILK%", _json('<div class="flex justify-center py-3 text-muted-foreground">'
-                                                  + symbol("arrow-down", "size-14") + "</div>"))
-                       .replace("%PFEILI%", _json('<div class="flex justify-center py-2 text-muted-foreground">'
-                                                  + symbol("arrow-down", "size-8") + "</div>"))
                        .replace("%SYMG%", _json({n: symbol(n, "size-6 shrink-0 text-muted-foreground")
                                                  for n in ("inbox", "settings-2", "bot", "file-text", "git-branch",
                                                            "file-plus", "message-square", "layout-dashboard", "list")}))
