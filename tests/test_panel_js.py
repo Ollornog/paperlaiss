@@ -54,6 +54,42 @@ console.log(JSON.stringify({listen: zahl(/<ol class="flow">/g), eintraege: zahl(
     # Außen 4 Einträge (Auslöser, A, B, Ende), innen 2 und 1; drei Listen.
     r.check("Ablauf: Kette ist ol.flow ohne eigene Pfeile",
             kette == '{"listen":3,"eintraege":7,"aussen":true,"pfeile":0}', kette or lauf.stderr.strip()[:300])
+    # Textvorschau und Tabellen kommen aus C22: kein eigenes Messen, kein Inline-Stil, Regeln brechen um.
+    probe = (seiten._JS_GRUND + seiten._JS_SCHRITTE_FERTIG + """
+;const zu = klapp('Eingabe — Text', '<p>x</p>'), auf = klapp('Ausgabe', '<p>x</p>', true);
+const regel = schritt({art: 'code', titel: 't', regeln: [['wenn', 'dann']]});
+console.log(JSON.stringify({
+  vorschau: /class="text-clamp[^"]*" data-lines="3">/.test(zu), offen: /data-lines="3" data-open>/.test(auf),
+  koerper: zu.includes('data-clamp-body'), knopf: zu.includes('data-clamp-toggle'), inline: zu.includes('style='),
+  umbruch: regel.includes('<table class="table" data-wrap>'),
+}));
+""")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(probe)
+    lauf = subprocess.run([node, f.name], capture_output=True, text=True)
+    Path(f.name).unlink()
+    teile = lauf.stdout.strip()
+    r.check("Ablauf: Textvorschau und Regel-Tabelle aus C22",
+            teile == '{"vorschau":true,"offen":true,"koerper":true,"knopf":true,"inline":false,"umbruch":true}',
+            teile or lauf.stderr.strip()[:300])
+    # Der Verlauf ist ein C22-Diagramm: flach, je Serie eine Farb-Rolle, klickbar.
+    skript = next(t for t in re.findall(r"<script>(.*?)</script>", seiten.aktivitaet(), re.S) if "verlaufDiagramm" in t)
+    stelle = skript.index("const SERIEN=")
+    ende = skript.index("async function verlauf()")
+    probe = skript[stelle:ende] + """
+;const c = verlaufDiagramm([{tag: '2026-09-01', vor_beginn: true}, {tag: '2026-09-02', klassifiziert: 3, fehler: 1}]);
+console.log(JSON.stringify({typ: c.type, hoehe: c.height, klick: c.selectable, namen: c.labels,
+  farben: c.series.map(s => s.color), werte: c.series[0].data, fehler: c.series[2].data}));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(probe)
+    lauf = subprocess.run([node, f.name], capture_output=True, text=True)
+    Path(f.name).unlink()
+    bild = lauf.stdout.strip()
+    r.check("Aktivität: Verlauf als C22-Diagramm",
+            bild == '{"typ":"stacked","hoehe":160,"klick":true,"namen":["01.09.","02.09."],'
+                    '"farben":["success","info","destructive","muted-foreground"],"werte":[0,3],"fehler":[0,1]}',
+            bild or lauf.stderr.strip()[:300])
     # Das Knopf-Skript in Paperless (KI, Export, Korrespondenten-Abschnitt): reines JS ohne Bau,
     # ein Syntaxfehler nähme Paperless alle Knöpfe — Paperless selbst liefe weiter, still ohne sie.
     knoepfe = ROOT / "deploy" / "paperless-knoepfe" / "paperlaiss-knoepfe.js"

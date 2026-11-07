@@ -11,6 +11,9 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - Ablauf und Lauf-Popup zeichnen die Kette mit dem C22-Baustein `ol.flow` statt mit eigenen Pfeilen.
 - C22 auf den Stand von `main` nachgezogen (Pack vega, `c22.js`).
 - `scripts/vendor-c22.sh` holt den Lizenztext der Schrift (`OFL.txt`) aus C22.
+- Der Verlauf auf der Aktivitätsseite ist ein C22-Diagramm statt eigener Balken. Ein Klick filtert weiter nach dem Tag, jetzt auch per Tastatur; statt des Browser-Titels zeigt ein Hinweisfeld die Zahlen.
+- Die Textvorschau bei Eingabe und Ausgabe kommt aus C22 (`.text-clamp`), die eigene Klemme ist entfernt.
+- Regeln und Feldtabellen im Ablauf brechen um, statt seitlich zu scrollen. Am Handy war die Spalte „Dann“ sonst nicht zu sehen.
 
 ## [0.1.2] - 2026-11-04
 
