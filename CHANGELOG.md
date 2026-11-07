@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-07
+
 ### Geändert
 
 - Ablauf und Lauf-Popup zeichnen die Kette mit dem C22-Baustein `ol.flow` statt mit eigenen Pfeilen.
