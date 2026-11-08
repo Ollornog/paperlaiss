@@ -41,9 +41,10 @@
 # per compare-API (`behind_by`): Liegt der rote Kopf hinter der Basis, zieht der Lauf ihn nach (mit App) und
 # urteilt erst über das Ergebnis auf aktueller Basis.
 #
-# Drei Jobs: `sammeln` (nur im geplanten Lauf) liest die offenen PRs und stößt je Kopf einen Lauf an,
-# `entscheiden` liest nur (API, kein Checkout, kein PR-Code), `ausfuehren` hält die
-# Schreibrechte und ruft nur `gh pr merge`, `gh pr update-branch`, `gh workflow run` und `gh pr comment`.
+# Vier Jobs: `sammeln` (nur im geplanten Lauf, nur Leserecht) liest die Köpfe der offenen PRs, `anstossen`
+# hält `actions: write` und ruft je Kopf nur `gh workflow run`, `entscheiden` liest nur (API, kein Checkout,
+# kein PR-Code), `ausfuehren` hält die Schreibrechte und ruft nur `gh pr merge`, `gh pr update-branch`,
+# `gh workflow run` und `gh pr comment`. Regel: Ein Job mit Schreibrecht enthält keine Logik.
 #
 # MIT GITHUB APP (seit 2026-10-11, PO): Liegt im Repo das Secret `AUTOMERGE_APP_KEY` und die Variable
 # `AUTOMERGE_APP_CLIENT_ID`, holt `ausfuehren` ein kurzlebiges App-Token (nur dieses Repo, nur
@@ -76,15 +77,21 @@ concurrency:
 
 jobs:
   sammeln:
-    # Nur im geplanten Lauf: je offenem Dependabot-PR (eigenes Repo) einen Lauf mit seinem Kopf anstoßen.
+    # Nur im geplanten Lauf: die Köpfe der offenen Dependabot-PRs (eigenes Repo) lesen. NUR Leserecht —
+    # die Logik (API, Filter, Formatprüfung) steht hier, der Job mit Schreibrecht ruft nur `gh workflow run`
+    # (seit 0.44.0; bis 0.43 beides in einem Job mit `actions: write`, das verletzte die Befehls-Erlaubnisliste
+    # für Jobs mit Recht in TinySesam).
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       pull-requests: read
-      actions: write       # `gh workflow run` (workflow_dispatch startet auch mit dem Workflow-Token)
+    outputs:
+      koepfe: ${{ steps.lesen.outputs.koepfe }}
+      datei: ${{ steps.lesen.outputs.datei }}
     steps:
-      - name: Offene Dependabot-PRs erneut prüfen lassen
+      - name: Offene Dependabot-PRs lesen
+        id: lesen
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -92,14 +99,37 @@ jobs:
         run: |
           set -euo pipefail
           DATEI="${WORKFLOW_REF%%@*}"; DATEI="${DATEI##*/}"
+          [[ "$DATEI" =~ ^[A-Za-z0-9._-]+\.ya?ml$ ]] || { echo "Workflow-Datei unlesbar: $DATEI" >&2; exit 1; }
           KOEPFE="$(gh api "repos/$REPO/pulls?state=open&per_page=100" --paginate \
             -q '.[] | select(.user.login == "dependabot[bot]" and .head.repo.full_name == .base.repo.full_name) | .head.sha')"
-          [ -n "$KOEPFE" ] || { echo "kein offener Dependabot-PR"; exit 0; }
-          while IFS= read -r sha; do
-            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || continue
-            echo "prüfe erneut: $sha"
-            gh workflow run "$DATEI" --repo "$REPO" --ref "$GITHUB_REF_NAME" -f head_sha="$sha"
-          done <<<"$KOEPFE"
+          # Nur 40-stellige SHAs kommen in die Matrix — eine leere Liste lässt `anstossen` ausfallen.
+          JSON="$(printf '%s\n' "$KOEPFE" | jq -Rnc '[inputs | select(test("^[0-9a-f]{40}$"))]')"
+          echo "Köpfe: $JSON"
+          { echo "koepfe=$JSON"; echo "datei=$DATEI"; } >>"$GITHUB_OUTPUT"
+
+  anstossen:
+    # Je Kopf ein Lauf per `workflow_dispatch` (startet auch mit dem Workflow-Token). Hält `actions: write`
+    # und ruft deshalb NUR `gh workflow run` — Kopf und Datei kommen geprüft aus `sammeln`, als Umgebung,
+    # nie in den Skripttext eingesetzt.
+    needs: sammeln
+    if: needs.sammeln.outputs.koepfe != '' && needs.sammeln.outputs.koepfe != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        sha: ${{ fromJSON(needs.sammeln.outputs.koepfe) }}
+    steps:
+      - name: Kopf erneut prüfen lassen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DATEI: ${{ needs.sammeln.outputs.datei }}
+          SHA: ${{ matrix.sha }}
+        run: |
+          gh workflow run "$DATEI" --repo "$REPO" --ref "$GITHUB_REF_NAME" -f head_sha="$SHA"
 
   entscheiden:
     # Nur Läufe aus einem PR im EIGENEN Repo auf einem Dependabot-Zweig — oder ein angestoßener Kopf
