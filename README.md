@@ -137,6 +137,31 @@ documents on their own, carrying their origin, and the classifier receives that 
 curl -F "file=@scan.pdf" -H "X-Ingest-Token: secret-office-scanner" http://panel:8400/ingest
 ```
 
+## Routing by person tags
+
+Paperless workflows cannot filter by owner, so "hand over if it is mine, share if it is someone
+else's" is not expressible with workflows alone. `POST /route` fills that gap: a workflow with a
+**webhook** action sends the document id, the panel reads the document and decides by its owner.
+
+* Document of the **hub** (`PANEL_ROUTE_HUB`) with exactly one person tag: that person becomes
+  owner, the hub keeps view and change rights.
+* Document of anyone else with another person's tag: the owner stays, the person gets view and
+  change rights. The hub is added too.
+* Several person tags on a hub document: shared with all of them, not handed over.
+* Rights are only ever added, never removed; groups stay. A second call changes nothing.
+
+| Variable | Meaning |
+|---|---|
+| `PANEL_ROUTE_PERSONS` | `<tag>=<username>,…`, e.g. `Alice=alice,Bob=bob` (tag case-insensitive) |
+| `PANEL_ROUTE_HUB` | username whose documents are handed over (empty: only share) |
+| `PANEL_ROUTE_TOKEN` | secret the webhook sends as `X-Route-Token`; without it `/route` answers 503 |
+
+Workflow in Paperless: triggers *Document added* and *Document updated*, filter *has any of these
+tags* = the person tags; action *Webhook*, URL `http://panel:8400/route`, *use parameters* and
+*send as JSON* with `doc_id` = `{{ doc_id }}`, header `X-Route-Token`. The webhook carries only the
+id, so a caller can make a document converge to the rules but never choose an owner. A new person
+needs an entry in `PANEL_ROUTE_PERSONS` and the tag in the workflow filter.
+
 ## Correspondent metadata
 
 Paperless **cannot** natively extend correspondents with fields (custom fields hang off documents

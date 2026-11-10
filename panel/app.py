@@ -18,6 +18,8 @@ ENV:
                   (PocketID/OIDC über PANEL_OIDC_*, Passwort nur mit PANEL_PASSWORD_LOGIN=1;
                   alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
+  PANEL_ROUTE_TOKEN    secret the Paperless webhook sends as X-Route-Token to POST /route; unset = 503
+  PANEL_ROUTE_PERSONS  person tags, "<tag>=<username>,…" (routing.py); PANEL_ROUTE_HUB = username of the hub
   EXPORT_*        Export-Knopf: EXPORT_MAX_DOKUMENTE (1000), EXPORT_MAX_MB (2000), EXPORT_AUFBEWAHRUNG_MIN
                   (20), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
 """
@@ -26,6 +28,7 @@ import urllib.request, urllib.error, zoneinfo
 from fastapi import BackgroundTasks, Body, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from kern import (KORR_FELDER, sperre_oeffnen, korr_anzeige, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
@@ -33,6 +36,7 @@ import exportlogik
 import exportpdf
 import huelle
 import nacharbeit
+import routing
 import seiten
 
 CLASSIFY_DIR = os.environ.get("CLASSIFY_DIR", "/scripts")
@@ -53,6 +57,10 @@ try:
     INGEST_TOKENS = json.loads(os.environ.get("INGEST_TOKENS", "{}"))
 except Exception:
     INGEST_TOKENS = {}
+# Owner-aware routing by person tags (routing.py, POST /route). Fails closed without a token.
+ROUTE_TOKEN = os.environ.get("PANEL_ROUTE_TOKEN", "")
+ROUTE_PERSONS = routing.parse_persons(os.environ.get("PANEL_ROUTE_PERSONS", ""))
+ROUTE_HUB = os.environ.get("PANEL_ROUTE_HUB", "").strip()
 
 # Felder der Config, die Geheimnisse tragen koennen: werden nie ausgeliefert und nie
 # ueber die API geschrieben. Sie gehoeren in die Umgebung (MISTRAL_KEY), nicht in eine
@@ -1034,6 +1042,42 @@ async def ingest(file: UploadFile = File(...), title: str = Form(None),
         return {"ok": True, "source": source, "tag": source, "task": task}
     except urllib.error.HTTPError as e:
         raise HTTPException(502, f"Paperless-Upload fehlgeschlagen: {e.read().decode('utf-8','replace')[:300]}")
+
+
+# ---------- Owner-aware routing (webhook from a Paperless workflow) ----------
+def route_document(doc_id: int) -> dict:
+    """Apply routing.plan() to one document. Reads everything from Paperless, trusts nothing sent."""
+    doc = api_get(f"/documents/{doc_id}/?full_perms=true&fields=id,owner,tags,permissions")
+    tag_ids = [int(t) for t in doc.get("tags") or []]
+    names = []
+    if tag_ids:
+        res = api_get(f"/tags/?id__in={','.join(map(str, tag_ids))}&fields=id,name&page_size={len(tag_ids)}")
+        names = [t["name"] for t in res.get("results") or []]
+    wanted = sorted(set(ROUTE_PERSONS.values()) | ({ROUTE_HUB} if ROUTE_HUB else set()))
+    res = api_get("/users/?page_size=1000")
+    user_ids = {u["username"]: int(u["id"]) for u in res.get("results") or [] if u.get("username") in wanted}
+    tagged = routing.targets(names, ROUTE_PERSONS, user_ids)
+    patch, reason = routing.plan(doc.get("owner"), tagged, doc.get("permissions"), user_ids.get(ROUTE_HUB))
+    if patch:
+        api_send(f"/documents/{doc_id}/", patch, method="PATCH")
+    return {"doc": doc_id, "changed": bool(patch), "reason": reason,
+            "owner": patch["owner"] if patch else doc.get("owner")}
+
+
+@app.post("/route")
+async def route(request: Request, x_route_token: str = Header(None)):
+    """Webhook target of the routing workflow: hand over or share a document by its person tags."""
+    if not ROUTE_TOKEN or not ROUTE_PERSONS:
+        raise HTTPException(503, "routing not configured: PANEL_ROUTE_TOKEN and PANEL_ROUTE_PERSONS needed")
+    if not hmac.compare_digest((x_route_token or "").encode(), ROUTE_TOKEN.encode()):
+        raise HTTPException(401, "valid X-Route-Token needed")
+    doc_id = doc_id_aus_webhook((await request.body()).decode("utf-8", "replace"))
+    if doc_id is None:
+        raise HTTPException(400, "document id missing")
+    try:
+        return await run_in_threadpool(route_document, doc_id)
+    except urllib.error.HTTPError as e:
+        raise HTTPException(502, f"Paperless answered {e.code} for document {doc_id}")
 
 
 # ---------- Korrespondent-Metadaten (Store, per Paperless-ID gekoppelt) ----------
