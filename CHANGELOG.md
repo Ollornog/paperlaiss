@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
 ### Hinzugefügt
 
 - `POST /route`: Routing nach Personen-Tags mit Blick auf den Besitzer, Ziel eines Paperless-Webhooks. Ein Dokument des Hubs mit einem Personen-Tag geht an die Person über (der Hub behält Sehen und Ändern), das Dokument eines anderen Kontos wird für die getaggte Person freigegeben. Paperless-Workflows können nicht nach dem Besitzer filtern. Einstellung über `PANEL_ROUTE_PERSONS`, `PANEL_ROUTE_HUB`, `PANEL_ROUTE_TOKEN`; ohne Token oder Personen antwortet der Endpunkt 503.
