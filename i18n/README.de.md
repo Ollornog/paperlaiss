@@ -123,6 +123,33 @@ Dokumente ab, samt Herkunft, und der Klassifizierer erhält das Quelle-Tag.
 curl -F "file=@scan.pdf" -H "X-Ingest-Token: geheim-scanner-buero" http://panel:8400/ingest
 ```
 
+## Routing nach Personen-Tags
+
+Paperless-Workflows können nicht nach dem Besitzer filtern; „übergeben, wenn es meins ist,
+freigeben, wenn es jemand anderem gehört“ geht mit Workflows allein nicht. `POST /route` schließt
+die Lücke: Ein Workflow mit **Webhook**-Aktion schickt die Dokument-ID, das Panel liest das
+Dokument und entscheidet nach dem Besitzer.
+
+* Dokument des **Hubs** (`PANEL_ROUTE_HUB`) mit genau einem Personen-Tag: Die Person wird
+  Besitzer, der Hub behält Sehen und Ändern.
+* Dokument eines anderen Kontos mit dem Tag einer anderen Person: Der Besitzer bleibt, die Person
+  bekommt Sehen und Ändern. Der Hub kommt mit dazu.
+* Mehrere Personen-Tags an einem Hub-Dokument: an alle freigegeben, nicht übergeben.
+* Rechte kommen nur dazu, nie weg; Gruppen bleiben. Ein zweiter Aufruf ändert nichts.
+
+| Variable | Bedeutung |
+|---|---|
+| `PANEL_ROUTE_PERSONS` | `<Tag>=<Benutzername>,…`, z. B. `Alice=alice,Bob=bob` (Tag ohne Groß/Klein) |
+| `PANEL_ROUTE_HUB` | Benutzername, dessen Dokumente übergeben werden (leer: nur freigeben) |
+| `PANEL_ROUTE_TOKEN` | Geheimnis, das der Webhook als `X-Route-Token` schickt; ohne antwortet `/route` 503 |
+
+Workflow in Paperless: Auslöser *Dokument hinzugefügt* und *Dokument aktualisiert*, Filter *hat
+eines dieser Tags* = die Personen-Tags; Aktion *Webhook*, URL `http://panel:8400/route`,
+*Parameter verwenden* und *als JSON senden* mit `doc_id` = `{{ doc_id }}`, Header `X-Route-Token`.
+Der Webhook trägt nur die ID: Ein Aufrufer kann ein Dokument auf die Regeln bringen, aber nie einen
+Besitzer wählen. Eine neue Person braucht einen Eintrag in `PANEL_ROUTE_PERSONS` und das Tag im
+Workflow-Filter.
+
 ## Korrespondent-Metadaten
 
 Paperless **kann** Korrespondenten nativ nicht um Felder erweitern (Custom Fields hängen nur an
