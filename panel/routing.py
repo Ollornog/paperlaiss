@@ -92,11 +92,15 @@ def plan(owner: int | None, tagged: list[int], perms: dict | None, hub: int | No
     if new_owner == owner and set(new_view) == set(view) and set(new_change) == set(change):
         return None, "already in place"
     patch = {
-        "owner": new_owner,
         # set_permissions replaces the whole set: groups are carried over unchanged.
         "set_permissions": {
             "view": {"users": new_view, "groups": sorted(_groups(perms, "view"))},
             "change": {"users": new_change, "groups": sorted(_groups(perms, "change"))},
         },
     }
+    # The owner goes into the patch only when it changes. Writing back the owner that was read would
+    # undo a hand-over another client made between our read and our write (an uploader that sets the
+    # owner right after the import raced the workflow webhook and lost the document to itself).
+    if new_owner != owner:
+        patch["owner"] = new_owner
     return patch, reason

@@ -1061,7 +1061,7 @@ def route_document(doc_id: int) -> dict:
     if patch:
         api_send(f"/documents/{doc_id}/", patch, method="PATCH")
     return {"doc": doc_id, "changed": bool(patch), "reason": reason,
-            "owner": patch["owner"] if patch else doc.get("owner")}
+            "owner": (patch or {}).get("owner", doc.get("owner"))}
 
 
 @app.post("/route")
