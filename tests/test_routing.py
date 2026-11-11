@@ -54,7 +54,7 @@ chk("hand-over: reason says so", why == "handed over", why)
 
 # ---- rule 2: someone else's document with another person's tag is shared, owner stays
 patch, why = routing.plan(ALICE, [BOB], EMPTY, HUB)
-chk("share: owner stays", patch is not None and patch["owner"] == ALICE, patch)
+chk("share: owner is not written (stays as it is)", patch is not None and "owner" not in patch, patch)
 chk("share: tagged person and hub get view",
         patch["set_permissions"]["view"]["users"] == [HUB, BOB], patch)
 chk("share: tagged person and hub get change",
@@ -64,7 +64,7 @@ chk("share: reason", why == "shared", why)
 # ---- own document with own tag: owner stays, the owner is never put into its own rights
 patch, why = routing.plan(ALICE, [ALICE], EMPTY, HUB)
 chk("own tag: owner stays, only the hub is added",
-        patch is not None and patch["owner"] == ALICE
+        patch is not None and "owner" not in patch
         and patch["set_permissions"]["view"]["users"] == [HUB]
         and ALICE not in patch["set_permissions"]["change"]["users"], patch)
 patch, why = routing.plan(ALICE, [ALICE], perms([HUB], [HUB]), HUB)
@@ -76,12 +76,12 @@ again, why = routing.plan(first["owner"], [ALICE], first["set_permissions"], HUB
 chk("idempotent: second run after hand-over is a no-op", again is None and why == "already in place",
         (again, why))
 first, _ = routing.plan(ALICE, [BOB], perms(vg=[9], cg=[9]), HUB)
-again, _ = routing.plan(first["owner"], [BOB], first["set_permissions"], HUB)
+again, _ = routing.plan(first.get("owner", ALICE), [BOB], first["set_permissions"], HUB)
 chk("idempotent: second run after share is a no-op", again is None, again)
 
 # ---- several persons on a hub document: no hand-over (ambiguous), everyone shared
 patch, why = routing.plan(HUB, [ALICE, BOB], EMPTY, HUB)
-chk("two persons: hub stays owner", patch is not None and patch["owner"] == HUB, patch)
+chk("two persons: hub stays owner", patch is not None and "owner" not in patch, patch)
 chk("two persons: both get view and change",
         patch["set_permissions"]["view"]["users"] == [ALICE, BOB]
         and patch["set_permissions"]["change"]["users"] == [ALICE, BOB], patch)
@@ -100,8 +100,22 @@ chk("groups are carried over unchanged", patch["set_permissions"]["view"]["group
 chk("no person tag: nothing", routing.plan(HUB, [], EMPTY, HUB) == (None, "no person tag"))
 chk("no owner: left alone", routing.plan(None, [ALICE], EMPTY, HUB) == (None, "document has no owner"))
 patch, why = routing.plan(HUB, [ALICE], EMPTY, None)
-chk("without a hub nothing is handed over", patch is not None and patch["owner"] == HUB
+chk("without a hub nothing is handed over", patch is not None and "owner" not in patch
         and patch["set_permissions"]["view"]["users"] == [ALICE], patch)
 chk("missing permissions are treated as empty", routing.plan(BOB, [ALICE], None, HUB)[0] is not None)
+
+# ---- race: the owner that was read is never written back
+# An uploader hands the document over (owner 6 -> ALICE) between the webhook's read and its write. The
+# webhook read owner 6 (not the hub), so it shares. Its patch must not carry owner 6, or it undoes the
+# hand-over. Simulated: apply the patch onto the state after the uploader's change.
+UPLOADER = 6
+patch, why = routing.plan(UPLOADER, [ALICE], EMPTY, HUB)
+after = {"owner": ALICE}
+after.update({k: v for k, v in (patch or {}).items() if k == "owner"})
+chk("race: a stale owner is not written back", why == "shared" and after["owner"] == ALICE, (patch, after))
+patch, _ = routing.plan(UPLOADER, [ALICE], EMPTY, HUB)
+chk("race: the tagged person and the hub still get view and change",
+        patch["set_permissions"]["view"]["users"] == [HUB, ALICE]
+        and patch["set_permissions"]["change"]["users"] == [HUB, ALICE], patch)
 
 sys.exit(r.done())

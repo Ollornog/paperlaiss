@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-11
+
+### Behoben
+
+- `POST /route` schreibt den Besitzer nur noch, wenn er sich ändert. Beim Freigeben ging bisher der gelesene Besitzer mit in den PATCH. Gab ein anderer Client das Dokument zwischen Lesen und Schreiben weiter (ein Uploader, der direkt nach dem Import den Besitzer setzt), machte das Routing die Übergabe rückgängig, und das Dokument blieb beim Uploader. Test `race: a stale owner is not written back`; die alten Prüfungen „owner stays“ hielten genau dieses Verhalten fest.
+
 ## [0.3.0] - 2026-11-10
 
 ### Hinzugefügt
