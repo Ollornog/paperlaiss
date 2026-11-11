@@ -72,6 +72,14 @@ A document type that is already set is replaced only on a real import (no `CLASS
 and bulk runs (`CLASSIFY_SOURCE=bulk`) leave it alone — a person may have set it. A type that
 Paperless' own matching pre-set on import reaches the model as a suggestion.
 
+A re-run takes back what the previous run set itself — KI tags it added, field values it changed
+(`tags_gesetzt`/`fields_gesetzt` in the trace) — as long as they are still unchanged and nobody has
+changed the classification since (title, correspondent, type, date, tags or fields by a user in the
+document history). The model then decides those fields afresh instead of seeing the old values as
+current. Reserved tags and the person tags of `PANEL_ROUTE_PERSONS` are never touched. Without a
+readable history (audit log off, token without permission) nothing is taken back; traces from before
+this change carry neither key, so their runs are left as they are.
+
 ## Panel
 
 An admin panel for when something hangs or needs adjusting — paperlaiss is middleware, master data
@@ -199,11 +207,20 @@ classifier uses it in three ways:
   value when the analysis named the correspondent exactly (at most 10 per field). Nothing is ever
   overwritten; VAT ID and address stay single (a second VAT ID is reported, not stored); a value that
   already belongs to another correspondent is dropped, so one wrong assignment cannot pull later
-  documents to the wrong correspondent. A one-sentence description of the counterpart ("car repair
+  documents to the wrong correspondent. A new IBAN or phone number that appears on documents of three or
+  more correspondents (Paperless content search) is most likely your own and is neither stored nor
+  reported. A personnel number (labelled *Personal-Nr.* in the value or the text) is never a customer
+  number: it is how an employer files you; the candidate search ignores one stored earlier. A one-sentence description of the counterpart ("car repair
   shop in Salzburg") fills an empty `kontext` — for new correspondents and known ones without one. If
   the document contradicts the correspondent (an IBAN/VAT ID/e-mail/domain/phone of *another*
   correspondent, or a different VAT ID), the run is marked **Prüfen**: a line in the activity, and
-  the `unsicher_tag` on the document if set. The origin (`erfasst`, per value for list fields) is shown in
+  the `unsicher_tag` on the document if set. Further reasons: one of your own *persons* as
+  correspondent of a type you do not write yourself (`eigene_typen`, default Bewerbung, Lebenslauf,
+  Brief, Kündigung, Antrag … — a company name for internal documents does not count), no document date
+  in the text while the date is still the import day, a collective document (identifiers of three
+  other correspondents; not for the types in `sammeldokument_ausser_typen`, default Kontoauszug,
+  Kreditkartenabrechnung), and a duplicate (a similar document with the same amounts, dates and
+  numbers, the same salutation and page count — a form letter to someone else is none). The origin (`erfasst`, per value for list fields) is shown in
   the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to

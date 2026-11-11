@@ -72,6 +72,14 @@ und Bestands-Durchläufe (`CLASSIFY_SOURCE=bulk`) lassen ihn stehen — ihn kann
 haben. Einen Typ, den Paperless' eigene Zuordnung beim Import vorbelegt hat, bekommt die KI als
 Vorschlag.
 
+Ein erneuter Lauf nimmt zurück, was der vorige selbst gesetzt hat — KI-Tags, die er hinzugefügt, und
+Feldwerte, die er geändert hat (`tags_gesetzt`/`fields_gesetzt` im Trace) —, solange sie unverändert
+stehen und seitdem niemand die Klassifizierung geändert hat (Titel, Korrespondent, Typ, Datum, Tags oder
+Felder durch einen Benutzer in der Änderungshistorie). Die KI entscheidet diese Felder dann neu, statt
+die alten Werte als aktuell zu sehen. Reservierte Tags und die Personen-Tags aus `PANEL_ROUTE_PERSONS`
+bleiben immer. Ohne lesbare Historie (Audit-Log aus, Token ohne Recht) wird nichts zurückgenommen;
+Traces von vor dieser Änderung tragen keinen der beiden Schlüssel, ihre Läufe bleiben, wie sie sind.
+
 ## Panel
 
 Ein Admin-Panel für den Fall, dass etwas hängt oder eingestellt werden muss — paperlaiss ist
@@ -184,11 +192,21 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
   die Analyse den Korrespondenten exakt genannt hat (höchstens 10 je Feld). Überschrieben wird nie;
   USt-ID und Adresse bleiben einzeln (eine zweite USt-ID wird gemeldet, nicht gespeichert); ein Wert,
   der schon einem anderen Korrespondenten gehört, wird verworfen — so zieht eine Fehlzuordnung keine
-  späteren Dokumente zum falschen. Ein Satz, was das Gegenüber ist („Kfz-Werkstatt in Salzburg“), füllt
+  späteren Dokumente zum falschen. Eine neue IBAN oder Telefonnummer, die auf Dokumenten von drei oder
+  mehr Korrespondenten steht (Inhaltssuche in Paperless), ist sehr wahrscheinlich eine eigene und wird
+  weder gespeichert noch gemeldet. Eine Personalnummer (Beschriftung *Personal-Nr.* im Wert oder im Text)
+  ist nie eine Kundennummer — unter ihr führt der Arbeitgeber uns; die Vorsuche übergeht auch eine
+  früher gespeicherte. Ein Satz, was das Gegenüber ist („Kfz-Werkstatt in Salzburg“), füllt
   einen leeren `kontext` — bei neuen Korrespondenten und bei bekannten ohne. Widerspricht das Dokument
   dem Korrespondenten (IBAN/USt-ID/Mail/Domain/Telefon eines *anderen*, oder eine andere USt-ID), wird
   der Lauf als **Prüfen** markiert: eine Zeile in der Aktivität und, falls eingestellt, der `unsicher_tag`
-  am Dokument. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
+  am Dokument. Weitere Gründe: eine eigene *Person* als Korrespondent bei einem Typ, den man nicht selbst
+  schreibt (`eigene_typen`, Vorgabe Bewerbung, Lebenslauf, Brief, Kündigung, Antrag … — ein Firmenname
+  bei internen Dokumenten zählt nicht), kein Dokumentdatum im Text, während das Datum noch der Importtag
+  ist, ein Sammeldokument (Kennungen dreier anderer Korrespondenten; nicht bei den Typen in
+  `sammeldokument_ausser_typen`, Vorgabe Kontoauszug, Kreditkartenabrechnung) und eine Dublette (ein
+  ähnliches Dokument mit denselben Beträgen, Daten und Nummern, derselben Anrede und Seitenzahl — ein
+  Serienbrief an jemand anderen ist keine). Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
   Paperless-Dialog. Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem
   Korrespondenten gehört. Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
 - **Namensabgleich.** Passt der Name aus der Analyse zu keinem Korrespondenten exakt, fragt eine zweite

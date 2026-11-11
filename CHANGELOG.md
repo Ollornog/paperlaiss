@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben
+
+Lehren aus einer großen Nacharbeit (Backlog T-9): alle 101 „KI-unsicher“-Markierungen eines Stapels waren Fehlalarme, und eigene Kennungen landeten in den Stammdaten fremder Korrespondenten.
+
+- **Eigene Kennungen nicht mehr als Stammdaten gelernt.** Eine neue IBAN oder Telefonnummer, die auf Dokumenten von mindestens drei Korrespondenten steht (Inhaltssuche in Paperless, `VERBREITET_AB`), gilt als wahrscheinlich eigene: Sie wird nicht gespeichert, und „gehört schon zu …“ meldet sie nicht mehr als Widerspruch. Anlass: Die eigene IBAN fehlte in `eigene_kennungen`, wurde bei einer Krankenkasse gelernt, und jede Lohnabrechnung kam danach in „Prüfen“. Die Suche läuft vor der Sperre auf `correspondents.json`.
+- **Personalnummer ist keine Kundennummer.** Steht „Personal-Nr.“/„Personalnummer“ im Wert oder direkt vor der Nummer im Text, wird sie nicht als `kundennummer` gespeichert, und die Vorsuche übergeht eine früher gespeicherte. Der Prompt nennt sie nicht mehr als Kennnummer. Das kehrt die Regel aus 0.1.0 um (Personalnummer als Kennnummer des Arbeitgebers).
+- **Sammeldokument nicht bei Kontoauszügen.** Für die Typen in `sammeldokument_ausser_typen` (Vorgabe Kontoauszug, Kreditkartenabrechnung) entfällt der Hinweis; dort stehen naturgemäß die Kennungen vieler Gegenüber.
+- **Dublette nicht bei Serienbriefen.** Eine Dublette verlangt jetzt dieselben Beträge, Daten und Nummern (statt Jaccard ≥ 0,85) und dieselbe Anrede. Ein Serienbrief an andere Empfänger unterscheidet sich in der Anrede oder einer Nummer.
+- **Eigene Person als Korrespondent wird geprüft.** Ist der Korrespondent eine der eigenen Personen (`eigene_kennungen.namen`, nur Personennamen) und der Typ keiner aus `eigene_typen` (Vorgabe Bewerbung, Lebenslauf, Anschreiben, Brief, Kündigung, Antrag, Widerspruch, Vollmacht, Erklärung, Notiz), kommt der Lauf in „Prüfen“, statt die Zuordnung still zu übernehmen. Anlass: Bei Formularen nahm die KI den Empfänger.
+- **Kein Datum im Text wird geprüft.** Bleibt das Datum mangels belegtem Dokumentdatum der Importtag, kommt der Lauf mit Grund in „Prüfen“, statt still das Importdatum zu behalten.
+- **Ein erneuter Lauf räumt auf.** Was der vorige Lauf selbst gesetzt hat (neu im Trace: `tags_gesetzt`, `fields_gesetzt`), nimmt der nächste zurück, solange es unverändert steht und laut Änderungshistorie seitdem kein Benutzer die Klassifizierung geändert hat; die KI sieht diese Werte nicht mehr als „aktuell“. Reservierte und Personen-Tags (`PANEL_ROUTE_PERSONS`) bleiben immer, ohne lesbare Historie bleibt alles. Bisher fügte ein erzwungener Lauf nur hinzu: Tags und Felder eines Fehllaufs blieben stehen.
+
 ## [0.3.1] - 2026-11-11
 
 ### Behoben

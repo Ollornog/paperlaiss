@@ -36,7 +36,7 @@ Env-Schalter:
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
   CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
 """
-import os, sys, json, re, unicodedata, urllib.request, urllib.error, difflib, datetime, base64, traceback, tempfile, subprocess
+import os, sys, json, re, unicodedata, urllib.request, urllib.error, urllib.parse, difflib, datetime, base64, traceback, tempfile, subprocess
 
 BASE = os.environ.get("PAPERLESS_API", "http://localhost:8000/api")
 TOK = os.environ.get("PAPERLESS_TOKEN", "")
@@ -106,6 +106,12 @@ CFG = {
     "eigene_regel": "",
     "tag_descriptions": {},            # merged über TAG_DESC (nur relevant wenn tagging_enabled)
     "type_descriptions": {},           # {"Typname": "wann dieser Typ gilt"} — steht im Prompt unter den Typen
+    # Document types we write ourselves: there one of our own persons may be the correspondent. For any
+    # other type an own person as correspondent is marked for checking (T-9).
+    "eigene_typen": ["Bewerbung", "Lebenslauf", "Anschreiben", "Brief", "Kündigung", "Antrag", "Widerspruch",
+                     "Vollmacht", "Erklärung", "Notiz"],
+    # Document types the "collective document" check skips: they list many counterparts by nature (T-9).
+    "sammeldokument_ausser_typen": ["Kontoauszug", "Kreditkartenabrechnung"],
     "kennungen_je_konto": False,       # an: „wir" = Besitzer des Dokuments (Haushalt mit eigenen Konten)
     "konten": {},                      # {"benutzername": {iban, email, domains, ustid, telefon, namen}, "*": gemeinsam}
     "api_key_text": "",                # leer = ENV MISTRAL_KEY
@@ -319,6 +325,26 @@ def eigene_nummer(x, eigene):
     return bool(n) and (n in eigene.get("nummern", ()) or bool(SV_NUMMER.match(n)))
 
 
+# A personnel number is how an employer files US, not a number of the employer: two employers' numbers
+# were learned as "customer numbers" and pulled later payslips to the wrong correspondent (T-9).
+PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Personal|Pers)\s*\.?\s*-?\s*(?:nummer|nr|no)\b\.?", re.IGNORECASE)
+_PERSONAL_WERT = re.compile(r"\s*[.:#]?\s*([0-9A-Za-z](?:[0-9A-Za-z]|[ ./-](?=\d))*)")
+
+
+def personalnummer(wert, text=""):
+    """Is `wert` a personnel number: labelled so in the value itself, or right after such a label in the text?"""
+    if PERSONAL_LABEL.search(str(wert or "")):
+        return True
+    n = norm_nummer(wert)
+    if not n:
+        return False
+    for m in PERSONAL_LABEL.finditer(str(text or "")):
+        folgt = _PERSONAL_WERT.match(str(text)[m.end():].split("\n", 1)[0])
+        if folgt and norm_nummer(folgt.group(1)) == n:
+            return True
+    return False
+
+
 
 def _roh_liste(v):
     """Einträge einer Config-Liste wie geschrieben (eine Zeichenkette zählt als ein Eintrag)."""
@@ -420,7 +446,7 @@ def stammdaten_treffer(corrs, meta, text, eigene):
                     and re.search(r"(?:@|www\.|//)" + re.escape(d) + r"(?![a-z0-9-])", klein)):
                 gruende.append(f"Domain {d}")
         for k in werte(m, "kundennummer"):
-            if eigene_nummer(k, eigene):
+            if eigene_nummer(k, eigene) or personalnummer(k, text):
                 continue
             if len(re.sub(r"\W", "", k)) >= 5 and re.search(r"(?<![0-9A-Za-z])" + re.escape(k) + r"(?![0-9A-Za-z])", str(text or "")):
                 gruende.append(f"Kundennummer {k}")
@@ -506,6 +532,42 @@ def gleicher_wert(feld, a, b):
 EINDEUTIG = {"iban", "ustid", "email", "domains", "telefon"}
 
 
+# An IBAN or phone number printed on documents of this many different correspondents is most likely
+# ours (own account, own phone), however it got into the master data: an own IBAN missing from
+# eigene_kennungen was learned at a health insurer, and every payslip afterwards reported
+# "belongs to <insurer>" (T-9). Customer numbers are excluded: every supplier assigns its own.
+VERBREITUNG_FELDER = ("iban", "telefon")
+VERBREITET_AB = 3
+
+
+def verbreitung_suchtexte(feld, wert):
+    """The spellings to search the archive for: an IBAN compact and in groups of four, a phone number as
+    stored and as given. Phone numbers have more spellings than a substring search can cover."""
+    if feld == "iban":
+        i = norm_iban(wert)
+        return [i, " ".join(i[k:k + 4] for k in range(0, len(i), 4))] if i else []
+    if feld == "telefon":
+        return list(dict.fromkeys(x for x in (norm_telefon(wert), str(wert or "").strip()) if len(x) >= 6))
+    return []
+
+
+def korrespondenten_mit(feld, wert, holen=None):
+    """IDs of the correspondents whose documents contain the value (Paperless content search), or None
+    if no search succeeded. `holen` = get (replaceable in tests)."""
+    holen = holen or get
+    ids, ok = set(), False
+    for q in verbreitung_suchtexte(feld, wert):
+        try:
+            r = holen("/documents/?page_size=100&fields=id,correspondent&content__icontains="
+                      + urllib.parse.quote(q))
+        except Exception:
+            continue
+        if isinstance(r, dict) and isinstance(r.get("results"), list):
+            ok = True
+            ids |= {d.get("correspondent") for d in r["results"] if isinstance(d, dict) and d.get("correspondent")}
+    return ids if ok else None
+
+
 def stammdaten_fremd(corrs, meta, eigener_id):
     """fremd(feld, wert) → Name des ANDEREN Korrespondenten, der den Wert schon hat, sonst None."""
     def fremd(feld, w):
@@ -525,7 +587,8 @@ def ohne_tabellenrest(wert):
     (2026-10-10: beide kamen so aus einer Tabelle)."""
     return str(wert or "").strip(" \t\n|·•-–—:;,")
 
-def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None, kontext=""):
+def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None, kontext="",
+                          text="", verbreitet=None):
     """Stammdaten eines Korrespondenten aus dem Dokument nachtragen.
 
     Rein: bekommt den alten Eintrag, gibt (neuer Eintrag, geschrieben, verworfen) zurück.
@@ -534,7 +597,12 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
     Korrespondenten exakt). Nie übernommen: eigene Kennungen, kaputte Formate und ein Wert, der
     schon einem anderen Korrespondenten gehört (`fremd`) — sonst zöge eine Fehlzuordnung jedes
     spätere Dokument mit derselben IBAN zum falschen. `erfasst` merkt sich die Herkunft, bei
-    Listenfeldern je Wert ({wert: quelle}). Bis 2026-09-27 füllte die Erfassung nur leere Felder."""
+    Listenfeldern je Wert ({wert: quelle}). Bis 2026-09-27 füllte die Erfassung nur leere Felder.
+
+    `text` is the document text: a number printed as a personnel number is never stored as a customer
+    number. `verbreitet(feld, wert)` counts the correspondents whose documents carry an IBAN or phone
+    number (None = unknown); from VERBREITET_AB on it is most likely one of ours and is neither stored
+    nor reported as "belongs to another" (T-9)."""
     alt = dict(alt or {})
     neu, erfasst = dict(alt), dict(alt.get("erfasst") or {})
     geschrieben, verworfen = {}, {}
@@ -547,6 +615,10 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
         bisher = werte(alt, feld)
         if any(gleicher_wert(feld, w, x) for x in bisher):
             return                                              # schon da
+        n = verbreitet(feld, w) if verbreitet and feld in VERBREITUNG_FELDER else None
+        if n is not None and n >= VERBREITET_AB:
+            verworfen[feld] = f"steht auf Dokumenten von {n} Korrespondenten — wahrscheinlich eine eigene Kennung"
+            return
         anderer = fremd(feld, w) if fremd else None
         if anderer:
             verworfen[feld] = f"gehört schon zu {anderer}"
@@ -614,6 +686,8 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
     kn = wert("kundennummer")[:60]
     if kn and eigene_nummer(kn, eigene):
         verworfen["kundennummer"] = "eigene Nummer (gilt bei jedem Gegenüber)"
+    elif kn and personalnummer(kn, text):
+        verworfen["kundennummer"] = "Personalnummer — keine Kennnummer des Gegenübers"
     else:
         setze("kundennummer", kn)
     # Was das Gegenüber ist („Kfz-Werkstatt in Salzburg“) — nur in einen leeren Kontext. Bis 2026-09-27
@@ -1649,7 +1723,7 @@ def typ_zuordnen(antwort, types):
 
 
 
-def pruef_befunde(did, doc, content, treffer, corr_id):
+def pruef_befunde(did, doc, content, treffer, corr_id, typ=None):
     """Hinweise zum Prüfen (PO 2026-10-11: markieren, nicht automatisch korrigieren): Teilstück,
     Dublette, Sammeldokument, erfundener OCR-Text. Jeder Fehler hier bricht den Lauf nicht ab."""
     b = {}
@@ -1664,7 +1738,7 @@ def pruef_befunde(did, doc, content, treffer, corr_id):
             d = None
         if d:
             b["dublette"] = d
-        sd = sammeldokument(treffer, corr_id)
+        sd = sammeldokument(treffer, corr_id, typ, CFG.get("sammeldokument_ausser_typen") or [])
         if sd:
             b["sammeldokument"] = sd
         if OCR_VERDACHT:
@@ -1672,6 +1746,115 @@ def pruef_befunde(did, doc, content, treffer, corr_id):
     except Exception as e:
         log(f"befunde-fail {did}: {e!r}")
     return b
+
+def eigene_person_befund(korrespondent, typ, eigene_namen, eigene_typen):
+    """One of our own PERSONS as correspondent of a document we do not write ourselves → hint, else None.
+
+    On forms (registration certificates, social insurance notices) the model took the addressee — us —
+    instead of the issuer (T-9). Our own letters, applications, notices of termination stay allowed
+    (`eigene_typen`). Only names that look like a person's count: a company archive names its own
+    company for internal documents (payroll, transfer lists) on purpose (EIGENE_REGEL)."""
+    k = set(ctoks(korrespondent or ""))
+    if not k or typ_in(typ, eigene_typen):
+        return None
+    for n in eigene_namen or ():
+        t = set(ctoks(n))
+        if t and t <= k and _personenname(n):
+            return f"„{korrespondent}“ ist eine eigene Person — {f'„{typ}“' if typ else 'ein Dokument ohne Typ'} schreibt man nicht selbst"
+    return None
+
+
+def datum_befund(vorschlag, wirksam, doc):
+    """No usable document date, so the date stays the import day → hint, else None (T-9: it stayed silently).
+
+    `vorschlag` is the model's date, `wirksam` the one that would be written (wirksames_datum). Only when
+    the current date IS the import day: a date Paperless or a person set before is kept on purpose."""
+    if wirksam:
+        return None
+    erstellt, hinzu = str(doc.get("created") or "")[:10], str(doc.get("added") or "")[:10]
+    if not hinzu or erstellt != hinzu:
+        return None
+    if not vorschlag:
+        return "kein Datum im Text — das Datum bleibt der Importtag"
+    return f"Datum {vorschlag} verworfen (nicht im Text oder Importtag) — das Datum bleibt der Importtag"
+
+
+# --- A re-run cleans up after the previous run (T-9) ---
+# Until T-9 a re-run only added: tags and field values of an earlier bad run (on text read upside down)
+# stayed, and the model saw them as "current" and kept them. What the previous run set itself is now
+# taken back before the new run decides — unless a person changed the classification since.
+GESICHTET = {"title", "correspondent", "document_type", "created", "tags", "custom_fields"}
+GNADE_S = 15   # writes of the run itself and clock skew around the trace time stamp (as panel/nacharbeit.py)
+
+
+def _utc(text):
+    try:
+        d = datetime.datetime.fromisoformat(str(text or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d if d.tzinfo else None
+
+
+def _feldwert(v):
+    """Field values comparable: Paperless and the run may write a number as number or text."""
+    return "" if v is None else " ".join(str(v).split())
+
+
+def personen_tags(text):
+    """Tag names of PANEL_ROUTE_PERSONS ("<tag>=<username>,…"), normalised — routing acts on them."""
+    return {norm(t) for t, sep, u in (x.partition("=") for x in str(text or "").split(",")) if sep and t.strip() and u.strip()}
+
+
+def vorlauf_kandidaten(trace, tags_on, cur_vals, tagid_by_norm, fid_by_name, geschuetzt):
+    """What the previous run set and is still exactly as it left it: ({tag id: name}, {field id: name}).
+
+    Only a finished run counts, and only what it CHANGED (`tags_gesetzt`, `fields_gesetzt`): a value
+    that was there before the run, set by a person, is not the run's to take back. Older traces lack
+    both keys and give nothing. Protected tags (reserved, person tags) are never candidates."""
+    wb = (trace or {}).get("writeback") if isinstance(trace, dict) else None
+    if not isinstance(wb, dict) or wb.get("fehler") or trace.get("error") or trace.get("_stage") != "fertig":
+        return {}, {}
+    tags = {}
+    for name in wb.get("tags_gesetzt") or []:
+        tid = tagid_by_norm.get(norm(name))
+        if tid in tags_on and norm(name) not in geschuetzt:
+            tags[tid] = name
+    felder = {}
+    for name, v in (wb.get("fields_gesetzt") or {}).items():
+        fid = fid_by_name.get(name)
+        if fid in cur_vals and _feldwert(cur_vals[fid]) == _feldwert(v):
+            felder[fid] = name
+    return tags, felder
+
+
+def nach_lauf_gesichtet(trace, historie):
+    """Has a user changed the classification since the run (document history)? None = unknown.
+
+    Unknown counts as "yes" for the caller: no history (audit log off, no permission) or no time stamp
+    means nothing is taken back. Entries without a user (workflows) do not count, as in the Nacharbeit."""
+    ende = _utc((trace or {}).get("ts_utc"))
+    if not isinstance(historie, list) or ende is None:
+        return None
+    grenze = ende + datetime.timedelta(seconds=GNADE_S)
+    for e in historie:
+        if not isinstance(e, dict):
+            continue
+        wer = (e.get("actor") or {}).get("username") if isinstance(e.get("actor"), dict) else None
+        t = _utc(e.get("timestamp"))
+        if wer and (t is None or t > grenze) and GESICHTET & set(e.get("changes") or {}):
+            return True
+    return False
+
+
+def gesetzt(vorher_tags, tag_ids, tagname_by_id, cur_vals, cfs, fname_by_id):
+    """What this run changed itself: (KI tag names it added, {field name: value} it set to a new value).
+    Stored in the trace for the next run's clean-up (vorlauf_kandidaten)."""
+    tags = [tagname_by_id.get(t) for t in dict.fromkeys(tag_ids) if t not in vorher_tags and tagname_by_id.get(t)]
+    felder = {fname_by_id[c["field"]]: c["value"] for c in cfs or ()
+              if c["field"] in fname_by_id and c.get("value") is not None
+              and (c["field"] not in cur_vals or _feldwert(cur_vals[c["field"]]) != _feldwert(c["value"]))}
+    return tags, felder
+
 
 def korrespondent_ergebnis(corr_info, bisher=None):
     """Der Name, der am Dokument stünde: aus „exakt='X'“, „gewählt='X'“, „NEU='X' (dry)“; bei
@@ -1700,20 +1883,46 @@ def teilstueck(text, seiten):
     return f"„Seite … von {y}“, das Dokument hat {n} Seite(n)" if n < y else None
 
 
+ANREDE = re.compile(r"^[ \t]*((?:sehr\s+geehrte[rs]?|liebe[rs]?|hallo|guten\s+tag)\b[^\n,]{0,60})", re.IGNORECASE | re.MULTILINE)
+
+
+def anrede(text):
+    """The salutation line ("Sehr geehrte Frau Muster"), normalised; "" if there is none."""
+    m = ANREDE.search(str(text or ""))
+    return norm(m.group(1)) if m else ""
+
+
 def dublette(text, seiten, aehnliche):
-    """Ein ähnliches Dokument mit fast denselben Beträgen/Daten und gleicher Seitenzahl → Hinweis."""
+    """Ein ähnliches Dokument mit denselben Beträgen/Daten, derselben Anrede und gleicher Seitenzahl → Hinweis.
+
+    Until T-9 "almost the same numbers" (Jaccard ≥ 0.85) was enough, and form letters were reported: the
+    same text sent to other recipients differs only in the salutation and a number or two (customer
+    number, postcode). A copy has all of them in common."""
     z = kennzahlen(text)
     if len(z) < 5:
         return None
+    a = anrede(text)
     for d in aehnliche or ():
-        zd = kennzahlen(d.get("content"))
-        if len(zd) >= 5 and len(z & zd) / len(z | zd) >= 0.85 and (d.get("page_count") or 1) == (seiten or 1):
+        if (kennzahlen(d.get("content")) == z and anrede(d.get("content")) == a
+                and (d.get("page_count") or 1) == (seiten or 1)):
             return f"wie Dokument {d.get('id')} ({str(d.get('title') or '')[:50]})"
     return None
 
 
-def sammeldokument(treffer, ausser=None):
-    """Harte Kennungen von mindestens drei verschiedenen Korrespondenten → Zusammenstellung."""
+def typ_in(typ, namen):
+    """Is the document type one of `namen`, regardless of spelling? A compound ending in a listed name of
+    5+ letters counts too ("Mietkündigung" → Kündigung), as in typ_zuordnen."""
+    f = _typ_falte(typ)
+    return bool(f) and any(f == g or (len(g) >= 5 and f.endswith(g)) for g in map(_typ_falte, namen or ()) if g)
+
+
+def sammeldokument(treffer, ausser=None, typ=None, ausnahmen=()):
+    """Harte Kennungen von mindestens drei verschiedenen Korrespondenten → Zusammenstellung.
+
+    Not for the types in `ausnahmen`: a bank or credit card statement lists the IBANs of everyone who was
+    paid, by nature (T-9: every statement was flagged)."""
+    if typ_in(typ, ausnahmen):
+        return None
     namen = [c["name"] for c, _ in treffer if c.get("id") != ausser]
     return f"Belege von {len(namen)} Absendern ({', '.join(namen[:4])})" if len(namen) >= 3 else None
 
@@ -1926,9 +2135,9 @@ FELD_ANWEISUNG = (
 ABSENDER_ANWEISUNG = (
     "\nGib ausserdem absender = Objekt mit den Kontaktdaten des GEGENÜBERS (der Partei, die nicht wir sind), "
     "so wie sie im Dokument stehen, sonst null je Feld: ustid, iban, email, telefon, adresse (einzeilig), "
-    "kundennummer (die Nummer, unter der das Gegenüber UNS führt: Kunden-, Personal-, Mitglieds-, Vertrags-, "
-    "Versicherungs- oder Aktennummer — NICHT Sozialversicherungsnummer oder Steuer-Identifikationsnummer, die "
-    "überall gleich sind). "
+    "kundennummer (die Nummer, unter der das Gegenüber UNS führt: Kunden-, Mitglieds-, Vertrags-, "
+    "Versicherungs- oder Aktennummer — NICHT Personalnummer, Sozialversicherungsnummer oder "
+    "Steuer-Identifikationsnummer). "
     "Und korrespondent_kontext = 1 kurzer Satz, was das Gegenüber ist (Art, Branche, Ort — etwa „Kfz-Werkstatt "
     "in Salzburg“), wenn es neu ist oder in den möglichen Korrespondenten kein [Kontext: …] trägt, sonst null.")
 
@@ -2240,6 +2449,36 @@ def main():
     manual_fids = {resolve_field(cfields, n) for n in (CFG.get("manual_fields") or [])}
     skip_fids = {x for x in (summary_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
 
+    # Take back what the previous run set, if nobody has touched the classification since (T-9). Before
+    # the prompt: the model must not see the old run's values as "current" and keep them.
+    vorlauf_tags, vorlauf_felder = {}, {}
+    TRACE["vorlauf"] = None
+    if not erbe:
+        try:
+            with open(os.path.join(TRACE_DIR, f"{did}.json"), encoding="utf-8") as f:
+                alt_trace = json.load(f)
+        except (OSError, ValueError):
+            alt_trace = None
+        geschuetzt = reserved | personen_tags(os.environ.get("PANEL_ROUTE_PERSONS"))
+        k_tags, k_felder = vorlauf_kandidaten(alt_trace, set(tag_ids_on), cur_vals, tagid_by_norm,
+                                              {f["name"]: f["id"] for f in cfields}, geschuetzt)
+        k_felder = {fid: n for fid, n in k_felder.items() if fid not in skip_fids}
+        if k_tags or k_felder:
+            try:
+                hist = get(f"/documents/{did}/history/")
+            except Exception:
+                hist = None
+            gesichtet = nach_lauf_gesichtet(alt_trace, hist)
+            if gesichtet is False:
+                vorlauf_tags, vorlauf_felder = k_tags, k_felder
+                tag_ids_on = [t for t in tag_ids_on if t not in vorlauf_tags]
+                for fid in vorlauf_felder:
+                    cur_vals.pop(fid, None)
+                TRACE["vorlauf"] = {"entfernt": {"tags": sorted(vorlauf_tags.values()), "felder": sorted(vorlauf_felder.values())}}
+            else:
+                TRACE["vorlauf"] = {"behalten": "seit dem letzten Lauf von Hand geändert" if gesichtet
+                                    else "Änderungshistorie nicht lesbar"}
+
     _NL = chr(10)
     mail_ktx = (cur_vals.get(mailctx_fid) or "").strip() if mailctx_fid else ""
     mail_from = (cur_vals.get(mailfrom_fid) or "").strip() if mailfrom_fid else ""
@@ -2486,8 +2725,21 @@ def main():
         _mail = mail_from if mail_bestaetigt(mail_from, corr_id, mail_corr, _text, prop.get("absender")) else ""
         _anh = corr_info.startswith("exakt")
         _fremd = stammdaten_fremd(corrs, cmeta, corr_id)
+        # Count the spread of a new IBAN/phone number BEFORE taking the store lock: the search is an
+        # HTTP call, and the panel waits on the same lock. A value not counted here counts as unknown.
+        _verbr = {}
+        _abs = prop.get("absender") if isinstance(prop.get("absender"), dict) else {}
+        for _feld, _norm in (("iban", norm_iban), ("telefon", norm_telefon)):
+            _roh = "" if is_null(_abs.get(_feld)) else ohne_tabellenrest(_abs.get(_feld))[:60]
+            _w = _norm(_roh)
+            _eigen = _w in eigene["iban"] or any(telefon_gleich(_w, x) for x in eigene.get("telefon", ()))
+            if (_w and not _eigen
+                    and not any(gleicher_wert(_feld, _w, x) for x in werte(cmeta(corr_id) if corr_id else {}, _feld))):
+                _ids = korrespondenten_mit(_feld, _roh)
+                _verbr[(_feld, _w)] = None if _ids is None else len(_ids | ({corr_id} if corr_id else set()))
+        _verbreitet = lambda feld, w: _verbr.get((feld, norm_iban(w) if feld == "iban" else norm_telefon(w)))
         aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle, _anh, _fremd,
-                                                      prop.get("korrespondent_kontext"))
+                                                      prop.get("korrespondent_kontext"), _text, _verbreitet)
         try:
             if corr_id and not DRY:
                 g, v = stammdaten_schreiben(corr_id, aenderung)
@@ -2505,7 +2757,21 @@ def main():
         except Exception as e:
             log(f"stammdaten-fail {did}: {e!r}")   # Klassifizierung läuft weiter
             TRACE["stammdaten"] = {"fehler": repr(e)}
-    pruefen.update(pruef_befunde(did, doc, content, treffer, corr_id))
+    pruefen.update(pruef_befunde(did, doc, content, treffer, corr_id, dt))
+    # The correspondent that will be on the document (also for the title below).
+    if corr_id in _c_by_id:
+        k_final = _c_by_id[corr_id]["name"]
+    elif corr_id or corr_info.startswith("NEU"):
+        k_final = corr_name
+    else:
+        k_final = cname
+    ep = eigene_person_befund(k_final, dt, (CFG_LAUF.get("eigene_kennungen") or {}).get("namen"),
+                              CFG.get("eigene_typen") or [])
+    if ep:
+        pruefen["eigene_person"] = ep
+    db = datum_befund(dokument_datum(prop), wirksames_datum(prop, content, doc), doc)
+    if db:
+        pruefen["datum"] = db
     TRACE["pruefen"] = pruefen or None
 
     # --- Titel: „Korrespondent – Dokumentart Kennung“, mit dem Korrespondenten und Typ, die tatsächlich
@@ -2513,13 +2779,7 @@ def main():
     titel_neu = None
     if CFG.get("titel_setzen", True) and (typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR) or erbe):
         _typ_id = typ_setzen(dt_id, doc.get("document_type"), True) or doc.get("document_type")
-        if corr_id in _c_by_id:
-            _kname = _c_by_id[corr_id]["name"]
-        elif corr_id or corr_info.startswith("NEU"):
-            _kname = corr_name
-        else:
-            _kname = cname
-        titel_neu = titel_bilden(_kname, next((n for n, i in types.items() if i == _typ_id), None), prop.get("titel_kennung"))
+        titel_neu = titel_bilden(k_final, next((n for n, i in types.items() if i == _typ_id), None), prop.get("titel_kennung"))
         if titel_neu == doc.get("title"):
             titel_neu = None
         TRACE["titel"] = {"kennung": prop.get("titel_kennung"), "bisher": doc.get("title"), "neu": titel_neu}
@@ -2529,7 +2789,7 @@ def main():
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
                "summary": summary, "fields": prop.get("fields"), "document_date": wirksames_datum(prop, content, doc),
                "korrespondent_ergebnis": korrespondent_ergebnis(corr_info, cname), "datum_bisher": (doc.get("created") or "")[:10],
-               "pruefen": pruefen or None,
+               "pruefen": pruefen or None, "vorlauf": TRACE.get("vorlauf"),
                "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}"
@@ -2586,6 +2846,10 @@ def main():
         log(f"repariert {did} nach {rounds} Runde(n)" if ok else f"repair-fehlgeschlagen {did}")
     if not ok and not str(err).startswith(ZEIT):   # nach allen Runden Feldfehler → wenigstens ohne custom_fields
         patch.pop("custom_fields", None); patch_doc(did, patch)
+    tg, fg = gesetzt(set(tag_ids_on), tag_ids, tagname_by_id, cur_vals, patch.get("custom_fields"),
+                     {f["id"]: f["name"] for f in cfields})
+    TRACE["writeback"].update({"tags_gesetzt": tg, "fields_gesetzt": fg,
+                               "vorlauf_entfernt": (TRACE.get("vorlauf") or {}).get("entfernt")})
     if not ok and str(err).startswith(ZEIT):
         TRACE["writeback"]["fehler"] = err
         raise RuntimeError(f"Speichern nach Paperless nicht möglich: {err[:200]}")

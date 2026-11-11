@@ -90,9 +90,10 @@ import contextlib as _ctx, io as _io
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
           dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None,
-          datei=None, hinzu=None, patch_ergebnis=None, tags=(), alle_tags=()):
+          datei=None, hinzu=None, patch_ergebnis=None, tags=(), alle_tags=(), mehr_routen=None):
     aufrufe = {"ocr": 0, "chat": []}
-    routen = {"/documents/5/": {"id": 5, "content": text, "title": titel, "tags": list(tags),
+    # mehr_routen first: "/documents/5/history/" must not be answered by "/documents/5/".
+    routen = {**(mehr_routen or {}), "/documents/5/": {"id": 5, "content": text, "title": titel, "tags": list(tags),
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
                                 "correspondent": korr, "owner": 3 if besitzer else None,
                                 "original_file_name": datei, "added": hinzu},
@@ -1514,17 +1515,34 @@ r.check("Eigene Nummer: aus der Config (ohne Schreibweise) und per SV-Muster",
         classify.eigene_nummer("86409331753", _eg) and classify.eigene_nummer("66130593 B017", _eg)
         and not classify.eigene_nummer("782125149", _eg))
 _kn, _kg, _kv = classify.stammdaten_nachtragen({}, {"kundennummer": "66130593B017"}, "", _eg, "Test")
-_kn2, _kg2, _ = classify.stammdaten_nachtragen({}, {"kundennummer": "Pers.-Nr. 782125149"}, "", _eg, "Test")
-r.check("Erfassen: SV-Nummer wird verworfen, Personalnummer gespeichert",
+_kn2, _kg2, _kv2 = classify.stammdaten_nachtragen({}, {"kundennummer": "Pers.-Nr. 782125149"}, "", _eg, "Test")
+# T-9: a personnel number is how an employer files us — learned as "customer number" it pulled payslips
+# to the wrong correspondent. Never stored, whether the label is in the value or only in the text.
+_kn3, _, _kv3 = classify.stammdaten_nachtragen({}, {"kundennummer": "782 125 149"}, "", _eg, "Test",
+                                               text="Lohnabrechnung 05/2026\nPersonal-Nr.: 782125149 Steuerklasse 1")
+_kn4, _, _ = classify.stammdaten_nachtragen({}, {"kundennummer": "4711815"}, "", _eg, "Test",
+                                            text="Personalnummer 782125149\nKunden-Nr. 4711815")
+r.check("Erfassen: SV-Nummer und Personalnummer werden verworfen, eine Kundennummer daneben gespeichert",
         "kundennummer" not in _kn and "eigene Nummer" in _kv.get("kundennummer", "")
-        and _kn2.get("kundennummer") == ["Pers.-Nr. 782125149"], f"{_kn} {_kv} {_kn2}")
-_tr = classify.stammdaten_treffer([{"id": 7, "name": "Arbeitgeber A"}, {"id": 8, "name": "Arbeitgeber B"}],
-                                  {7: {"kundennummer": ["782125149"]}, 8: {"kundennummer": ["66130593B017"]}}.get,
-                                  "Lohnabrechnung Pers.-Nr. 782125149 SV-Nr 66130593B017", _eg)
-r.check("Vorsuche: Personalnummer findet den Arbeitgeber, eine gespeicherte SV-Nummer zählt nicht",
-        [c["id"] for c, _ in _tr] == [7], str(_tr))
-r.check("Prompt: Kennnummer umfasst Personal-/Vertragsnummer, nicht SV-Nr/Steuer-ID",
-        "Personal-" in classify.ABSENDER_ANWEISUNG and "Sozialversicherungsnummer" in classify.ABSENDER_ANWEISUNG)
+        and "kundennummer" not in _kn2 and _kv2.get("kundennummer", "").startswith("Personalnummer")
+        and "kundennummer" not in _kn3 and _kv3.get("kundennummer", "").startswith("Personalnummer")
+        and _kn4.get("kundennummer") == ["4711815"], f"{_kn2} {_kv2} {_kn3} {_kv3} {_kn4}")
+r.check("Personalnummer: Beschriftung im Wert oder direkt davor im Text; andere Nummern nicht",
+        classify.personalnummer("Pers.-Nr. 1234567") and classify.personalnummer("Personal-Nummer 99")
+        and classify.personalnummer("123 456", "Pers. Nr.: 123 456 Abt. 3")
+        and not classify.personalnummer("1234567", "Personalnummer 12345678")
+        and not classify.personalnummer("1234567", "Kundennummer 1234567")
+        and not classify.personalnummer("1234567", "Personalausweis 1234567"))
+_tr = classify.stammdaten_treffer([{"id": 7, "name": "Arbeitgeber A"}, {"id": 8, "name": "Arbeitgeber B"},
+                                   {"id": 9, "name": "Versand C"}],
+                                  {7: {"kundennummer": ["782125149"]}, 8: {"kundennummer": ["66130593B017"]},
+                                   9: {"kundennummer": ["5550001"]}}.get,
+                                  "Lohnabrechnung Pers.-Nr. 782125149 SV-Nr 66130593B017 Kd-Nr. 5550001", _eg)
+r.check("Vorsuche: eine gespeicherte Personalnummer und SV-Nummer zählen nicht, eine Kundennummer schon",
+        [c["id"] for c, _ in _tr] == [9], str(_tr))
+r.check("Prompt: Kennnummer ohne Personalnummer, SV-Nr und Steuer-ID",
+        "NICHT Personalnummer" in classify.ABSENDER_ANWEISUNG and "Sozialversicherungsnummer" in classify.ABSENDER_ANWEISUNG
+        and "Kunden-, Personal-" not in classify.ABSENDER_ANWEISUNG)
 
 # ---- Prüf-Befunde: Teilstück, Dublette, Sammeldokument, erfundener OCR-Text (nur markieren).
 r.check("Teilstück: „Seite 2 von 7“ bei einer Seite, nicht bei vollständigen Dokumenten",
@@ -1547,6 +1565,200 @@ _pb = _lauf([_ok], text=_gut + " Seite 2 von 7", dry=False)
 r.check("Verdrahtung: Teilstück landet in „Prüfen“ (Tag KI-unsicher, PRÜFEN-Zeile)",
         "teilstueck" in (classify.TRACE.get("pruefen") or {})
         and "PRÜFEN 5" in Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8"), str(classify.TRACE.get("pruefen")))
+
+# ---- T-9: false alarms and master data learned from our own identifiers.
+_IBAN_A, _IBAN_B, _IBAN_C = "DE00 1111 2222 3333 4444 55", "DE00 5555 6666 7777 8888 99", "AT00 1234 5678 9012 3456"
+# 1. An IBAN/phone number on documents of many correspondents is most likely ours: not learned, no "belongs to".
+_fr_b = lambda feld, w: "Krankenkasse Muster" if feld in ("iban", "telefon") else None
+_nv, _gv, _vv = classify.stammdaten_nachtragen({}, {"iban": _IBAN_A, "telefon": "0662 55 44 33"}, "", _eig, _q,
+                                               fremd=_fr_b, verbreitet=lambda feld, w: 3)
+r.check("Verbreitet: IBAN/Telefon auf Dokumenten von 3 Korrespondenten — nicht gelernt, kein „gehört schon zu“",
+        "iban" not in _nv and "telefon" not in _nv and "eigene Kennung" in _vv.get("iban", "")
+        and "eigene Kennung" in _vv.get("telefon", ""), f"{_nv} {_vv}")
+_nv2, _, _vv2 = classify.stammdaten_nachtragen({}, {"iban": _IBAN_A, "telefon": "0662 55 44 33"}, "", _eig, _q,
+                                               fremd=_fr_b, verbreitet=lambda feld, w: 2)
+r.check("Verbreitet: bei 2 Korrespondenten bleibt es beim Widerspruch — weder IBAN noch Telefon zusätzlich gelernt",
+        "iban" not in _nv2 and "telefon" not in _nv2 and _vv2.get("iban") == "gehört schon zu Krankenkasse Muster"
+        and _vv2.get("telefon") == "gehört schon zu Krankenkasse Muster", f"{_nv2} {_vv2}")
+r.check("Verbreitet: unbekannt (None) oder selten → neue IBAN wird wie bisher gelernt; Kundennummer zählt nie",
+        classify.stammdaten_nachtragen({}, {"iban": _IBAN_A}, "", _eig, _q, verbreitet=lambda f, w: None)[0].get("iban") == [_IBAN_A]
+        and classify.stammdaten_nachtragen({}, {"kundennummer": "K-99887"}, "", _eig, _q,
+                                           verbreitet=lambda f, w: 9)[0].get("kundennummer") == ["K-99887"])
+_suchen = []
+def _holen(pfad):
+    _suchen.append(pfad)
+    return {"results": [{"id": 1, "correspondent": 8}, {"id": 2, "correspondent": 11}, {"id": 3, "correspondent": None}]}
+r.check("Verbreitung: IBAN kompakt und in Vierergruppen gesucht, Korrespondenten gezählt (ohne leere)",
+        classify.korrespondenten_mit("iban", _IBAN_A, _holen) == {8, 11} and len(_suchen) == 2
+        and any("DE0011112222333344445" in p for p in _suchen) and any("DE00%201111" in p for p in _suchen), str(_suchen))
+r.check("Verbreitung: scheitert jede Suche → unbekannt (None)",
+        classify.korrespondenten_mit("iban", _IBAN_A, lambda p: (_ for _ in ()).throw(OSError("weg"))) is None
+        and classify.korrespondenten_mit("kundennummer", "123456", _holen) is None)
+classify.CORR_META.clear(); classify.CORR_META.update({"8": {"iban": [_IBAN_A]}})
+_alt_ut = classify.CFG.get("unsicher_tag")
+classify.CFG["unsicher_tag"] = "KI-unsicher"
+try:
+    _kk = [{"id": 7, "name": "Arbeitgeber Muster"}, {"id": 8, "name": "Krankenkasse Muster"}]
+    _vb = _lauf([{**_ok, "correspondent": "Arbeitgeber Muster", "absender": {"iban": _IBAN_A}}], dry=False, korrespondenten=_kk,
+                mehr_routen={"/documents/?page_size=100": {"results": [{"id": 1, "correspondent": 8}, {"id": 2, "correspondent": 12}]}})
+    _vb_pr = dict(classify.TRACE.get("pruefen") or {}); _vb_sd = dict((classify.TRACE.get("stammdaten") or {}).get("verworfen") or {})
+    _vs = _lauf([{**_ok, "correspondent": "Arbeitgeber Muster", "absender": {"iban": _IBAN_A}}], dry=False, korrespondenten=_kk,
+                mehr_routen={"/documents/?page_size=100": {"results": [{"id": 1, "correspondent": 8}]}})
+    _vs_pr = dict(classify.TRACE.get("pruefen") or {})
+finally:
+    classify.CFG["unsicher_tag"] = _alt_ut
+    classify.CORR_META.clear()
+r.check("Verdrahtung: eigene IBAN bei Krankenkasse gelernt, auf Dokumenten von 3 Korrespondenten → kein Prüfen",
+        "iban" not in _vb_pr and "eigene Kennung" in _vb_sd.get("iban", ""), f"{_vb_pr} {_vb_sd}")
+r.check("Verdrahtung: nur beim anderen Korrespondenten gefunden → Prüfen „gehört schon zu“ wie bisher",
+        _vs_pr.get("iban") == "gehört schon zu Krankenkasse Muster", str(_vs_pr))
+
+# 2. Bank and credit card statements list many counterparts by nature: no "collective document".
+_sd3 = [({"id": i, "name": f"F{i}"}, ["IBAN"]) for i in (1, 2, 3)]
+r.check("Sammeldokument: nicht bei Kontoauszug/Kreditkartenabrechnung (Schreibweise egal), sonst wie bisher",
+        classify.sammeldokument(_sd3, typ="Kontoauszug", ausnahmen=classify.CFG["sammeldokument_ausser_typen"]) is None
+        and classify.sammeldokument(_sd3, typ="KREDITKARTENABRECHNUNG", ausnahmen=["Kreditkartenabrechnung"]) is None
+        and classify.sammeldokument(_sd3, typ="Rechnung", ausnahmen=["Kontoauszug"])
+        and classify.sammeldokument(_sd3, typ="Kontoauszug"))
+r.check("Sammeldokument: Ausnahmen in der Vorgabe-Config", classify.CFG.get("sammeldokument_ausser_typen")
+        == ["Kontoauszug", "Kreditkartenabrechnung"], str(classify.CFG.get("sammeldokument_ausser_typen")))
+classify.CORR_META.clear(); classify.CORR_META.update({"21": {"iban": [_IBAN_A]}, "22": {"iban": [_IBAN_B]}, "23": {"iban": [_IBAN_C]}})
+try:
+    _sdk = [{"id": 21, "name": "Strom Muster"}, {"id": 22, "name": "Miete Muster"}, {"id": 23, "name": "Versand Muster"}]
+    _sdtext = _gut + f"\nÜberweisung {_IBAN_A}\nLastschrift {_IBAN_B}\nGutschrift {_IBAN_C}\n"
+    _lauf([{**_ok, "document_type": "Kontoauszug"}], text=_sdtext, korrespondenten=_sdk,
+          typen=[{"id": 1, "name": "Kontoauszug"}, {"id": 2, "name": "Rechnung"}])
+    _sd_konto = dict(classify.TRACE.get("pruefen") or {})
+    _lauf([{**_ok, "document_type": "Rechnung"}], text=_sdtext, korrespondenten=_sdk,
+          typen=[{"id": 1, "name": "Kontoauszug"}, {"id": 2, "name": "Rechnung"}])
+    _sd_rechnung = dict(classify.TRACE.get("pruefen") or {})
+finally:
+    classify.CORR_META.clear()
+r.check("Verdrahtung: Kontoauszug mit drei fremden IBANs kein Sammeldokument, eine Rechnung schon",
+        "sammeldokument" not in _sd_konto and "sammeldokument" in _sd_rechnung, f"{_sd_konto} {_sd_rechnung}")
+
+# 3. A form letter is the same text to other recipients — a duplicate needs the same numbers AND salutation.
+_zahlen = " ".join(f"{t:02d}.03.2025 {t},50" for t in range(1, 7))
+_brief = lambda anrede, kd: f"Musterverein\n{anrede},\nIhre Mitgliedsnummer {kd}\n{_zahlen}\nBeitrag ab sofort."
+r.check("Dublette: Serienbrief mit anderer Anrede ist keine",
+        classify.dublette(_brief("Sehr geehrte Frau Muster", "1234567"), 1,
+                          [{"id": 9, "content": _brief("Sehr geehrter Herr Beispiel", "1234567"), "page_count": 1}]) is None)
+r.check("Dublette: Serienbrief mit anderer Mitgliedsnummer ist keine (fast gleiche Zahlen reichen nicht mehr)",
+        classify.dublette(_brief("Sehr geehrte Damen und Herren", "1234567"), 1,
+                          [{"id": 9, "content": _brief("Sehr geehrte Damen und Herren", "7654321"), "page_count": 1}]) is None)
+r.check("Dublette: gleicher Text, gleiche Zahlen, gleiche Anrede → Doppelscan",
+        classify.dublette(_brief("Sehr geehrte Frau Muster", "1234567"), 1,
+                          [{"id": 9, "title": "Alt", "content": _brief("Sehr geehrte Frau Muster", "1234567") + " x",
+                            "page_count": 1}]) == "wie Dokument 9 (Alt)")
+r.check("Anrede: erkannt und normalisiert, ohne Anrede leer",
+        classify.anrede("Kopf\n  Sehr geehrte Frau Muster,\nText") == "sehr geehrte frau muster"
+        and classify.anrede("Liebe Erika, hallo") == "liebe erika" and classify.anrede("Rechnung 12") == "")
+
+# 4. One of our own persons as correspondent of a document we do not write → check.
+_et = classify.CFG["eigene_typen"]
+r.check("Eigene Person: Korrespondent = eigene Person bei fremdem Typ → Befund",
+        "eigene Person" in (classify.eigene_person_befund("Erika Muster", "Meldebescheinigung", ["Erika Muster"], _et) or "")
+        and "ohne Typ" in (classify.eigene_person_befund("Erika Muster", None, ["Erika Muster"], _et) or ""))
+r.check("Eigene Person: selbst verfasste Typen (auch zusammengesetzt) und andere Personen nicht",
+        classify.eigene_person_befund("Erika Muster", "Bewerbung", ["Erika Muster"], _et) is None
+        and classify.eigene_person_befund("Erika Muster", "Mietkündigung", ["Erika Muster"], _et) is None
+        and classify.eigene_person_befund("Max Beispiel", "Meldebescheinigung", ["Erika Muster"], _et) is None
+        and classify.eigene_person_befund(None, "Meldebescheinigung", ["Erika Muster"], _et) is None)
+r.check("Eigene Person: die eigene Firma bei internen Dokumenten nicht (kein Personenname)",
+        classify.eigene_person_befund("Eigenfirma GmbH", "Lohnabrechnung", ["Eigenfirma GmbH"], _et) is None)
+_ep_cfg = {"eigene_kennungen": {"namen": ["Erika Muster"]}}
+_ep_typen = [{"id": 1, "name": "Meldebescheinigung"}, {"id": 2, "name": "Bewerbung"}]
+_lauf([{**_ok, "document_type": "Meldebescheinigung", "correspondent": "Erika Muster"}, {"empfaenger": None, "adresse": None}],
+      korrespondenten=[{"id": 3, "name": "Erika Muster"}], typen=_ep_typen, cfg=_ep_cfg)
+_ep_ja = dict(classify.TRACE.get("pruefen") or {})
+_lauf([{**_ok, "document_type": "Bewerbung", "correspondent": "Erika Muster"}, {"empfaenger": None, "adresse": None}],
+      korrespondenten=[{"id": 3, "name": "Erika Muster"}], typen=_ep_typen, cfg=_ep_cfg)
+_ep_nein = dict(classify.TRACE.get("pruefen") or {})
+r.check("Verdrahtung: Meldebescheinigung mit eigener Person → Prüfen; Bewerbung nicht",
+        "eigene_person" in _ep_ja and "eigene_person" not in _ep_nein, f"{_ep_ja} {_ep_nein}")
+
+# 6. No date in the text → the import day stays; that is marked now, not silent.
+_imp = {"created": "2026-07-01", "added": "2026-07-01T09:12:00+02:00"}
+r.check("Datum: kein Datum, Datum = Importtag → Befund; verworfenes Datum ebenso",
+        "kein Datum" in (classify.datum_befund(None, None, _imp) or "")
+        and "2026-05-05 verworfen" in (classify.datum_befund("2026-05-05", None, _imp) or ""))
+r.check("Datum: mit wirksamem Datum, anderem Datum am Dokument oder ohne Importzeit kein Befund",
+        classify.datum_befund("2026-05-05", "2026-05-05", _imp) is None
+        and classify.datum_befund(None, None, {"created": "2025-12-24", "added": "2026-07-01T09:12:00+02:00"}) is None
+        and classify.datum_befund(None, None, {"created": "2026-07-01"}) is None)
+_lauf([_ok], hinzu="2026-01-01T09:00:00+01:00")
+_dt_ohne = dict(classify.TRACE.get("pruefen") or {})
+_lauf([{**_ok, "document_type": "Rechnung", "document_date": "2025-12-15"}], text=_gut + " Wien, 15.12.2025",
+      hinzu="2026-01-01T09:00:00+01:00")
+_dt_mit = dict(classify.TRACE.get("pruefen") or {})
+r.check("Verdrahtung: ohne Datum im Text → Prüfen „datum“, mit belegtem Datum nicht",
+        "kein Datum" in _dt_ohne.get("datum", "") and "datum" not in _dt_mit, f"{_dt_ohne} {_dt_mit}")
+
+# 5. A re-run takes back what the previous run set, if nobody touched the classification since.
+_vl_trace = {"_stage": "fertig", "ts_utc": "2026-11-01T10:00:00+00:00",
+             "writeback": {"tags_gesetzt": ["Steuer", "Offen", "Erika"], "fields_gesetzt": {"Fahrzeug": "Musterauto X1", "Notiz": "alt"}}}
+_vl_tags = {"steuer": 60, "offen": 61, "erika": 63}
+_vk_t, _vk_f = classify.vorlauf_kandidaten(_vl_trace, {60, 61, 62, 63}, {4: "Musterauto X1", 5: "von Hand"}, _vl_tags,
+                                           {"Fahrzeug": 4, "Notiz": 5}, {"offen"} | classify.personen_tags("Erika=erika, Max=max"))
+r.check("Vorlauf: nur was er selbst gesetzt hat und noch so steht; reservierte und Personen-Tags nie",
+        _vk_t == {60: "Steuer"} and _vk_f == {4: "Fahrzeug"}, f"{_vk_t} {_vk_f}")
+r.check("Vorlauf: alter Trace ohne tags_gesetzt/fields_gesetzt, abgebrochener oder fehlender Lauf → nichts",
+        classify.vorlauf_kandidaten({"_stage": "fertig", "writeback": {"tags": ["Steuer"], "fields_ki": {"Fahrzeug": "Musterauto X1"}}},
+                                    {60}, {4: "Musterauto X1"}, _vl_tags, {"Fahrzeug": 4}, set()) == ({}, {})
+        and classify.vorlauf_kandidaten({**_vl_trace, "_stage": "Pass 1"}, {60}, {}, _vl_tags, {}, set()) == ({}, {})
+        and classify.vorlauf_kandidaten({**_vl_trace, "writeback": {**_vl_trace["writeback"], "fehler": "x"}}, {60}, {}, _vl_tags, {}, set()) == ({}, {})
+        and classify.vorlauf_kandidaten(None, {60}, {}, _vl_tags, {}, set()) == ({}, {}))
+_h_mensch = [{"timestamp": "2026-11-02T08:00:00+00:00", "actor": {"username": "erika"}, "changes": {"tags": {"operation": "add", "objects": ["Privat"]}}}]
+r.check("Gesichtet: Änderung eines Benutzers nach dem Lauf → ja; Workflow, Lauf selbst (Gnadenfrist), nur Rechte → nein",
+        classify.nach_lauf_gesichtet(_vl_trace, _h_mensch) is True
+        and classify.nach_lauf_gesichtet(_vl_trace, [{"timestamp": "2026-11-02T08:00:00+00:00", "actor": None, "changes": {"tags": {}}}]) is False
+        and classify.nach_lauf_gesichtet(_vl_trace, [{"timestamp": "2026-11-01T10:00:10+00:00", "actor": {"username": "erika"}, "changes": {"tags": {}}}]) is False
+        and classify.nach_lauf_gesichtet(_vl_trace, [{"timestamp": "2026-11-02T08:00:00+00:00", "actor": {"username": "hub"}, "changes": {"owner": [1, 2]}}]) is False
+        and classify.nach_lauf_gesichtet(_vl_trace, []) is False)
+r.check("Gesichtet: Historie nicht lesbar oder Lauf ohne Zeit → unbekannt (None)",
+        classify.nach_lauf_gesichtet(_vl_trace, {"detail": "Insufficient permissions"}) is None
+        and classify.nach_lauf_gesichtet({"_stage": "fertig"}, []) is None)
+r.check("Gesetzt: nur neu hinzugefügte KI-Tags und geänderte Felder",
+        classify.gesetzt({60}, [60, 64], {60: "Steuer", 64: "Auto"}, {4: "alt", 5: "gleich"},
+                         [{"field": 4, "value": "neu"}, {"field": 5, "value": "gleich"}, {"field": 6, "value": None}],
+                         {4: "Fahrzeug", 5: "Notiz", 6: "Leer"}) == (["Auto"], {"Fahrzeug": "neu"}))
+
+
+def _vorlauf_lauf(historie="keine", antwort=None, **kw):
+    _alt_td = classify.TRACE_DIR
+    classify.TRACE_DIR = tempfile.mkdtemp()
+    Path(classify.TRACE_DIR, "5.json").write_text(json.dumps(_vl_trace), encoding="utf-8")
+    routen = {} if historie == "keine" else {"/documents/5/history/": historie}
+    try:
+        return _lauf([antwort or _ok], dry=False, mehr_routen=routen, tags=[60, 61, 62],
+                     alle_tags=[{"id": 60, "name": "Steuer"}, {"id": 61, "name": "Offen"}, {"id": 62, "name": "Privat"}],
+                     felder=[{"id": 4, "name": "Fahrzeug", "data_type": "string"}, {"id": 5, "name": "Notiz", "data_type": "string"}],
+                     feldwerte=[{"field": 4, "value": "Musterauto X1"}, {"field": 5, "value": "von Hand"}], **kw)
+    finally:
+        classify.TRACE_DIR = _alt_td
+
+
+_vr = _vorlauf_lauf([], {**_ok, "fields": {"Fahrzeug": "BEHALTEN", "Notiz": "BEHALTEN"}})
+_vrp = (_vr.get("patch") or [{}])[0]
+r.check("Verdrahtung Vorlauf: Tag und Feld des vorigen Laufs entfernt, reservierter, Hand-Tag und Hand-Feld bleiben",
+        set(_vrp.get("tags") or []) >= {61, 62} and 60 not in (_vrp.get("tags") or [])
+        and {"field": 5, "value": "von Hand"} in (_vrp.get("custom_fields") or [])
+        and all(c["field"] != 4 for c in _vrp.get("custom_fields") or []), str(_vrp))
+r.check("Verdrahtung Vorlauf: der alte Wert steht nicht als „aktuell“ im Prompt, Trace nennt das Entfernte",
+        "Fahrzeug (Text), aktuell: —" in _vr["chat"][0]
+        and (classify.TRACE.get("vorlauf") or {}).get("entfernt") == {"tags": ["Steuer"], "felder": ["Fahrzeug"]},
+        str(classify.TRACE.get("vorlauf")))
+_vr2 = _vorlauf_lauf([], {**_ok, "fields": {"Fahrzeug": "Neuwagen Y"}})
+r.check("Verdrahtung Vorlauf: was der neue Lauf selbst setzt, steht da und ist im Trace als gesetzt vermerkt",
+        {"field": 4, "value": "Neuwagen Y"} in ((_vr2.get("patch") or [{}])[0].get("custom_fields") or [])
+        and (classify.TRACE.get("writeback") or {}).get("fields_gesetzt") == {"Fahrzeug": "Neuwagen Y"},
+        str((classify.TRACE.get("writeback") or {}).get("fields_gesetzt")))
+for _hist, _wie in ((_h_mensch, "nach dem Lauf von Hand geändert"), ("keine", "Historie nicht lesbar")):
+    _vrh = _vorlauf_lauf(_hist)
+    _vrhp = (_vrh.get("patch") or [{}])[0]
+    r.check(f"Verdrahtung Vorlauf: {_wie} → nichts entfernt",
+            60 in (_vrhp.get("tags") or []) and {"field": 4, "value": "Musterauto X1"} in (_vrhp.get("custom_fields") or []),
+            str(_vrhp))
 
 # ---- Teile aus dem Aufteilen (2026-10-14): Paperless kopiert Titel, Korrespondent, Typ,
 # Datum, Tags (auch den Marker) und alle Feldwerte des Ausgangsdokuments in jeden Teil.

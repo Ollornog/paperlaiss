@@ -1,7 +1,7 @@
 ---
 type: Task
 title: 'Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent'
-status: offen
+status: in-arbeit
 id: T-9
 milestone: M-1
 tags: [ki, eval, stammdaten, nacharbeit]
@@ -21,6 +21,8 @@ created: '2026-11-11'
 7. **Grund von „KI-unsicher“ sichtbar machen** (Notiz am Dokument oder Spalte im Panel), damit man nicht jedes Dokument öffnen muss.
 8. **Nacharbeit misst zu wenig:** zählt nur Änderungen angemeldeter Benutzer, wird nur auf Knopfdruck aufgefrischt. Regelmäßig auffrischen; Korrekturen aus einem Gegenlese-Lauf als Sollliste für `eval.py` übernehmen.
 9. **Modell gepinnt statt `*-latest`**, Formulare probeweise mit einem größeren Modell gegen die Sollliste messen.
+
+**Stand:** Punkte 1–6 als Fehlerbehebung umgesetzt (CHANGELOG „Unreleased“, Abschnitt „Behoben“). Offen aus 1: die wahrscheinlich eigene Kennung im Panel vorschlagen (heute wird sie nur nicht gelernt und nicht gemeldet) und früher falsch gelernte Werte aus dem Store räumen. Offen: 7–9.
 
 **Vorschläge (Konfiguration/Prompt, je Installation):**
 - Typbeschreibungen für Lohnsteuerbescheinigung, Lohn-/Gehaltsabrechnung, Meldebescheinigung zur Sozialversicherung, Meldebestätigung (Wohnsitz) — heute fehlen sie, die Typen werden verwechselt.
