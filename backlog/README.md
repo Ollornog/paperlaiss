@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 4/7 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 4/8 erledigt
 
 ## Aufgaben
 
@@ -18,6 +18,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☐ **[T-5](T-5-automatischer-export.md)** Automatischer Export nach Regeln (Filter, Turnus, Auslöser) · M-1
 * ☑ **[T-6](T-6-korrektur-log-was-menschen-nach-der-ki-geandert-ha.md)** Korrektur-Log: was Menschen nach der KI geändert haben · M-1
 * ☐ **[T-7](T-7-sammelscans-automatisch-teilen.md)** Sammelscans automatisch teilen · M-1
+* ☐ **[T-8](T-8-ausrichtung-je-dokument-korrigieren-kopfuber-schra.md)** Ausrichtung je Dokument korrigieren: kopfüber, Schräglage, Ecken · M-1
 
 ## Entscheidungen (ADR)
 
