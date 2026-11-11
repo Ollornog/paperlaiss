@@ -19,7 +19,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-6](T-6-korrektur-log-was-menschen-nach-der-ki-geandert-ha.md)** Korrektur-Log: was Menschen nach der KI geändert haben · M-1
 * ☐ **[T-7](T-7-sammelscans-automatisch-teilen.md)** Sammelscans automatisch teilen · M-1
 * ☐ **[T-8](T-8-ausrichtung-je-dokument-korrigieren-kopfuber-schra.md)** Ausrichtung je Dokument korrigieren: kopfüber, Schräglage, Ecken · M-1
-* ☐ **[T-9](T-9-lehren-aus-einer-grosen-nacharbeit-fehlalarme-stam.md)** Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent · M-1
+* ◐ **[T-9](T-9-lehren-aus-einer-grosen-nacharbeit-fehlalarme-stam.md)** Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent · M-1
 
 ## Entscheidungen (ADR)
 

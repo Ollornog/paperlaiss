@@ -752,6 +752,13 @@ EINSTELLUNGEN = {
     "reserved_tags": ("Tags", "Reservierte Tags",
                       "Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (Status, Richtung …). Ein Eintrag je Zeile."),
     "unsicher_tag": ("Tags", "Tag bei Unsicherheit", "Wird gesetzt, wenn die KI einen neuen Tag vorschlägt. Leer = aus."),
+    "sammeldokument_ausser_typen": ("Korrespondenten", "Kein Sammeldokument bei diesen Typen",
+                                    "Dokumenttypen, auf denen naturgemäß Kennungen vieler Gegenüber stehen (Kontoauszug, "
+                                    "Kreditkartenabrechnung). Für sie entfällt der Prüfhinweis „Sammeldokument“. Einer je Zeile."),
+    "eigene_typen": ("Korrespondenten", "Selbst verfasste Typen",
+                     "Dokumenttypen, die wir selbst schreiben (Bewerbung, Brief, Kündigung, Antrag …): dort darf eine eigene "
+                     "Person Korrespondent sein. Bei jedem anderen Typ wird eine eigene Person als Korrespondent zum "
+                     "Prüfen markiert. Einer je Zeile."),
     "manual_fields": ("Felder", "Felder, die die KI nie anfasst",
                       "Namen von Custom Fields, die nur von Hand gepflegt werden (z. B. Bezahlt-Am). Ein Eintrag je Zeile."),
     "leerseiten_entfernen": ("Allgemein", "Leere Seiten entfernen",
