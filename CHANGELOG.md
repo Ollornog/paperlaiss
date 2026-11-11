@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
 ### Behoben
 
 Lehren aus einer großen Nacharbeit (Backlog T-9): alle 101 „KI-unsicher“-Markierungen eines Stapels waren Fehlalarme, und eigene Kennungen landeten in den Stammdaten fremder Korrespondenten.
