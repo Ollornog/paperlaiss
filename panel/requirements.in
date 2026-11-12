@@ -3,17 +3,17 @@
 # (Befehl im Kopf dort). Dependabot (`uv`, /panel) hebt die Pins hier und erzeugt den Lock neu.
 # Bis 2026-10-08 war requirements.txt selbst die Eingabe: direkte Pins ohne Prüfsummen, die
 # Unterabhängigkeiten ungepinnt — jeder Bau zog, was der Index gerade lieferte.
-fastapi==0.162.0
+fastapi==0.162.2
 # Schlichtes uvicorn plus httptools und uvloop (nimmt es von selbst). `[standard]` zog bis 0.6.0 auch pyyaml,
 # watchfiles, websockets und python-dotenv (ungenutzt); pyyaml 6.0.3 hat kein Wheel für CPython 3.15.
 uvicorn==0.54.0
 httptools==0.9.0
 uvloop==0.23.0; sys_platform != 'win32' and sys_platform != 'cygwin' and platform_python_implementation != 'PyPy'
 python-multipart==0.0.33
-tinysesam[oidc,argon2]==0.25.1
+tinysesam[oidc,argon2]==0.25.3
 # authlib kommt über tinysesam (verlangt nur >=1.6.12); 1.8.x trägt bekannte Lücken.
-authlib==1.9.1
+authlib==1.9.5
 # joserfc kommt über tinysesam/authlib; 1.7.5 trägt CVE-2026-119284.
-joserfc==1.7.7
+joserfc==1.8.0
 pypdf[crypto]==7.0.0
 reportlab==5.1.0
