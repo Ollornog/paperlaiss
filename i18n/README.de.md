@@ -64,6 +64,7 @@ mandantenspezifisch.
 CLASSIFY_DRY=1  CLASSIFY_DOC=<id>  python3 classify.py     # nur ausgeben, nichts schreiben
 CLASSIFY_FORCE=1 CLASSIFY_DOC=<id> python3 classify.py     # schon klassifiziertes Dokument neu machen
 CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # Mistral-OCR erzwingen
+CLASSIFY_KONTROLLE=1439-1859 [CLASSIFY_DRY=1] python3 classify.py # Kontrolllauf: nur Prüfungen, keine KI
 ```
 
 Einen schon gesetzten Dokumenttyp ersetzt paperlaiss nur beim echten Import (keine `CLASSIFY_SOURCE`,
@@ -206,7 +207,17 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
   ist, ein Sammeldokument (Kennungen dreier anderer Korrespondenten; nicht bei den Typen in
   `sammeldokument_ausser_typen`, Vorgabe Kontoauszug, Kreditkartenabrechnung) und eine Dublette (ein
   ähnliches Dokument mit denselben Beträgen, Daten und Nummern, derselben Anrede und Seitenzahl — ein
-  Serienbrief an jemand anderen ist keine). Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
+  Serienbrief an jemand anderen ist keine). Seit 0.5 bekommt ein kaputter Scan — alle Seiten leer (wo
+  Ghostscript da ist, *vor* der OCR geprüft), erfundener OCR-Text (eine Zeile über die halbe Seite, fremde
+  Schrift, ein Modell-Kommentar; solche Seiten ersetzen nie den Text des Dokuments), „Seite x von y“ bei
+  weniger Seiten oder „Fortsetzung nächste Seite“ am Ende — stattdessen den `kaputt_tag`. Nennt die KI
+  eine eigene Person oder eine Krankenkasse/Einzugsstelle bei einem Typ vom Arbeitgeber
+  (`arbeitgeber_typen`, `einzugsstellen_muster`), fragt der Lauf einmal nach dem Aussteller; ohne Antwort
+  setzt er keinen Korrespondenten und markiert. Mit `pruef_notiz` steht der Grund als Notiz am Dokument
+  (je Wortlaut einmal). Ein Lauf, der an einem Ausfall abbricht (Paperless oder Mistral 429/5xx nach allen
+  Wiederholungen), bekommt den `unsicher_tag` und eine Notiz. Der **Kontrolllauf**
+  (`CLASSIFY_KONTROLLE=<ids>`) wendet die Prüfungen ohne KI auf vorhandene Dokumente an und markiert,
+  was er findet; sonst ändert er nichts. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
   Paperless-Dialog. Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem
   Korrespondenten gehört. Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
 - **Namensabgleich.** Passt der Name aus der Analyse zu keinem Korrespondenten exakt, fragt eine zweite
@@ -334,6 +345,10 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `tagging_enabled` | `false` | KI vergibt inhaltliche Tags (aus: nur Typ/Korrespondent/Felder) |
 | `marker_tag` | `ai-processed` | Tag, das gesetzt wird + als „schon erledigt"-Signal dient |
 | `unsicher_tag` | – | optionaler Flag-Tag (per Name) |
+| `kaputt_tag` | – | optionaler Tag für einen kaputten Scan (leere Seiten, fehlende Seiten, erfundener OCR-Text); leer = `unsicher_tag` |
+| `pruef_notiz` | `false` | Grund eines Prüfhinweises als Notiz am Dokument |
+| `technische_konten` | `[]` | Konten, die nur hochladen (Scanner, Mail-Abruf): für ihre Dokumente gelten alle eigenen Namen als „wir“ |
+| `arbeitgeber_typen` / `einzugsstellen_muster` | Lohnabrechnung, Lohnsteuer- und SV-Formulare / Krankenkassen | bei diesen Typen ist ein passender Name nie Korrespondent; die KI wird nach dem Arbeitgeber gefragt |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |

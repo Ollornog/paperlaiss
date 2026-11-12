@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 4/9 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 5/10 erledigt
 
 ## Aufgaben
 
@@ -20,6 +20,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☐ **[T-7](T-7-sammelscans-automatisch-teilen.md)** Sammelscans automatisch teilen · M-1
 * ☐ **[T-8](T-8-ausrichtung-je-dokument-korrigieren-kopfuber-schra.md)** Ausrichtung je Dokument korrigieren: kopfüber, Schräglage, Ecken · M-1
 * ◐ **[T-9](T-9-lehren-aus-einer-grosen-nacharbeit-fehlalarme-stam.md)** Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent · M-1
+* ☑ **[T-10](T-10-kaputte-scans-uberlast-alias-und-kontrolllauf.md)** Kaputte Scans, Überlast, Alias-Treffer und ein Kontrolllauf · M-1
 
 ## Entscheidungen (ADR)
 
