@@ -6,6 +6,27 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-12
+
+Lehren aus der Durchsicht eines Stapelscans von gut 400 Altdokumenten (Backlog T-10). Gemessen an einer Sollliste aus den Korrekturen des Tages (125 Dokumente, Trockenlauf, ohne OCR): Korrespondent 118 → 122, Typ 113 → 115 (davon Schwankung Arbeitsvertrag/Vertrag), Datum unverändert 123. Der Kontrolllauf fand im selben Stapel (419 Dokumente) alle 6 von Hand als kaputt markierten Dokumente (drei leer, drei mit fehlender Seite) und einen weiteren Kandidaten („Seite 2 von 2“ bei einer Seite).
+
+### Behoben
+
+- **Erfundener OCR-Text ersetzt nie den Inhalt.** Auf leeren Seiten erfand Mistral-OCR Text (50× dieselbe Formelzeile, ein sinnloser Satz in Schleife), und der ersetzte den Text, den Paperless gelesen hatte. Wiederholungsschleifen gelten jetzt als erfunden (`wiederholung`); erfundene Seiten fehlen im OCR-Text, ein erfundener Gesamttext wird verworfen. Ein Dokument ohne Text wird, wo Ghostscript und `leerseiten.py` neben dem Skript liegen (Paperless-Container), vor der OCR auf leere Seiten geprüft und dann gar nicht erst gelesen. Bleibt kein Text, markiert der Lauf das Dokument, statt still abzubrechen.
+- **Überlast.** Mistral-Pausen 5/15/30/60/120 s (vorher bis 60 s: zwei Dokumente blieben nach einem zweiminütigen 503 unklassifiziert). Lesezugriffe auf Paperless werden bei 429/502/503/504 und Netzfehlern wiederholt, PATCH bei 429/5xx, POST nur bei 429/503 (nach 502/504 könnte er angekommen sein); Schreibzugriffe nach einem Netzfehler nie blind. Bricht ein Lauf trotzdem an einem Ausfall ab, bekommt das Dokument den `unsicher_tag` (und mit `pruef_notiz` eine Notiz).
+- **Alias statt neuer Korrespondent.** Nennt die KI einen Namen, der eindeutig Alias eines Korrespondenten ist, wird dieser zugeordnet (`alias='…'` im Log); bisher legte der Lauf einen neuen an, obwohl die Vorsuche ihn über genau diesen Alias gefunden hatte.
+- **Krankenkasse oder eigene Person ist nicht der Aussteller.** Nennt die KI bei einem Typ vom Arbeitgeber (`arbeitgeber_typen`, Vorgabe Lohnabrechnung, Gehaltsabrechnung, Lohnsteuerbescheinigung, Meldebescheinigung zur Sozialversicherung, Arbeitsbescheinigung) eine Krankenkasse/Einzugsstelle (`einzugsstellen_muster`) oder eine eigene Person, fragt der Lauf in derselben Unterhaltung nach dem Aussteller. Ohne verwertbare Antwort setzt er keinen Korrespondenten und markiert („einzugsstelle“/„eigene_person“); die Absenderdaten aus Pass 1 werden dann nicht gelernt.
+- **Frankiervermerk ist kein Absender.** „DV 08.22 0,85 Deutsche Post“ im Adressfeld wird für die Vorsuche und den Prompt durch „[Frankiervermerk]“ ersetzt.
+- **Personalnummer im Tabellenkopf.** Steht „Personal-Nr.“/„P.-Nr.“ im Kopf einer Tabelle und die Nummer eine Zeile darunter in derselben Spalte, gilt sie ebenfalls als Personalnummer und wird nicht als Kundennummer gelernt.
+- **Upload-Konten.** Für Dokumente der `technische_konten` (Scanner, Mail-Abruf) gelten alle eigenen Namen als „wir“; bisher war beim Import das Upload-Konto „wir“, und der spätere Besitzer wurde Korrespondent.
+- Die Aktivität im Panel zeigt den Korrespondenten auch bei `alias=` und `gewählt=`.
+
+### Hinzugefügt
+
+- **Kontrolllauf** `CLASSIFY_KONTROLLE=<ids>` (z. B. `1439-1859,1900`, mit `CLASSIFY_DRY=1` nur anzeigen): die Prüfungen ohne KI über vorhandene Dokumente — leer, erfundener Text, fehlende Seiten („Seite x von y“, „Fortsetzung nächste Seite“ am Ende), Dublette, eigene Person, Krankenkasse auf Arbeitgeber-Typen. Markiert mit `kaputt_tag`/`unsicher_tag` und (mit `pruef_notiz`) einer Notiz; sonst ändert er nichts.
+- `kaputt_tag`: eigener Tag für kaputte Scans (leer, fehlende Seiten, erfundener Text); leer = `unsicher_tag`.
+- `pruef_notiz`: der Grund eines Prüfhinweises als Notiz am Dokument („paperlaiss: prüfen — …“), je Wortlaut einmal.
+
 ## [0.4.0] - 2026-11-11
 
 ### Behoben

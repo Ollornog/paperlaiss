@@ -67,6 +67,22 @@ CFG = {
     "tagging_enabled": False,          # KI vergibt KEINE inhaltlichen Tags (Firmen-DMS: Tags sind manuelle Status/Richtung)
     "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
     "unsicher_tag": "",                # optional: Flag-Tag bei Unsicherheit / KI-Tag-Vorschlag
+    # Optional tag for a broken scan: blank pages, pages missing ("page 2 of 3" on a one-page document),
+    # invented OCR text. Empty = such findings get the unsicher_tag like any other (T-10).
+    "kaputt_tag": "",
+    # Write the reason of a finding as a note on the document (prefix "paperlaiss: "), once per text — so
+    # nobody has to open the trace to see why a document is flagged (T-9 item 7, T-10).
+    "pruef_notiz": False,
+    # Accounts that only upload (a scanner, a mail fetch): the real owner is set later. For their documents
+    # "we" are all own names of `eigene_kennungen`, not the upload account (T-10: a scan account made the
+    # owner of the scan a correspondent).
+    "technische_konten": [],
+    # Document types issued by the EMPLOYER. On them a health insurance fund or collecting agency named on
+    # the form is never the correspondent (T-10: 21 payslips filed under the health insurer).
+    "arbeitgeber_typen": ["Lohnabrechnung", "Gehaltsabrechnung", "Lohnsteuerbescheinigung",
+                          "Meldebescheinigung zur Sozialversicherung", "Arbeitsbescheinigung"],
+    "einzugsstellen_muster": r"\b(?:AOK|BKK|IKK|DAK|BARMER|HEK|hkk|KKH|Knappschaft|\w*krankenkasse|Ersatzkasse|"
+                             r"Gesundheitskasse|\w*GKK|ÖGK|Einzugsstelle)\b",   # case-insensitive
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
     "mail_context_field": "",          # optional: Herkunft-Kontext (Mail-/Chat-Anschreiben) fürs Prompt
     "mail_from_field": "",             # optional: Absender-Mail → Korrespondent-Domain-Match
@@ -327,7 +343,8 @@ def eigene_nummer(x, eigene):
 
 # A personnel number is how an employer files US, not a number of the employer: two employers' numbers
 # were learned as "customer numbers" and pulled later payslips to the wrong correspondent (T-9).
-PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Personal|Pers)\s*\.?\s*-?\s*(?:nummer|nr|no)\b\.?", re.IGNORECASE)
+PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Personal|Pers|P(?=\s*\.\s*-))\s*\.?\s*-?\s*(?:nummer|nr|no)\b\.?",
+                            re.IGNORECASE)     # "P.-Nr." only with dot and hyphen: "P Nr" may be a postcode
 _PERSONAL_WERT = re.compile(r"\s*[.:#]?\s*([0-9A-Za-z](?:[0-9A-Za-z]|[ ./-](?=\d))*)")
 
 
@@ -338,11 +355,39 @@ def personalnummer(wert, text=""):
     n = norm_nummer(wert)
     if not n:
         return False
-    for m in PERSONAL_LABEL.finditer(str(text or "")):
-        folgt = _PERSONAL_WERT.match(str(text)[m.end():].split("\n", 1)[0])
+    text = str(text or "")
+    for m in PERSONAL_LABEL.finditer(text):
+        folgt = _PERSONAL_WERT.match(text[m.end():].split("\n", 1)[0])
         if folgt and norm_nummer(folgt.group(1)) == n:
             return True
+        # A header cell (nothing after the label in its cell): the value stands one row below.
+        if not re.search(r"\d", _ZELLEN.split(text[m.end():].split("\n", 1)[0])[0]) \
+                and n in _spalte_darunter(text, m.start()):
+            return True
     return False
+
+
+_ZELLEN = re.compile(r"\s*\|\s*|\s{2,}|\t")
+
+
+def _spalte_darunter(text, pos):
+    """Numbers in the cell below the label at `pos`: a payslip header row ("Personal-Nr. | Geburtsdatum | …")
+    with the values in the next non-empty row (T-10: personnel numbers were learned as customer numbers of
+    the health insurer that is named on the same form)."""
+    anfang = text.rfind("\n", 0, pos) + 1
+    ende = text.find("\n", pos)
+    if ende < 0:
+        return set()
+    kopf = [z for z in _ZELLEN.split(text[anfang:ende]) if z.strip()]
+    spalte = next((i for i, z in enumerate(kopf) if PERSONAL_LABEL.search(z)), None)
+    folgende = (z for z in text[ende + 1:].split("\n")[:3] if z.strip() and not set(z.strip()) <= set("|-: "))
+    zeile = next(folgende, None)
+    if spalte is None or zeile is None:
+        return set()
+    zellen = [z for z in _ZELLEN.split(zeile) if z.strip()]
+    if spalte >= len(zellen):
+        return set()
+    return {norm_nummer(w) for w in zellen[spalte].split() if norm_nummer(w)}
 
 
 
@@ -371,6 +416,9 @@ def konto_cfg(cfg, owner_id, benutzer=None):
         u = None
     if not u or not u.get("username"):
         return cfg
+    if u["username"] in (cfg.get("technische_konten") or ()):
+        # An upload account owns the document only until the real owner is set (T-10).
+        return {**cfg, "_konto": u["username"] + " (technisch: alle eigenen Namen)"}
     konten = cfg.get("konten") or {}
     eigen, alle = konten.get(u["username"]) or {}, konten.get("*") or {}
     name = f"{u.get('first_name') or ''} {u.get('last_name') or ''}".strip()
@@ -460,6 +508,19 @@ def stammdaten_treffer(corrs, meta, text, eigene):
 DATEINAME_IN_ZEILE = re.compile(r"\S\.(?:pdf|docx?|odt|rtf|txt|xlsx?|ods|pptx?|odp|jpe?g|png|heic|tiff?|eml|msg)\b",
                                 re.IGNORECASE)
 
+# Franking mark of the postal service in the address window: "DV 08.22 0,85 Deutsche Post", "0,85 Deutsche Post".
+# It names who carried the letter, not who wrote it — four letters (licence fee, health insurer, pension
+# fund) were filed under "Deutsche Post AG" (T-10). The price is what tells it from a sender line.
+_FRANKIERUNG = re.compile(r"(?:\bDV\s?\d{2,4}(?:[.\s]\d{2})?\s+)?(?<![\d,.])\d[.,]?\d{2}\s+Deutsch\w*\s+Post\b(?!\s*AG\b)",
+                          re.IGNORECASE)
+FRANKIERVERMERK = "[Frankiervermerk]"
+
+
+def ohne_frankierung(text):
+    """The text with franking marks replaced by a neutral placeholder (for the search and the prompt)."""
+    return _FRANKIERUNG.sub(FRANKIERVERMERK, str(text or ""))
+
+
 def namens_treffer(corrs, alias, text, eigene_namen=()):
     """Korrespondenten, deren Name oder Alias im Text steht: [(korrespondent, [Grund])].
 
@@ -490,6 +551,16 @@ def namens_treffer(corrs, alias, text, eigene_namen=()):
                 aus.append((len(t), c, [f"Name „{nm}“ im Briefkopf"]))
                 break
     return [(c, g) for _, c, g in sorted(aus, key=lambda x: -x[0])]
+
+
+def alias_treffer(name, corrs, alias):
+    """The one correspondent whose alias is `name` (same tokens, legal form ignored), else None.
+    Two correspondents with the same alias decide nothing."""
+    t = " ".join(ctoks(name or ""))
+    if not t:
+        return None
+    hits = [c for c in corrs if any(" ".join(ctoks(a)) == t for a in str(alias(c) or "").split(",") if a.strip())]
+    return hits[0] if len(hits) == 1 else None
 
 
 def mail_bestaetigt(mail_from, corr_id, mail_corr, text, absender):
@@ -884,16 +955,56 @@ def set_stage(did, s):
     mark_running(did, s)
 
 
-def get(path, raw=False):
+# Paperless itself is overloaded at times (bulk scan of hundreds of pages, index rebuild): it answers 502/503/
+# 504 for a minute (T-10). A read or an idempotent write is simply repeated. A POST creates something
+# (correspondent, note): after 502/504 it may have gone through, so it is repeated only on 429/503, which
+# say "not processed".
+PAPERLESS_WIEDERHOLEN_BEI = {429, 502, 503, 504}
+PAPERLESS_POST_WIEDERHOLEN_BEI = {429, 503}
+PAPERLESS_WARTEN_S = (2, 5, 15, 30)
+
+
+def _pause_aus(e, vorgabe):
+    """Pause before the next attempt: the server's `Retry-After` (seconds, at most 120) wins."""
+    nach = e.headers.get("Retry-After") if getattr(e, "headers", None) else None
+    return min(120, int(nach)) if nach and str(nach).isdigit() else vorgabe
+
+
+def mit_wiederholung(aufruf, codes, pausen, wer, netz=True):
+    """Run `aufruf()`; on an HTTP status in `codes` or (with `netz`) a network error wait and try again, then
+    give up. Other HTTP errors (400, 401, 404, 422) are passed on at once — waiting does not heal them."""
+    for versuch in range(len(pausen) + 1):
+        try:
+            return aufruf()
+        except urllib.error.HTTPError as e:
+            if e.code not in codes or versuch == len(pausen):
+                raise
+            pause = _pause_aus(e, pausen[versuch])
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if not netz or versuch == len(pausen):
+                raise
+            pause = pausen[versuch]
+        log(f"{wer}: Versuch {versuch + 1} gescheitert, neuer Versuch in {pause} s")
+        __import__("time").sleep(pause)
+
+
+def get(path, raw=False, warten=None):
     req = urllib.request.Request(BASE + path, headers={"Authorization": f"Token {TOK}"})
-    r = urllib.request.urlopen(req, timeout=45)
-    return r.read() if raw else json.load(r)
+
+    def lesen():
+        r = urllib.request.urlopen(req, timeout=45)
+        return r.read() if raw else json.load(r)
+    return mit_wiederholung(lesen, PAPERLESS_WIEDERHOLEN_BEI, PAPERLESS_WARTEN_S if warten is None else warten,
+                            "Paperless")
 
 
-def send(path, data, method="PATCH", timeout=45):
+def send(path, data, method="PATCH", timeout=45, warten=None):
     req = urllib.request.Request(BASE + path, data=json.dumps(data).encode("utf-8"),
         headers={"Authorization": f"Token {TOK}", "Content-Type": "application/json"}, method=method)
-    return json.load(urllib.request.urlopen(req, timeout=timeout))
+    codes = PAPERLESS_POST_WIEDERHOLEN_BEI if method == "POST" else PAPERLESS_WIEDERHOLEN_BEI
+    # A write that timed out may still arrive — no blind repeat (patch_doc checks first, then sends once more).
+    return mit_wiederholung(lambda: json.load(urllib.request.urlopen(req, timeout=timeout)), codes,
+                            PAPERLESS_WARTEN_S if warten is None else warten, "Paperless", netz=False)
 
 
 # Cache-Schlüssel für Mistrals Prompt-Caching (`prompt_cache_key`): zwischengespeicherte
@@ -910,28 +1021,24 @@ NUTZUNG = []
 # gleichzeitigen Dokumenten bekam 94 von 203 Mal HTTP 429 — ohne Wiederholung blieb jedes davon
 # unklassifiziert, genauso wie beim Hochladen vieler Dokumente auf einmal.
 WIEDERHOLEN_BEI = {429, 500, 502, 503, 504}
-WARTEN_S = (5, 15, 30, 60)
+# 2026-11-12 (T-10): Mistral answered 503 for about two minutes during a bulk scan; the four pauses up to
+# 60 s (110 s in all) ran out and two documents stayed unclassified. With 120 s more the wait covers ~4 min.
+WARTEN_S = (5, 15, 30, 60, 120)
 
 
 def mistral_senden(req, timeout, warten=None):
     """Eine Mistral-Anfrage senden, bei 429/5xx und Netzfehlern mit wachsender Pause wiederholen.
     Ein `Retry-After` der Gegenseite geht vor (höchstens 120 s). Andere Fehler (400, 401, 422)
     werden sofort weitergereicht — sie heilen nicht durch Warten."""
-    pausen = WARTEN_S if warten is None else warten
-    for versuch in range(len(pausen) + 1):
-        try:
-            return json.load(urllib.request.urlopen(req, timeout=timeout))
-        except urllib.error.HTTPError as e:
-            if e.code not in WIEDERHOLEN_BEI or versuch == len(pausen):
-                raise
-            nach = e.headers.get("Retry-After") if e.headers else None
-            pause = min(120, int(nach)) if nach and str(nach).isdigit() else pausen[versuch]
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
-            if versuch == len(pausen):
-                raise
-            pause = pausen[versuch]
-        log(f"Mistral: Versuch {versuch + 1} gescheitert, neuer Versuch in {pause} s")
-        __import__("time").sleep(pause)
+    return mit_wiederholung(lambda: json.load(urllib.request.urlopen(req, timeout=timeout)), WIEDERHOLEN_BEI,
+                            WARTEN_S if warten is None else warten, "Mistral")
+
+
+def voruebergehend(e):
+    """Is `e` a passing outage (overload, network) rather than a fault of this document?"""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code in WIEDERHOLEN_BEI
+    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError))
 
 
 def mistral_chat(messages, max_tokens=900, schema=None, name="antwort"):
@@ -1017,6 +1124,39 @@ GEGENUEBER_FRAGE = (
     "{{\"empfaenger\": <Name oder null>, \"adresse\": <Anschrift des Empfängers oder null>}}.")
 
 
+AUSSTELLER_FRAGE = (
+    "Du hast {NAME} als correspondent genannt. {GRUND} Wer hat das Dokument ausgestellt (Firma, Behörde, "
+    "Arbeitgeber — Briefkopf, Stempel, Feld „Arbeitgeber“ bzw. „Name und Anschrift des Arbeitgebers“)? Antworte "
+    "NUR JSON {{\"aussteller\": <Name ohne Anrede oder null>}}; null, wenn es im Dokument nicht erkennbar ist.")
+
+
+def aussteller_schema():
+    return {"type": "object", "properties": {"aussteller": _NULLBAR("string")}, "required": ["aussteller"],
+            "additionalProperties": False}
+
+
+def nicht_aussteller_grund(korrespondent, typ, cfg_lauf, cfg):
+    """Why `korrespondent` cannot be the issuer: (finding key, reason for the model) or None.
+
+    An own PERSON on a document we do not write ourselves (the addressee), or a health insurance fund /
+    collecting agency on a document the employer issues (payslip, social insurance notice) — the form names
+    it, it did not write it (T-10)."""
+    if not korrespondent:
+        return None
+    if eigene_person_befund(korrespondent, typ, (cfg_lauf.get("eigene_kennungen") or {}).get("namen"),
+                            cfg.get("eigene_typen") or []):
+        return "eigene_person", "Das ist eine eigene Person (der Empfänger), nicht das Gegenüber."
+    muster = cfg.get("einzugsstellen_muster")
+    if muster and typ_in(typ, cfg.get("arbeitgeber_typen") or ()):
+        try:
+            if re.search(muster, str(korrespondent), re.IGNORECASE):
+                return ("einzugsstelle", f"Das ist die Krankenkasse/Einzugsstelle, die das Formular nur angibt; "
+                                         f"eine {typ} stellt der Arbeitgeber aus.")
+        except re.error:
+            pass
+    return None
+
+
 def ist_eigener_name(name, eigene_namen):
     """Enthält der Name einen eigenen Namen (Token-Teilmenge, wie bei der Vorsuche)?"""
     t = set(ctoks(name or ""))
@@ -1052,6 +1192,25 @@ _FREMDE_SCHRIFT = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0600-\u
 _MODELL_FLOSKEL = re.compile(r"ground truth|the image (shows|displays|contains)|as an ai\b|i cannot (read|see)", re.I)
 
 
+def wiederholung(text):
+    """A loop of the OCR model on a blank or nearly blank page (T-10, 2026-11-12): the same line again and
+    again (`\\( \\therefore m = \\frac{3}{11} \\)` fifty times, „und die in der Zeitung im Fraktionischen …“
+    twenty times). Returns (piece, count) or None.
+
+    Only lines with a letter count — table rules („| --- |“) repeat in real documents. A real page has at
+    most a few equal lines; here one line makes at least half of the page."""
+    zeilen = [" ".join(z.split()) for z in str(text or "").splitlines() if re.search(r"[^\W\d_]", z)]
+    if len(zeilen) >= 6:
+        z, n = __import__("collections").Counter(zeilen).most_common(1)[0]
+        if n >= 5 and n * 2 >= len(zeilen):
+            return z, n
+    # Without line breaks: a long text made of a handful of words.
+    woerter = re.findall(r"[^\W\d_]{3,}", str(text or "").lower())
+    if len(woerter) >= 60 and len(set(woerter)) * 10 < len(woerter):
+        return " ".join(woerter[:6]), len(woerter) // len(set(woerter))
+    return None
+
+
 def ocr_seite_verdaechtig(text):
     """Grund, warum der OCR-Text einer Seite erfunden aussieht — oder None."""
     t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", str(text or ""))
@@ -1060,7 +1219,19 @@ def ocr_seite_verdaechtig(text):
     buchstaben = [c for c in t if c.isalpha()]
     if len(buchstaben) >= 10 and len(_FREMDE_SCHRIFT.findall(t)) / len(buchstaben) > 0.2:
         return "überwiegend fremde Schrift"
+    w = wiederholung(t)
+    if w:
+        return f"Wiederholungsschleife („{w[0][:40]}“ {w[1]}×)"
     return None
+
+
+def ocr_text_pruefen(text):
+    """The OCR text as a whole: (usable text, [reason]). An invented text never replaces the document's text
+    (T-10: three blank pages got 50× „m = 3/11“ as content, a payslip a Dada poem)."""
+    grund = ocr_seite_verdaechtig(text)
+    if grund:
+        return "", [grund]
+    return str(text or "").strip(), []
 
 def mistral_ocr(did):
     pdf = get(f"/documents/{did}/download/", raw=True)  # Archiv = immer PDF (auch bei Bild-Originalen)
@@ -1071,7 +1242,10 @@ def mistral_ocr(did):
     resp = mistral_senden(req, 180)
     seiten = [p.get("markdown", "") for p in resp.get("pages", [])]
     OCR_VERDACHT[:] = [(n, g) for n, g in ((i, ocr_seite_verdaechtig(t)) for i, t in enumerate(seiten, 1)) if g]
-    return "\n\n".join(seiten).strip()
+    # Invented pages are left out (T-10): until 0.4 they went into the document's text and replaced the
+    # text Paperless had read. They stay visible as a finding (ocr_erfunden).
+    erfunden = {n for n, _ in OCR_VERDACHT}
+    return "\n\n".join(t for i, t in enumerate(seiten, 1) if i not in erfunden).strip()
 
 
 def norm(s):
@@ -1742,10 +1916,119 @@ def pruef_befunde(did, doc, content, treffer, corr_id, typ=None):
         if sd:
             b["sammeldokument"] = sd
         if OCR_VERDACHT:
-            b["ocr_erfunden"] = "; ".join(f"Seite {n}: {g}" for n, g in OCR_VERDACHT)
+            b["ocr_erfunden"] = "; ".join(f"{'OCR-Text' if n == 'alle' else f'Seite {n}'}: {g}" for n, g in OCR_VERDACHT)
     except Exception as e:
         log(f"befunde-fail {did}: {e!r}")
     return b
+
+# Findings that mean "the scan is broken" rather than "the classification may be wrong" (T-10).
+KAPUTT_BEFUNDE = ("leer", "teilstueck", "ocr_erfunden")
+BEFUND_NAMEN = {"leer": "leer", "teilstueck": "Seiten fehlen", "ocr_erfunden": "OCR-Text erfunden",
+                "dublette": "Dublette", "sammeldokument": "Sammeldokument", "datum": "Datum",
+                "eigene_person": "eigene Person als Korrespondent", "einzugsstelle": "Einzugsstelle statt Arbeitgeber",
+                "abbruch": "Lauf abgebrochen"}
+NOTIZ_PRAEFIX = "paperlaiss: "
+
+
+def befund_tags(befunde, unsicher_id, kaputt_id):
+    """Flag tags for findings: a broken scan gets the kaputt tag (when set), anything else the unsicher tag."""
+    if not befunde:
+        return []
+    kaputt = [k for k in befunde if k in KAPUTT_BEFUNDE]
+    tags = [kaputt_id] if (kaputt and kaputt_id) else []
+    if unsicher_id and (not tags or len(kaputt) < len(befunde)):
+        tags.append(unsicher_id)
+    return tags
+
+
+def befund_text(befunde):
+    """One line for the note and the log: what is wrong, in words."""
+    return "prüfen — " + "; ".join(f"{BEFUND_NAMEN.get(k, k)}: {v}" for k, v in befunde.items())
+
+
+def notiz_setzen(did, text):
+    """Add a note to the document unless the same note is already there (re-runs must not pile them up).
+    True when one was written."""
+    text = NOTIZ_PRAEFIX + text
+    try:
+        da = get(f"/documents/{did}/notes/")
+    except Exception:
+        da = []
+    if isinstance(da, dict):
+        da = da.get("results") or []
+    if any(isinstance(n, dict) and n.get("note") == text for n in da or ()):
+        return False
+    send(f"/documents/{did}/notes/", {"note": text}, "POST")
+    return True
+
+
+def _hat_ghostscript():
+    return bool(__import__("shutil").which("gs"))
+
+
+def alle_seiten_leer(did, seiten):
+    """„alle N Seite(n) leer“ when every page is blank, else None — None also when it cannot be told: the
+    check needs leerseiten.py next to this script and Ghostscript (the Paperless container has both, the
+    panel container neither)."""
+    pfad = os.path.join(SCRIPT_DIR, "leerseiten.py")
+    try:
+        seiten = int(seiten or 0)
+        if seiten < 1 or not os.path.isfile(pfad) or not _hat_ghostscript():
+            return None
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("paperlaiss_leerseiten", pfad)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        pdf = get(f"/documents/{did}/download/", raw=True)
+        with tempfile.TemporaryDirectory(prefix="paperlaiss-leer-") as tmp:
+            datei = os.path.join(tmp, "dokument.pdf")
+            with open(datei, "wb") as f:
+                f.write(pdf)
+            leer, _ = mod.leere_seiten(datei, seiten)
+        return f"alle {seiten} Seite(n) leer" if len(leer) == seiten else None
+    except Exception as e:
+        log(f"leerseiten-fail {did}: {e!r}")
+        return None
+
+
+def nur_markieren(did, doc, tag_ids_on, befunde, marker_id, unsicher_id, kaputt_id):
+    """Mark a document that cannot be classified (no text): marker (no endless re-runs), flag tags, note."""
+    TRACE["pruefen"] = befunde
+    if DRY:
+        print(json.dumps({"id": did, "pruefen": befunde, "korrespondent_ergebnis": None, "document_type": None,
+                          "document_date": None, "datum_bisher": (doc.get("created") or "")[:10]}, ensure_ascii=False))
+        return
+    tags = list(dict.fromkeys(list(tag_ids_on) + ([marker_id] if marker_id else [])
+                              + befund_tags(befunde, unsicher_id, kaputt_id)))
+    ok, err = patch_doc(did, {"tags": tags})
+    if not ok:
+        log(f"markieren-fail {did}: {str(err)[:200]}")
+    if CFG.get("pruef_notiz"):
+        try:
+            notiz_setzen(did, befund_text(befunde))
+        except Exception as e:
+            log(f"notiz-fail {did}: {e!r}")
+    log(f"PRÜFEN {did} | ohne Klassifizierung | " + "; ".join(f"{k} {x}" for k, x in befunde.items()))
+    TRACE["_stage"] = "fertig"
+    save_trace(did)
+
+
+def abbruch_markieren(did, e):
+    """After a run broke off on a passing outage (overload, network): flag the document and say why, so it
+    does not silently stay unclassified (T-10: two payslips after a two-minute 503 of the model)."""
+    if DRY or not did or not CFG.get("unsicher_tag"):
+        return
+    try:
+        doc = get(f"/documents/{did}/")
+        tagid_by_norm = {norm(t["name"]): t["id"] for t in get("/tags/?page_size=1000")["results"]}
+        uid = resolve_tag(tagid_by_norm, CFG["unsicher_tag"])
+        if uid and uid not in (doc.get("tags") or []):
+            patch_doc(did, {"tags": list(doc.get("tags") or []) + [uid]})
+        if CFG.get("pruef_notiz"):
+            notiz_setzen(did, befund_text({"abbruch": f"{e!r} — bitte neu klassifizieren"}))
+    except Exception as e2:
+        log(f"abbruch-markieren-fail {did}: {e2!r}")
+
 
 def eigene_person_befund(korrespondent, typ, eigene_namen, eigene_typen):
     """One of our own PERSONS as correspondent of a document we do not write ourselves → hint, else None.
@@ -1878,9 +2161,16 @@ def teilstueck(text, seiten):
     angaben = [(int(a), int(b)) for a, b in re.findall(r"(?:Seite|Blatt|Page)\s*:?\s*(\d{1,2})\s*(?:von|/|of)\s*(\d{1,2})\b",
                                                         str(text or ""), re.I) if 1 < int(b) <= 50 and int(a) <= int(b)]
     if not angaben:
-        return None
+        # The last page announces a next one (T-10: a payslip ended in „Fortsetzung nächste Seite“, page 2
+        # was missing).
+        return ("„Fortsetzung nächste Seite“ am Ende — die Folgeseite fehlt"
+                if _FORTSETZUNG.search(str(text or "").strip()[-150:]) else None)
     y = max(b for _, b in angaben); n = seiten or 1
     return f"„Seite … von {y}“, das Dokument hat {n} Seite(n)" if n < y else None
+
+
+# Not "bitte wenden": forms print it on every front page, also on the last sheet (seen on a pension notice).
+_FORTSETZUNG = re.compile(r"Fortsetzung\s+(?:auf\s+(?:der\s+)?)?(?:nächste|naechste|folgende)n?\s+Seite", re.IGNORECASE)
 
 
 ANREDE = re.compile(r"^[ \t]*((?:sehr\s+geehrte[rs]?|liebe[rs]?|hallo|guten\s+tag)\b[^\n,]{0,60})", re.IGNORECASE | re.MULTILINE)
@@ -2119,7 +2409,7 @@ def reservierte_tags(cfg):
     """Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (normalisiert):
     die konfigurierten plus Marker-, Unsicher- und Ausloeser-Tag."""
     reserved = {norm(x) for x in (cfg.get("reserved_tags") or [])}
-    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag")):
+    for extra in (cfg.get("marker_tag"), cfg.get("unsicher_tag"), cfg.get("kaputt_tag")):
         if extra:
             reserved.add(norm(extra))
     return reserved
@@ -2391,6 +2681,7 @@ def main():
 
     marker_id = resolve_tag(tagid_by_norm, CFG["marker_tag"])
     unsicher_id = resolve_tag(tagid_by_norm, CFG["unsicher_tag"])
+    kaputt_id = resolve_tag(tagid_by_norm, CFG.get("kaputt_tag"))
 
     # Ein Teil aus dem Aufteilen trägt Marker, Titel und Feldwerte seines Ausgangsdokuments (erbe_verwerfen).
     erbe = erbe_offen(doc, TRACE_DIR)
@@ -2414,14 +2705,24 @@ def main():
     TRACE["ocr"] = {"triggered": False, "grund": "Text ausreichend"}
     vorher = ocr_gruende(content, CFG)
     ocr_versucht = False
-    if CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or vorher):
+    # Blank pages BEFORE the OCR model sees them (T-10): on a blank page it invents text. Only when Paperless
+    # read no text at all, and only where Ghostscript is at hand (in the Paperless container).
+    leer = alle_seiten_leer(did, doc.get("page_count")) if len(content.strip()) < 20 else None
+    if leer:
+        TRACE["ocr"] = {"triggered": False, "grund": f"nicht nötig: {leer}"}
+    elif CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or vorher):
         ocr_versucht = True
         grund = ("KI-Knopf in Paperless" if FORCE_OCR and SOURCE == "knopf"
                  else "manuell erzwungen" if FORCE_OCR else "immer-OCR" if CFG["ocr_always"]
                  else "; ".join(vorher))
         try:
-            new = mistral_ocr(did)
-            if FORCE_OCR or CFG["ocr_always"] or len(new) > max(len(content), 40) * 1.1 or (len(content) < 40 and len(new) > 40):
+            new, erfunden = ocr_text_pruefen(mistral_ocr(did))
+            if erfunden:
+                OCR_VERDACHT.append(("alle", erfunden[0]))
+            if not new:
+                TRACE["ocr"] = {"triggered": True, "grund": grund, "verworfen": "OCR lieferte keinen echten Text"
+                                + (f" ({erfunden[0]})" if erfunden else "")}
+            elif FORCE_OCR or CFG["ocr_always"] or len(new) > max(len(content), 40) * 1.1 or (len(content) < 40 and len(new) > 40):
                 if not DRY:
                     send(f"/documents/{did}/", {"content": new}, "PATCH")
                 content = new; ocr_note = f"OCR-rescue({len(new)})"
@@ -2434,7 +2735,14 @@ def main():
             log(f"OCR-rescue-fail {did}: {e!r}")
 
     if len(content.strip()) < 20:
-        log(f"skip {did}: kein Text nach OCR"); return
+        # No text, not even after OCR: a blank page or a broken scan. Until 0.4 the run ended here without a
+        # trace on the document; now it is marked so that someone looks at it (T-10).
+        log(f"skip {did}: kein Text nach OCR")
+        befund = ({"leer": leer} if leer else
+                  {"ocr_erfunden": "; ".join(f"{'OCR-Text' if n == 'alle' else f'Seite {n}'}: {g}" for n, g in OCR_VERDACHT)}
+                  if OCR_VERDACHT else {"leer": "kein lesbarer Text, auch nicht nach OCR"})
+        nur_markieren(did, doc, tag_ids_on, befund, marker_id, unsicher_id, kaputt_id)
+        return
 
     types_roh = get("/document_types/?page_size=1000")["results"]
     types = {t["name"]: t["id"] for t in types_roh}
@@ -2510,10 +2818,11 @@ def main():
     # 2. Trotzdem immer im Text suchen: Stammdaten (harte Kennungen), dann Namen und Aliase.
     _text = titel_ohne_eigenen_kopf(title, cname) + "\n" + content
     treffer = stammdaten_treffer(corrs, cmeta, _text, eigene)
+    _text_namen = ohne_frankierung(_text)
     _gefunden = {}
     if mail_corr:
         _gefunden[mail_corr["id"]] = ["Absender-Mail"]
-    for c, g in treffer[:6] + namens_treffer(corrs, calias, _text, eigene["namen"])[:8]:
+    for c, g in treffer[:6] + namens_treffer(corrs, calias, _text_namen, eigene["namen"])[:8]:
         _gefunden.setdefault(c["id"], []).extend(x for x in g if x not in _gefunden.get(c["id"], []))
     _by_id = {c["id"]: c for c in corrs}
     kand = [_by_id[i] for i in list(_gefunden)[:10]]
@@ -2564,7 +2873,7 @@ def main():
         hinweis, cname, chint, kand_lines if kand else "", mail_ktx,
         (doc.get('added') or '')[:10], (doc.get('created') or '')[:10], dateiname_fuer_prompt(doc.get('original_file_name')),
         fieldspec, titel_ohne_unbelegtes(titel_ohne_eigenen_kopf(title, cname, _typ_bisher), content) or "—",
-        text_kuerzen(content, CFG['content_max_len'], CFG.get('content_end_len', 1000)),
+        text_kuerzen(ohne_frankierung(content), CFG['content_max_len'], CFG.get('content_end_len', 1000)),
         typ_vorschlag=_typ_bisher))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     prop, assistant_raw = mistral_chat(messages, 1200, schema1, "pass1")
@@ -2580,7 +2889,9 @@ def main():
     if nachher and not ocr_versucht and CFG["ocr_enabled"] and not NO_OCR:
         set_stage(did, "OCR-Nachlauf")
         try:
-            new = mistral_ocr(did)
+            new, erfunden = ocr_text_pruefen(mistral_ocr(did))
+            if erfunden:
+                OCR_VERDACHT.append(("alle", erfunden[0]))
             if len(new) > 40:
                 if not DRY:
                     send(f"/documents/{did}/", {"content": new}, "PATCH")
@@ -2622,6 +2933,28 @@ def main():
             # Der Absender aus Pass 1 beschreibt dann UNS (Briefkopf) — nie beim Kunden ablegen.
             prop["absender"] = {"adresse": antwort.get("adresse")} if antwort.get("adresse") else {}
 
+    # --- Not the issuer: an own person (the addressee) or the health insurer named on an employer's form ---
+    # One more question in the same conversation, as above (T-10: 21 payslips filed under the health insurer,
+    # several forms under the owner). No answer → no correspondent from the model, and a finding.
+    _typ_ki = prop.get("document_type") or prop.get("dokumentart")
+    _nicht_aussteller = nicht_aussteller_grund(prop.get("correspondent"), _typ_ki, CFG_LAUF, CFG)
+    _verworfen = None
+    if _nicht_aussteller:
+        frage = AUSSTELLER_FRAGE.format(NAME=prop.get("correspondent"), GRUND=_nicht_aussteller[1])
+        messages.append({"role": "assistant", "content": assistant_raw})
+        messages.append({"role": "user", "content": frage})
+        antwort, assistant_raw = mistral_chat(messages, 200, aussteller_schema(), "aussteller")
+        neu_k = re.sub(r"^(?:Herrn?|Frau|Firma)\s+", "", ohne_tabellenrest(antwort.get("aussteller")) or "").strip() or None
+        TRACE["aussteller"] = {"vorher": prop.get("correspondent"), "grund": _nicht_aussteller[0], "user": frage,
+                               "response": antwort}
+        # The issuer data from pass 1 described the wrong party — never learn it for the new one.
+        prop["absender"] = {}
+        if neu_k and not nicht_aussteller_grund(neu_k, _typ_ki, CFG_LAUF, CFG):
+            prop["correspondent"] = neu_k
+        else:
+            _verworfen = (_nicht_aussteller[0], f"„{prop.get('correspondent')}“ verworfen — {_nicht_aussteller[1]}")
+            prop["correspondent"] = None
+
     # --- Korrespondent-Feedback-Loop ---
     set_stage(did, "Korrespondent")
     corr_name = ohne_tabellenrest(prop.get("correspondent"))
@@ -2643,9 +2976,14 @@ def main():
             return max(ov, difflib.SequenceMatcher(None, ak, " ".join(bt)).ratio())
         scored = sorted(((cscore(c), c) for c in corrs), key=lambda x: -x[0])
         exact = next((c for s, c in scored if ak and " ".join(ctoks(c["name"])) == ak), None)
+        # The name the model gave is a known ALIAS (T-10: a staffing agency's short name — the search had
+        # found the correspondent by exactly that alias, the run still created a new one).
+        per_alias = None if exact else alias_treffer(corr_name, corrs, calias)
         pass2 = None
         if exact:
             corr_id = exact["id"]; corr_info = f"exakt='{exact['name']}'"
+        elif per_alias:
+            corr_id = per_alias["id"]; corr_info = f"alias='{per_alias['name']}'"
         else:
             # Nur ähnliche Namen, die die Namensregel bestehen — sonst ohne zweiten KI-Aufruf neu anlegen
             # (bis 2026-09-27 fragte Pass 2 bei jeder Ähnlichkeit ab 0,28: 9 von 33 Läufen, davon 4 ohne
@@ -2769,6 +3107,8 @@ def main():
                               CFG.get("eigene_typen") or [])
     if ep:
         pruefen["eigene_person"] = ep
+    if _verworfen and _verworfen[0] not in pruefen:
+        pruefen[_verworfen[0]] = _verworfen[1]
     db = datum_befund(dokument_datum(prop), wirksames_datum(prop, content, doc), doc)
     if db:
         pruefen["datum"] = db
@@ -2797,7 +3137,8 @@ def main():
         return
 
     # --- Zurückschreiben (KEIN owner/Rechte — macht post-consume.sh) ---
-    extra = ([marker_id] if marker_id else []) + ([unsicher_id] if ((new_tags or pruefen) and unsicher_id) else [])
+    extra = (([marker_id] if marker_id else []) + befund_tags(pruefen, unsicher_id, kaputt_id)
+             + ([unsicher_id] if (new_tags and unsicher_id) else []))
     keep_tags = tag_ids_on + tag_ids + extra
     patch = {"tags": list(dict.fromkeys(keep_tags))}
     if corr_id:
@@ -2861,10 +3202,95 @@ def main():
     if pruefen:
         # Nach der OK-Zeile: die Aktivität zeigt es als „Prüfen“, bis ein späterer Lauf ohne Widerspruch folgt.
         log(f"PRÜFEN {did} | {corr_info} | " + "; ".join(f"{k} {x}" for k, x in pruefen.items()))
+        if CFG.get("pruef_notiz"):
+            try:
+                notiz_setzen(did, befund_text(pruefen))
+            except Exception as e:
+                log(f"notiz-fail {did}: {e!r}")
     nachbearbeiten(did, patch, ok, TRACE.get("writeback") or {})
     TRACE["_stage"] = "fertig"
     save_trace(did)
     unmark_running(did)
+
+
+# --- Control run (T-10): the checks without the model, over documents already in Paperless ---
+# A large manual review found by eye what the code can find alone: missing pages, blank pages, invented OCR
+# text, copies, the owner as correspondent, the health insurer on a payslip. The control run looks for these
+# on existing documents and flags them (kaputt/unsicher tag, note with the reason); it changes nothing else.
+
+def kontroll_befunde(doc, korrespondent, typ, aehnliche, cfg_lauf, cfg):
+    """Findings for one document as {key: reason}; empty when nothing is wrong. Pure (no I/O)."""
+    b = {}
+    content = str(doc.get("content") or "")
+    if len(content.strip()) < 20:
+        b["leer"] = "kein Text (leere Seite oder kaputter Scan?)"
+    else:
+        g = ocr_seite_verdaechtig(content)
+        if g:
+            b["ocr_erfunden"] = g
+        t = teilstueck(content, doc.get("page_count"))
+        if t:
+            b["teilstueck"] = t
+        d = dublette(content, doc.get("page_count"), [x for x in aehnliche or () if x.get("id") != doc.get("id")])
+        if d:
+            b["dublette"] = d
+    n = nicht_aussteller_grund(korrespondent, typ, cfg_lauf, cfg)
+    if n:
+        b[n[0]] = f"„{korrespondent}“ — {n[1]}"
+    return b
+
+
+def ids_lesen(text):
+    """"1439-1442,1500" → [1439, 1440, 1441, 1442, 1500]."""
+    ids = []
+    for teil in str(text or "").replace(" ", "").split(","):
+        if not teil:
+            continue
+        a, _, b = teil.partition("-")
+        ids.extend(range(int(a), int(b) + 1) if b else [int(a)])
+    return list(dict.fromkeys(ids))
+
+
+def kontrolle(ids):
+    """Run the checks over `ids`; flag what is found (not in a dry run). Returns {id: findings}."""
+    tags_all = get("/tags/?page_size=1000")["results"]
+    tagid_by_norm = {norm(t["name"]): t["id"] for t in tags_all}
+    unsicher_id = resolve_tag(tagid_by_norm, CFG["unsicher_tag"])
+    kaputt_id = resolve_tag(tagid_by_norm, CFG.get("kaputt_tag"))
+    korr = {c["id"]: c["name"] for c in get("/correspondents/?page_size=2000")["results"]}
+    typen = {t["id"]: t["name"] for t in get("/document_types/?page_size=1000")["results"]}
+    konten, ergebnis = {}, {}
+    for did in ids:
+        try:
+            doc = get(f"/documents/{did}/")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue            # deleted or in the trash
+            raise
+        try:
+            r = get(f"/documents/?more_like_id={did}&page_size=5&fields=id,title,content,page_count")
+            aehnliche = r.get("results", [])
+        except Exception:
+            aehnliche = []
+        owner = doc.get("owner")
+        if owner not in konten:
+            konten[owner] = konto_cfg(CFG, owner)
+        b = kontroll_befunde(doc, korr.get(doc.get("correspondent")), typen.get(doc.get("document_type")),
+                             aehnliche, konten[owner], CFG)
+        if not b:
+            continue
+        ergebnis[did] = b
+        if DRY:
+            continue
+        neu = [t for t in befund_tags(b, unsicher_id, kaputt_id) if t not in (doc.get("tags") or [])]
+        if neu:
+            ok, err = patch_doc(did, {"tags": list(doc.get("tags") or []) + neu})
+            if not ok:
+                log(f"kontrolle-fail {did}: {str(err)[:200]}")
+        if CFG.get("pruef_notiz"):
+            notiz_setzen(did, befund_text(b))
+        log(f"PRÜFEN {did} | Kontrolle | " + "; ".join(f"{k} {x}" for k, x in b.items()))
+    return ergebnis
 
 
 # Nur beim direkten Aufruf ausführen (Post-Consume / manuell / Panel). So bleibt das Modul
@@ -2884,6 +3310,8 @@ def ausfuehren():
         eid = os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
         log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
         save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
+        if voruebergehend(e) and eid != "?":
+            abbruch_markieren(eid, e)
         return 2 if os.environ.get("CLASSIFY_DOC") else 0
     finally:
         unmark_running(os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
@@ -2909,6 +3337,11 @@ if __name__ == "__main__":
                           "model": CFG["model"], "ocr_model": CFG["ocr_model"], "ocr_min_len": CFG["ocr_min_len"],
                           "temperature": CFG["temperature"], "content_max_len": CFG["content_max_len"],
                           "ocr_always": CFG["ocr_always"], "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
+        sys.exit(0)
+
+    if os.environ.get("CLASSIFY_KONTROLLE"):
+        # CLASSIFY_KONTROLLE="1439-1859,1900" [CLASSIFY_DRY=1]: checks only, no model (T-10).
+        print(json.dumps(kontrolle(ids_lesen(os.environ["CLASSIFY_KONTROLLE"])), ensure_ascii=False, indent=1))
         sys.exit(0)
 
     sys.exit(ausfuehren())

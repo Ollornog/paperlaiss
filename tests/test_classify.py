@@ -90,13 +90,14 @@ import contextlib as _ctx, io as _io
 
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
           dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None,
-          datei=None, hinzu=None, patch_ergebnis=None, tags=(), alle_tags=(), mehr_routen=None):
+          datei=None, hinzu=None, patch_ergebnis=None, tags=(), alle_tags=(), mehr_routen=None, ocr_text=None,
+          seiten=None):
     aufrufe = {"ocr": 0, "chat": []}
     # mehr_routen first: "/documents/5/history/" must not be answered by "/documents/5/".
     routen = {**(mehr_routen or {}), "/documents/5/": {"id": 5, "content": text, "title": titel, "tags": list(tags),
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
                                 "correspondent": korr, "owner": 3 if besitzer else None,
-                                "original_file_name": datei, "added": hinzu},
+                                "original_file_name": datei, "added": hinzu, "page_count": seiten},
               "/users/3/": besitzer or {},
               "/tags/": {"results": list(alle_tags)}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
@@ -106,7 +107,7 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
 
     def ocr(did):
         aufrufe["ocr"] += 1
-        return "Neu gelesener Text " * 10
+        return "Neu gelesener Text " * 10 if ocr_text is None else ocr_text
     antworten = list(chat_antworten)
 
     def chat(messages, max_tokens=900, schema=None, name=""):
@@ -1396,7 +1397,7 @@ _kl = _lauf([{**_ok, "correspondent": "Max Muster"}], text=_gut + " Absender: Ma
 r.check("Verdrahtung: bei Erikas Dokument ist Max ein Kandidat und Erika allein „wir“",
         "Name „Max Muster“" in _kl["chat"][0] and "im Konto von Erika Muster" in _kl["system"]
         and (classify.TRACE.get("konto") == "erika"), _kl["chat"][0][:300])
-_kg = _lauf([{**_ok, "correspondent": "Max Muster"}, {"empfaenger": None, "adresse": None}], text=_gut + " Absender: Max Muster, Musterweg 1",
+_kg = _lauf([{**_ok, "correspondent": "Max Muster"}, {"empfaenger": None, "adresse": None}, {"aussteller": None}], text=_gut + " Absender: Max Muster, Musterweg 1",
             korrespondenten=[{"id": 7, "name": "Max Muster"}], besitzer=_erika, cfg={**_haus, "kennungen_je_konto": False})
 r.check("Verdrahtung: ohne Schalter bleibt Max „wir“ (kein Kandidat)", "Name „Max Muster“" not in _kg["chat"][0])
 
@@ -1668,8 +1669,8 @@ r.check("Eigene Person: die eigene Firma bei internen Dokumenten nicht (kein Per
         classify.eigene_person_befund("Eigenfirma GmbH", "Lohnabrechnung", ["Eigenfirma GmbH"], _et) is None)
 _ep_cfg = {"eigene_kennungen": {"namen": ["Erika Muster"]}}
 _ep_typen = [{"id": 1, "name": "Meldebescheinigung"}, {"id": 2, "name": "Bewerbung"}]
-_lauf([{**_ok, "document_type": "Meldebescheinigung", "correspondent": "Erika Muster"}, {"empfaenger": None, "adresse": None}],
-      korrespondenten=[{"id": 3, "name": "Erika Muster"}], typen=_ep_typen, cfg=_ep_cfg)
+_lauf([{**_ok, "document_type": "Meldebescheinigung", "correspondent": "Erika Muster"}, {"empfaenger": None, "adresse": None},
+       {"aussteller": None}], korrespondenten=[{"id": 3, "name": "Erika Muster"}], typen=_ep_typen, cfg=_ep_cfg)
 _ep_ja = dict(classify.TRACE.get("pruefen") or {})
 _lauf([{**_ok, "document_type": "Bewerbung", "correspondent": "Erika Muster"}, {"empfaenger": None, "adresse": None}],
       korrespondenten=[{"id": 3, "name": "Erika Muster"}], typen=_ep_typen, cfg=_ep_cfg)
@@ -1848,5 +1849,285 @@ _bb = _beleg_lauf("4711")
 _bbp = {c["field"]: c["value"] for c in (_bb.get("patch") or [{}])[0].get("custom_fields", [])}
 r.check("KI-Knopf: belegte Kennung ohne Kennzeichnung angeboten und behalten",
         "aktuell: 4711\n" in _bb["chat"][0] and "TITEL: Rechnung 4711" in _bb["chat"][0] and _bbp.get(1) == "4711", str(_bbp))
+
+
+# ---- T-10: lessons from the review of 419 scanned documents (2026-11-12) ----
+# 1. The OCR model loops on blank pages; its invention must never become the document's text.
+_loop = "\n\n".join(["\\( \\therefore m = \\frac{3}{11} \\)"] * 50)
+_dada = ("Wir sind die in der Zeitung im Fraktionischen Lachschaffenerfahren\n"
+         + "und die in der Zeitung im Fraktionischen Lachschaffenerfahren\n" * 20)
+r.check("Wiederholung: 50× dieselbe Zeile und ein Satz in Schleife erkannt, echte Seiten nicht",
+        classify.wiederholung(_loop)[1] == 50 and classify.wiederholung(_dada) is not None
+        and classify.wiederholung(_gut) is None
+        and classify.wiederholung("| --- | --- |\n" * 12 + "Lohnart Betrag\n") is None
+        and classify.wiederholung("Mo 06:00 15:00 8:00\n" * 3 + "Di 06:00 16:15 9:15\nSumme\nSaldo\n") is None)
+r.check("OCR-Verdacht: Wiederholungsschleife ist ein Grund",
+        (classify.ocr_seite_verdaechtig(_loop) or "").startswith("Wiederholungsschleife"))
+r.check("OCR-Text: erfundener Text wird verworfen, echter bleibt",
+        classify.ocr_text_pruefen(_loop) == ("", [classify.ocr_seite_verdaechtig(_loop)])
+        and classify.ocr_text_pruefen(_gut) == (_gut.strip(), []))
+_kt = ({"id": 1, "name": "KI-unsicher"}, {"id": 2, "name": "Kaputt"}, {"id": 3, "name": "KI-Klassifiziert"})
+_kcfg = {"unsicher_tag": "KI-unsicher", "kaputt_tag": "Kaputt", "marker_tag": "KI-Klassifiziert", "pruef_notiz": True}
+_ol = _lauf([_ok], text="", dry=False, ocr_text=_loop, alle_tags=_kt, cfg=_kcfg,
+            mehr_routen={"/documents/5/notes/": []})
+r.check("Leere Seite: erfundener OCR-Text wird NICHT ins Dokument geschrieben, keine KI-Analyse",
+        not any(p == "/documents/5/" and "content" in (d or {}) for p, d in _ol.get("send", []))
+        and _ol["chat"] == [], str(_ol.get("send")))
+r.check("Leere Seite: Tag Kaputt + Marker, Grund als Notiz",
+        [set(p["tags"]) for p in _ol.get("patch", [])] == [{2, 3}]
+        and any(p == "/documents/5/notes/" and "OCR-Text erfunden" in d["note"] for p, d in _ol.get("send", [])),
+        f"{_ol.get('patch')} {_ol.get('send')}")
+_on = _lauf([{**_ok, "needs_ocr": True}, _ok], dry=False, ocr_text=_dada)
+r.check("OCR-Nachlauf: Schleife ersetzt den Paperless-Text nicht, kein zweiter Pass 1",
+        not any("content" in (d or {}) for p, d in _on.get("send", [])) and len(_on["chat"]) == 1
+        and "ocr_erfunden" in (classify.TRACE.get("pruefen") or {}), str(classify.TRACE.get("pruefen")))
+# Blank pages are found before the model is asked (where Ghostscript is at hand).
+_leer_dir = tempfile.mkdtemp()
+Path(_leer_dir, "leerseiten.py").write_text("def leere_seiten(pfad, seiten):\n    return list(range(1, seiten + 1)), {}\n")
+_alt_gs, _alt_sd, _alt_get = classify._hat_ghostscript, classify.SCRIPT_DIR, classify.get
+classify._hat_ghostscript, classify.SCRIPT_DIR, classify.get = (lambda: True), _leer_dir, (lambda p, raw=False: b"%PDF-")
+try:
+    _leer_ja, _leer_0 = classify.alle_seiten_leer(5, 2), classify.alle_seiten_leer(5, 0)
+    classify._hat_ghostscript = lambda: False
+    _leer_ohne_gs = classify.alle_seiten_leer(5, 2)
+finally:
+    classify._hat_ghostscript, classify.SCRIPT_DIR, classify.get = _alt_gs, _alt_sd, _alt_get
+Path(_leer_dir, "leerseiten.py").write_text("def leere_seiten(pfad, seiten):\n    return [1], {}\n")
+classify._hat_ghostscript, classify.SCRIPT_DIR, classify.get = (lambda: True), _leer_dir, (lambda p, raw=False: b"%PDF-")
+try:
+    _leer_teil = classify.alle_seiten_leer(5, 2)
+finally:
+    classify._hat_ghostscript, classify.SCRIPT_DIR, classify.get = _alt_gs, _alt_sd, _alt_get
+r.check("Leerseiten: alle Seiten leer erkannt; eine von zwei, ohne Seiten oder ohne Ghostscript keine Aussage",
+        _leer_ja == "alle 2 Seite(n) leer" and _leer_teil is None and _leer_0 is None and _leer_ohne_gs is None)
+_tk = _lauf([_ok], text=_gut + " Seite 2 von 7", dry=False, alle_tags=_kt, cfg=_kcfg,
+            mehr_routen={"/documents/5/notes/": []})
+r.check("Lauf: fehlende Seiten → Tag Kaputt (nicht KI-unsicher) und Notiz mit dem Grund",
+        2 in _tk["patch"][0]["tags"] and 1 not in _tk["patch"][0]["tags"]
+        and any("Seiten fehlen" in d.get("note", "") for p, d in _tk.get("send", []) if p.endswith("/notes/")),
+        f"{_tk.get('patch')} {_tk.get('send')}")
+_alt_ls = classify.alle_seiten_leer
+classify.alle_seiten_leer = lambda did, seiten: "alle 1 Seite(n) leer"
+try:
+    _lv = _lauf([_ok], text="", dry=False, alle_tags=_kt, cfg=_kcfg, seiten=1, mehr_routen={"/documents/5/notes/": []})
+finally:
+    classify.alle_seiten_leer = _alt_ls
+r.check("Leerseiten: leeres Dokument geht nicht zur OCR und nicht zur KI, bekommt Kaputt",
+        _lv["ocr"] == 0 and _lv["chat"] == [] and [set(p["tags"]) for p in _lv.get("patch", [])] == [{2, 3}],
+        f"ocr={_lv['ocr']} {_lv.get('patch')}")
+
+
+# 2. Overload: Paperless reads repeat on 502/503/504, writes never blindly, and a broken-off run is flagged.
+def _paperless_mit(fehlercodes, methode=None):
+    folge = list(fehlercodes); aufrufe = []
+
+    def urlopen(req, timeout=0):
+        aufrufe.append(1)
+        if folge:
+            code = folge.pop(0)
+            if code == "netz":
+                raise _ue.URLError("weg")
+            raise _ue.HTTPError("u", code, "x", {}, None)
+        return io.BytesIO(json.dumps({"ok": True}).encode())
+    alt = classify.urllib.request.urlopen
+    classify.urllib.request.urlopen = urlopen
+    try:
+        try:
+            erg = (classify.get("/x/", warten=(0, 0)) if methode is None
+                   else classify.send("/x/", {}, methode, warten=(0, 0)))
+            return erg, len(aufrufe)
+        except _ue.URLError as e:
+            return getattr(e, "code", "netz"), len(aufrufe)
+    finally:
+        classify.urllib.request.urlopen = alt
+
+
+r.check("Paperless: Lesen wird bei 503/502 und Netzfehler wiederholt",
+        _paperless_mit([503, 502]) == ({"ok": True}, 3) and _paperless_mit(["netz"]) == ({"ok": True}, 2))
+r.check("Paperless: 404 sofort, nach allen Versuchen kommt 503 durch",
+        _paperless_mit([404]) == (404, 1) and _paperless_mit([503, 503, 503]) == (503, 3))
+r.check("Paperless: PATCH bei 504 wiederholt, POST nicht (könnte angekommen sein); Netzfehler beim Schreiben nie",
+        _paperless_mit([504], "PATCH") == ({"ok": True}, 2) and _paperless_mit([504], "POST") == (504, 1)
+        and _paperless_mit([503], "POST") == ({"ok": True}, 2) and _paperless_mit(["netz"], "PATCH") == ("netz", 1))
+r.check("Mistral: fünf Pausen bis 120 s (2026-11-12: 503 für zwei Minuten)",
+        classify.WARTEN_S[-1] >= 120 and sum(classify.WARTEN_S) >= 200)
+r.check("Abbruch: Überlast und Netz sind vorübergehend, 400 nicht",
+        classify.voruebergehend(_ue.HTTPError("u", 503, "x", {}, None)) and classify.voruebergehend(TimeoutError())
+        and not classify.voruebergehend(_ue.HTTPError("u", 400, "x", {}, None)) and not classify.voruebergehend(ValueError()))
+_ab = {"patch": [], "send": []}
+_alt = {n: getattr(classify, n) for n in ("get", "send", "patch_doc", "CFG", "DRY")}
+classify.get = lambda p, raw=False: ({"id": 5, "tags": [3]} if p == "/documents/5/" else
+                                     {"results": list(_kt)} if p.startswith("/tags/") else [])
+classify.send = lambda p, d, m="PATCH", **k: _ab["send"].append((p, d))
+classify.patch_doc = lambda did, patch, pause=None: (_ab["patch"].append(patch), (True, None))[1]
+classify.CFG, classify.DRY = {**classify.CFG, **_kcfg}, False
+try:
+    classify.abbruch_markieren("5", _ue.HTTPError("u", 503, "Service Unavailable", {}, None))
+finally:
+    for _n, _v in _alt.items():
+        setattr(classify, _n, _v)
+r.check("Abbruch: Dokument bekommt KI-unsicher und eine Notiz mit dem Grund",
+        _ab["patch"] == [{"tags": [3, 1]}] and "Lauf abgebrochen" in _ab["send"][0][1]["note"], str(_ab))
+
+# mistral_ocr itself leaves invented pages out of the text and reports them.
+_alt_ms, _alt_get = classify.mistral_senden, classify.get
+classify.mistral_senden = lambda req, timeout, warten=None: {"pages": [{"markdown": _gut}, {"markdown": _loop}]}
+classify.get = lambda p, raw=False: b"%PDF-"
+try:
+    _mo = classify.mistral_ocr(5)
+    _mo_verdacht = list(classify.OCR_VERDACHT)
+finally:
+    classify.mistral_senden, classify.get = _alt_ms, _alt_get
+    classify.OCR_VERDACHT.clear()
+r.check("OCR: erfundene Seite fehlt im Text und steht als Verdacht da",
+        _mo == _gut.strip() and [n for n, _ in _mo_verdacht] == [2], f"{_mo[:60]!r} {_mo_verdacht}")
+# The run that broke off on an outage is flagged (wiring in ausfuehren).
+_alt_main, _alt_ab = classify.main, classify.abbruch_markieren
+_abr = []
+classify.abbruch_markieren = lambda did, e: _abr.append((did, getattr(e, "code", None)))
+os.environ["CLASSIFY_DOC"] = "5"
+try:
+    def _wirf(code):
+        def m():
+            raise _ue.HTTPError("u", code, "x", {}, None)
+        return m
+    classify.main = _wirf(503)
+    _c503 = classify.ausfuehren()
+    classify.main = _wirf(400)
+    _c400 = classify.ausfuehren()
+finally:
+    classify.main, classify.abbruch_markieren = _alt_main, _alt_ab
+    os.environ.pop("CLASSIFY_DOC", None)
+r.check("Abbruch: nach 503 markiert, nach 400 nicht (Fehler des Dokuments, nicht der Lage)",
+        _abr == [("5", 503)] and _c503 == 2 and _c400 == 2, str(_abr))
+
+# 3. The model names a known alias: use that correspondent, do not create a new one .
+_meta_alt = dict(classify.CORR_META)
+classify.CORR_META["549"] = {"aliase": "MP Personaldienste GmbH, Muster-Gruppe"}
+try:
+    _al = _lauf([{**_ok, "correspondent": "MP Personaldienste GmbH"}, {"match": None}], dry=False,
+                korrespondenten=[{"id": 549, "name": "Muster Personal GmbH"}, {"id": 7, "name": "Anderes Haus"}])
+finally:
+    classify.CORR_META.clear()
+    classify.CORR_META.update(_meta_alt)
+r.check("Alias: Name der KI ist Alias eines Korrespondenten → zugeordnet, nichts neu angelegt",
+        [p.get("correspondent") for p in _al.get("patch", [])] == [549]
+        and not any(p == "/correspondents/" for p, _ in _al.get("send", [])), f"{_al.get('patch')} {_al.get('send')}")
+r.check("Alias: zwei Korrespondenten mit demselben Alias entscheiden nichts",
+        classify.alias_treffer("ACME", [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], lambda c: "ACME GmbH") is None
+        and classify.alias_treffer("ACME", [{"id": 1, "name": "A"}], lambda c: "ACME GmbH")["id"] == 1)
+
+# 4a. A franking mark is not a sender.
+r.check("Frankierung: Vermerk im Adressfeld wird neutralisiert, Absenderzeile der Post bleibt",
+        classify.ohne_frankierung("01 2FCC DV 08.22 0,85 Deutsche Post *K4000*") == "01 2FCC [Frankiervermerk] *K4000*"
+        and classify.ohne_frankierung("DV 01.26 0.95 Deutsch Post OF") == "[Frankiervermerk] OF"
+        and classify.ohne_frankierung("Deutsche Post AG, PZC, 48000 Münster") == "Deutsche Post AG, PZC, 48000 Münster"
+        and classify.ohne_frankierung("Betrag 10,00 Deutsche Post AG") == "Betrag 10,00 Deutsche Post AG")
+_fr = _lauf([_ok], text="DV 08.22 0,85 Deutsche Post *K4000*\n" + _gut,
+            korrespondenten=[{"id": 394, "name": "Deutsche Post AG"}])
+r.check("Frankierung: Post ist kein Kandidat der Vorsuche und steht nicht im Prompt-Text",
+        "Deutsche Post AG" not in str((classify.TRACE.get("vorsuche") or {}).get("kandidaten"))
+        and "0,85 Deutsche Post" not in _fr["chat"][0], str(classify.TRACE.get("vorsuche")))
+# 4b. A personnel number in a table (label in the header row, value one row below) is never a customer number.
+_tab = "Blatt 1\n1 Personal-Nr. | Geburtsdatum | StKl\n50003 220265 1 | ev | 30\nAOK Musterland"
+_md = "| P.-Nr. | KST |\n| --- | --- |\n| 277000709 | 277 |"
+r.check("Personalnummer: Wert in der Zeile unter dem Tabellenkopf erkannt, andere Spalten nicht",
+        classify.personalnummer("50003", _tab) and not classify.personalnummer("30", _tab)
+        and classify.personalnummer("277000709", _md) and not classify.personalnummer("277", _md)
+        and not classify.personalnummer("4711815", "Personalnummer 782125149\nKunden-Nr. 4711815"))
+_kn5, _, _kv5 = classify.stammdaten_nachtragen({}, {"kundennummer": "50003"}, "", _eg, "Test", text=_tab)
+r.check("Erfassen: Personalnummer aus der Tabelle wird nicht als Kundennummer gespeichert",
+        "kundennummer" not in _kn5 and "Personalnummer" in str(_kv5.get("kundennummer")), f"{_kn5} {_kv5}")
+# 4c. Health insurer on an employer's form, own person: ask for the issuer.
+_lt = [{"id": 1, "name": "Lohnabrechnung"}, {"id": 2, "name": "Rechnung"}]
+_kk = _lauf([{**_ok, "document_type": "Lohnabrechnung", "correspondent": "AOK Musterland"},
+             {"aussteller": "Muster Personal GmbH"}], dry=False, typen=_lt,
+            korrespondenten=[{"id": 357, "name": "AOK Beispiel"}, {"id": 549, "name": "Muster Personal GmbH"}])
+r.check("Einzugsstelle: Krankenkasse auf Lohnabrechnung → Rückfrage, Arbeitgeber wird Korrespondent",
+        len(_kk["chat"]) == 2 and "Arbeitgeber" in _kk["chat"][1]
+        and [p.get("correspondent") for p in _kk.get("patch", [])] == [549], f"{_kk['chat'][-1][:200]} {_kk.get('patch')}")
+_kk2 = _lauf([{**_ok, "document_type": "Lohnabrechnung", "correspondent": "AOK Beispiel"}, {"aussteller": None}],
+             dry=False, typen=_lt, korrespondenten=[{"id": 357, "name": "AOK Beispiel"}])
+r.check("Einzugsstelle: ohne Antwort kein Korrespondent von der KI, Befund „einzugsstelle“",
+        [p.get("correspondent") for p in _kk2.get("patch", [])] == [None]
+        and "einzugsstelle" in (classify.TRACE.get("pruefen") or {}), str(classify.TRACE.get("pruefen")))
+_kk3 = _lauf([{**_ok, "document_type": "Rechnung", "correspondent": "AOK Beispiel"}], typen=_lt,
+             korrespondenten=[{"id": 357, "name": "AOK Beispiel"}])
+r.check("Einzugsstelle: auf einer Rechnung darf die Krankenkasse Absender sein (keine Rückfrage)", len(_kk3["chat"]) == 1)
+_ep2 = _lauf([{**_ok, "document_type": "Meldebescheinigung", "correspondent": "Erika Muster"},
+              {"empfaenger": None, "adresse": None}, {"aussteller": "Beispiel Zeitarbeit"}], dry=False,
+             korrespondenten=[{"id": 3, "name": "Erika Muster"}, {"id": 536, "name": "Beispiel Zeitarbeit"}],
+             typen=_ep_typen, cfg=_ep_cfg)
+r.check("Eigene Person: Rückfrage nach dem Aussteller, der wird Korrespondent",
+        [p.get("correspondent") for p in _ep2.get("patch", [])] == [536], str(_ep2.get("patch")))
+r.check("Technisches Konto: Upload-Konto ist nicht „wir“, es gelten alle eigenen Namen",
+        classify.konto_cfg({**_haus, "technische_konten": ["scanner"]}, 6, {"username": "scanner", "first_name": "Scan"})
+        ["eigene_kennungen"]["namen"] == ["Erika Muster", "Max Muster"])
+
+
+# 5. Control run: the checks without the model.
+def _kb(doc, k=None, t=None, ae=()):
+    return classify.kontroll_befunde(doc, k, t, list(ae), _ep_cfg, {**classify.CFG, **_ep_cfg})
+
+
+r.check("Kontrolle: leer, Schleife, fehlende Seite, Dublette, eigene Person, Krankenkasse",
+        "leer" in _kb({"id": 1, "content": " "})
+        and "ocr_erfunden" in _kb({"id": 1, "content": _loop})
+        and "teilstueck" in _kb({"id": 1, "content": _gut + " Seite 1 von 3", "page_count": 1})
+        and "dublette" in _kb({"id": 1, "content": _t1, "page_count": 1}, ae=[{"id": 9, "content": _t1, "page_count": 1}])
+        and "eigene_person" in _kb({"id": 1, "content": _gut}, "Erika Muster", "Meldebescheinigung")
+        and "einzugsstelle" in _kb({"id": 1, "content": _gut}, "AOK Beispiel", "Lohnabrechnung"))
+r.check("Kontrolle: ein gutes Dokument hat keinen Befund, sich selbst als Dublette auch nicht",
+        _kb({"id": 1, "content": _t1, "page_count": 1}, "Muster GmbH", "Rechnung",
+            ae=[{"id": 1, "content": _t1, "page_count": 1}]) == {})
+r.check("Teilstück: „Fortsetzung nächste Seite“ am Ende meldet die fehlende Folgeseite, mitten im Text nicht",
+        "Folgeseite fehlt" in (classify.teilstueck(_gut + " Gesetzliches Netto 1713,13  Fortsetzung nächste Seite", 1) or "")
+        and classify.teilstueck("Fortsetzung nächste Seite " + _gut, 2) is None
+        and classify.teilstueck(_gut + " Bl.2 Rs. bitte wenden", 2) is None)
+r.check("Kontrolle: ID-Liste mit Bereichen", classify.ids_lesen("3-5, 9,4") == [3, 4, 5, 9])
+r.check("Befund-Tags: kaputter Scan → Kaputt, sonst KI-unsicher, gemischt beide, ohne Kaputt-Tag KI-unsicher",
+        classify.befund_tags({"leer": "x"}, 1, 2) == [2] and classify.befund_tags({"dublette": "x"}, 1, 2) == [1]
+        and classify.befund_tags({"leer": "x", "dublette": "y"}, 1, 2) == [2, 1]
+        and classify.befund_tags({"leer": "x"}, 1, None) == [1] and classify.befund_tags({}, 1, 2) == [])
+_kd = {"patch": [], "send": []}
+_alt = {n: getattr(classify, n) for n in ("get", "send", "patch_doc", "CFG", "DRY")}
+_kdocs = {"/documents/7/": {"id": 7, "content": _loop, "tags": [3], "owner": None, "page_count": 1},
+          "/documents/8/": {"id": 8, "content": _gut, "tags": [], "owner": None, "page_count": 1}}
+
+
+def _kget(p, raw=False):
+    if p in _kdocs:
+        return _kdocs[p]
+    if p == "/documents/9/":
+        raise _ue.HTTPError("u", 404, "x", {}, None)
+    if p.startswith("/documents/?more_like_id"):
+        return {"results": []}
+    if p.endswith("/notes/"):
+        return []
+    return {"results": list(_kt) if p.startswith("/tags/") else []}
+
+
+classify.get = _kget
+classify.send = lambda p, d, m="PATCH", **k: _kd["send"].append((p, d))
+classify.patch_doc = lambda did, patch, pause=None: (_kd["patch"].append((did, patch)), (True, None))[1]
+classify.CFG, classify.DRY = {**classify.CFG, **_kcfg}, False
+try:
+    _ke = classify.kontrolle([7, 8, 9])
+finally:
+    for _n, _v in _alt.items():
+        setattr(classify, _n, _v)
+r.check("Kontrolle: nur das kaputte Dokument wird markiert (Kaputt + Notiz), gelöschtes übersprungen",
+        list(_ke) == [7] and _kd["patch"] == [(7, {"tags": [3, 2]})]
+        and [p for p, _ in _kd["send"]] == ["/documents/7/notes/"], f"{_ke} {_kd}")
+_nz = {"send": []}
+_alt_get, _alt_send = classify.get, classify.send
+classify.get = lambda p, raw=False: [{"note": "paperlaiss: prüfen — leer: x"}]
+classify.send = lambda p, d, m="PATCH", **k: _nz["send"].append(d)
+try:
+    _n1 = classify.notiz_setzen(5, "prüfen — leer: x")
+    _n2 = classify.notiz_setzen(5, "prüfen — dublette: y")
+finally:
+    classify.get, classify.send = _alt_get, _alt_send
+r.check("Notiz: gleicher Wortlaut nur einmal", _n1 is False and _n2 is True and len(_nz["send"]) == 1)
 
 sys.exit(r.done())

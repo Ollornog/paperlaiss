@@ -238,6 +238,9 @@ r.check("Aktivität: Eintrag zerlegt (Art, Dokument, Korrespondent, Typ, OCR)",
         ("klassifiziert", 913, "Klein GmbH", "21", "OCR-rescue(340)"), str(_e))
 r.check("Aktivität: neuer Korrespondent erkannt", kern.eintrag_lesen(_z[4])["korrespondent_neu"] is True)
 r.check("Aktivität: Zeile ohne Zeitstempel fällt weg", kern.eintrag_lesen(_z[2]) is None)
+r.check("Aktivität: Zuordnung per Alias und per Rückfrage zeigt den Korrespondenten",
+        kern.eintrag_lesen("2026-11-12 03:00:00 OK 12 | alias='Muster Personal GmbH' id=7 | typ=35 |")["korrespondent"] == "Muster Personal GmbH"
+        and kern.eintrag_lesen("2026-11-12 03:00:00 OK 7 | gewählt='Muster' id=3 | typ=1 |")["korrespondent"] == "Muster")
 _a = kern.aktivitaet(_z)
 r.check("Aktivität: neueste zuerst", _a["eintraege"][0]["doc"] == 8 and _a["gesamt"] == 5)
 r.check("Aktivität: Kennzahlen je Art", _a["kennzahlen"] ==

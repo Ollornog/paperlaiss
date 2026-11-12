@@ -65,6 +65,7 @@ tenant-specific.
 CLASSIFY_DRY=1  CLASSIFY_DOC=<id>  python3 classify.py     # print only, write nothing
 CLASSIFY_FORCE=1 CLASSIFY_DOC=<id> python3 classify.py     # redo an already-classified document
 CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # force Mistral OCR
+CLASSIFY_KONTROLLE=1439-1859 [CLASSIFY_DRY=1] python3 classify.py # control run: checks only, no model
 ```
 
 A document type that is already set is replaced only on a real import (no `CLASSIFY_SOURCE`, no
@@ -220,7 +221,17 @@ classifier uses it in three ways:
   in the text while the date is still the import day, a collective document (identifiers of three
   other correspondents; not for the types in `sammeldokument_ausser_typen`, default Kontoauszug,
   Kreditkartenabrechnung), and a duplicate (a similar document with the same amounts, dates and
-  numbers, the same salutation and page count — a form letter to someone else is none). The origin (`erfasst`, per value for list fields) is shown in
+  numbers, the same salutation and page count — a form letter to someone else is none). Since 0.5: a
+  broken scan — all pages blank (checked with Ghostscript *before* OCR where it is available), invented
+  OCR text (a line repeated over half a page, foreign script, a model remark; such pages never replace
+  the document's text), "page x of y" with fewer pages or "Fortsetzung nächste Seite" at the end — gets
+  the `kaputt_tag` instead. If the model names an own person, or a health insurer/collecting agency on a
+  type the employer issues (`arbeitgeber_typen`, `einzugsstellen_muster`), it is asked once for the
+  issuer; without an answer it sets no correspondent and the run is marked. With `pruef_notiz` the
+  reason is written as a note on the document (once per wording). A run that breaks off on an outage
+  (Paperless or Mistral 429/5xx after all retries) gets the `unsicher_tag` and a note. The **control
+  run** (`CLASSIFY_KONTROLLE=<ids>`) applies the checks without the model to documents already in
+  Paperless and flags what it finds; nothing else changes. The origin (`erfasst`, per value for list fields) is shown in
   the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
@@ -353,6 +364,10 @@ an earlier rule consumed it in the same run.
 | `tagging_enabled` | `false` | AI assigns content tags (off: type/correspondent/fields only) |
 | `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal |
 | `unsicher_tag` | – | optional flag tag (by name) |
+| `kaputt_tag` | – | optional tag for a broken scan (blank pages, missing pages, invented OCR text); empty = `unsicher_tag` |
+| `pruef_notiz` | `false` | write the reason of a finding as a note on the document |
+| `technische_konten` | `[]` | upload-only accounts (scanner, mail fetch): for their documents all own names count as "we" |
+| `arbeitgeber_typen` / `einzugsstellen_muster` | payslip, wage tax and social insurance forms / health insurers | on these types a matching name is never the correspondent; the model is asked for the employer |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |

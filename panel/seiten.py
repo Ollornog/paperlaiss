@@ -752,6 +752,21 @@ EINSTELLUNGEN = {
     "reserved_tags": ("Tags", "Reservierte Tags",
                       "Tags, die die KI nie vergibt und die beim Schreiben erhalten bleiben (Status, Richtung …). Ein Eintrag je Zeile."),
     "unsicher_tag": ("Tags", "Tag bei Unsicherheit", "Wird gesetzt, wenn die KI einen neuen Tag vorschlägt. Leer = aus."),
+    "kaputt_tag": ("Tags", "Tag bei kaputtem Scan",
+                   "Für leere Seiten, fehlende Seiten („Seite 2 von 3“ bei einer Seite) und erfundenen OCR-Text. "
+                   "Leer = diese Fälle bekommen den Tag bei Unsicherheit."),
+    "pruef_notiz": ("Tags", "Grund als Notiz",
+                    "An: der Grund eines Prüfhinweises steht als Notiz am Dokument („paperlaiss: prüfen — …“), "
+                    "je Wortlaut nur einmal."),
+    "technische_konten": ("Korrespondenten", "Technische Konten (nur Hochladen)",
+                          "Benutzernamen, die nur hochladen (Scanner, Mail-Abruf); der Besitzer kommt später. Für ihre "
+                          "Dokumente gelten alle eigenen Namen als „wir“, nicht das Upload-Konto. Einer je Zeile."),
+    "arbeitgeber_typen": ("Korrespondenten", "Typen vom Arbeitgeber",
+                          "Dokumenttypen, die der Arbeitgeber ausstellt (Lohnabrechnung, Meldebescheinigung …). Nennt die "
+                          "KI dort eine Krankenkasse oder Einzugsstelle, fragt paperlaiss nach dem Arbeitgeber. Einer je Zeile."),
+    "einzugsstellen_muster": ("Korrespondenten", "Muster Krankenkasse/Einzugsstelle",
+                              "Regulärer Ausdruck (ohne Groß-/Kleinschreibung) für Namen, die bei den Typen vom "
+                              "Arbeitgeber nie Korrespondent sind."),
     "sammeldokument_ausser_typen": ("Korrespondenten", "Kein Sammeldokument bei diesen Typen",
                                     "Dokumenttypen, auf denen naturgemäß Kennungen vieler Gegenüber stehen (Kontoauszug, "
                                     "Kreditkartenabrechnung). Für sie entfällt der Prüfhinweis „Sammeldokument“. Einer je Zeile."),
