@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-12
+
+Nur das Panel-Abbild: neue Python-Linie und aktueller Debian-Sicherheitsstand. Klassifizierer und Panel-Verhalten unverändert.
+
+### Sicherheit
+
+- **Panel-Abbild auf Python 3.15.2** (vorher 3.14.10): Basis `python:3.15-slim@65a65fc…`, neueste stabile Linie. Der Abbild-Bau zieht jetzt die Pakete aus trixie-security nach (`apt-get upgrade`), das Basisabbild hinkt hinterher. Gemessen mit syft 1.54.0 und grype 0.120.0 über die SBOM: v0.6.0 hatte 0 kritische und 5 hohe Funde (apt, libapt-pkg, zlib1g ×2, Python CVE-2026-119170), jetzt 0 und 0.
+- `uvicorn[standard]` → `uvicorn` plus `httptools` und `uvloop` (uvicorn nimmt beide von selbst, der Server verhält sich wie vorher). `[standard]` zog außerdem pyyaml, watchfiles, websockets und python-dotenv, die das Panel nicht nutzt; pyyaml 6.0.3 hat kein Wheel für CPython 3.15. pydantic 2.14.3 (core 2.50.4) und httptools 0.9.0 bringen ihre 3.15-Wheels mit.
+
+### Geändert
+
+- **Dependabot prüft das Basisabbild täglich.** Die Wartezeit (cooldown) des docker-Ökosystems zählt ab dem letzten Push des Tags auf Docker Hub, und `python:3.x-slim` wird alle paar Tage neu gepusht. Der Monatslauf fand am 2026-11-07 jeden Kandidaten in der Wartezeit („Skipping tag … due to cooldown period“) und behielt den alten Digest. Die drei Tage Wartezeit bleiben.
+
 ## [0.6.0] - 2026-11-12
 
 Lehren aus einer zweiten Durchsicht aller gut 700 Dokumente einer Person (Backlog T-11). Gemessen an der Sollliste dieser Durchsicht (123 Dokumente, Trockenlauf ohne OCR, je zwei Läufe 0.5.0 gegen 0.6.0): Korrespondent 122/121 → 122/121, Typ 116/119 → 119/118, Datum 121/121 → 121/121 — gleich im Rahmen der Schwankung (Arbeitsvertrag/Vertrag, Urkunde/Bescheinigung; ein Korrespondent, der in beiden Fassungen je nach Antwort auf die Rückfrage wechselt). Gezählt in denselben Läufen: IBAN-Feldwerte mit falscher Prüfziffer 7/8 → 0/0, „Vorsorge“ und „Versicherungen“ zusammen 18/17 → 1/1. Der Kontrolllauf über alle Dokumente der Person meldet die zwei Fehlalarme nicht mehr (Seitenkopf auf 13 Seiten, überlange Seite), behält alle 7 echten Befunde und findet zwei Teilkopien (eine bisher übersehen, eine zweite Fassung mit einer Seite mehr).

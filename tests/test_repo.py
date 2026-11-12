@@ -69,6 +69,16 @@ PFLICHT = [
 fehlt = hygiene.pruefe_pflichtdateien(str(ROOT), PFLICHT)
 r.check("alle Pflichtdateien vorhanden", not fehlt, " | ".join(fehlt))
 
+# ---- Dependabot prüft das Basisabbild täglich
+# Die docker-Wartezeit zählt ab dem letzten Push des Tags auf Docker Hub, `python:3.x-slim` wird alle paar Tage neu
+# gepusht. Ein Monatslauf fand so jeden Kandidaten in der Wartezeit und behielt den alten Digest (2026-11-07).
+_dep = (ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
+_docker = next((e for e in re.split(r"\n  - ", _dep)[1:]
+                if re.match(r"package-ecosystem:\s*docker\s*$", e.splitlines()[0])), "")
+r.check("Dependabot: der `docker`-Eintrag (Basisabbild) läuft täglich",
+        re.search(r"^\s*interval:\s*daily\b", _docker, re.M) is not None,
+        "monatlich verpasst das Ruhefenster neu gepushter Basis-Tags")
+
 # ---- Keine private Infrastruktur
 # `admin@example.de` ist harmlos — `paperless.example.de` verrät, wo ein Paperless läuft.
 # Muster und Sperrliste stehen in tests/_kit/hygiene_policy.json — einer Quelle für alle Repos.

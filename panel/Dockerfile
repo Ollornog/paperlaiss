@@ -1,11 +1,14 @@
-# Per DIGEST gepinnt, nicht per Tag: `python:3.14-slim` zeigt heute hierhin und morgen woanders —
+# Per DIGEST gepinnt, nicht per Tag: `python:3.15-slim` zeigt heute hierhin und morgen woanders —
 # zwei Bauläufe desselben Commits ergäben verschiedene Abbilder. Dependabot (docker, /panel) hebt
 # den Digest; ein Basisabbild-Wechsel wird von Hand gemergt.
-FROM python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 # Schrift für das Inhaltsverzeichnis des Export-Knopfs: DejaVu Sans deckt Umlaute, €, Ost- und
 # Südosteuropäisches, Griechisch und Kyrillisch ab (ohne sie fällt exportpdf.py auf Helvetica zurück,
 # die nur Windows-1252 kann).
+# `apt-get upgrade`: das Basisabbild hinkt trixie-security hinterher (2026-11-12: zlib1g +b1 statt +deb13u1,
+# zwei hohe grype-Funde). Der Schritt läuft ohnehin gegen das Netz (Schrift), also gleich den Sicherheitsstand mit.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

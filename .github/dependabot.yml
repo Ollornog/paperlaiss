@@ -50,13 +50,18 @@ updates:
         patterns: ["*"]
         update-types: ["patch", "minor"]
   # Das Basis-Abbild ist per Digest gepinnt; ohne Dependabot bliebe es für immer stehen.
+  # TÄGLICH statt monatlich (2026-11-12): die Wartezeit des docker-Ökosystems zählt ab `tag_last_pushed` des Kandidaten
+  # auf Docker Hub (dependabot-core docker/update_checker.rb, apply_cooldown). `python:3.x-slim` wird alle paar Tage neu
+  # gepusht; ein Monatslauf in so einem Fenster überspringt jeden Kandidaten und behält den alten Digest einen weiteren
+  # Monat (2026-11-07). Täglich trifft das erste ruhige Drei-Tage-Fenster, die Wartezeit selbst bleibt. Auf der neuesten
+  # Python-Linie bleiben: gibt es eine neuere Nebenversion, bietet Dependabot nur diese an, nie den Digest der alten.
   - package-ecosystem: docker
     directory: /panel
     # Wartezeit vor Versions-Updates (PO 2026-09-28), gilt nicht für Sicherheits-Updates.
     cooldown:
       default-days: 3
     schedule:
-      interval: monthly
+      interval: daily
     commit-message:
       prefix: "ci"
     groups:
