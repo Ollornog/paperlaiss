@@ -217,7 +217,18 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
   (je Wortlaut einmal). Ein Lauf, der an einem Ausfall abbricht (Paperless oder Mistral 429/5xx nach allen
   Wiederholungen), bekommt den `unsicher_tag` und eine Notiz. Der **Kontrolllauf**
   (`CLASSIFY_KONTROLLE=<ids>`) wendet die Prüfungen ohne KI auf vorhandene Dokumente an und markiert,
-  was er findet; sonst ändert er nichts. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
+  was er findet; sonst ändert er nichts. Seit 0.6 gilt eine IBAN (Feld oder Stammdaten) nur mit gültiger
+  Prüfziffer (ISO 13616) und so, wie sie im Text steht; ein Kennungsfeld nimmt keine Personalnummer und
+  keinen Wert, der eine enthält, und bei den Typen aus `arbeitgeber_typen` füllt die KI die Felder aus
+  `arbeitgeber_ohne_felder` nie. Mit `tag_ausschluss` schließt ein Tag andere aus (außer ein Muster steht
+  im Text). Eine Dublette zählt auch, wenn die Zahlen des einen Textes die des anderen bis auf wenige
+  enthalten, die die OCR verloren hat (Scan eines digitalen Originals); ein Dokument mit weniger Seiten,
+  dessen Zahlen alle in einem längeren stehen, ist eine **Teilkopie**. Kandidaten kommen aus „ähnliche
+  Dokumente“ und einer Inhaltssuche nach den zwei größten Beträgen. Ein Seitenkopf auf jeder Seite ist
+  keine OCR-Schleife, und „Seite x von y“ ist vollständig, wenn alle Seiten 1 … y genannt sind (überlanger
+  Scan); „van“/„v0n“ gelten als „von“. Keine Kennung wird gelernt, die am Eintrag einer eigenen Person
+  steht (alle aus `eigene_kennungen.namen`), keine Kundennummer, die schon bei einem anderen
+  Korrespondenten gespeichert ist, und der Eintrag einer eigenen Person bekommt keine Kennungen. Die Herkunft (`erfasst`, bei Listenfeldern je Wert) zeigt der
   Paperless-Dialog. Die Absender-Mail wird nur übernommen, wenn sie nachweislich zu diesem
   Korrespondenten gehört. Schreibzugriffe laufen über eine gemeinsame Dateisperre mit dem Panel.
 - **Namensabgleich.** Passt der Name aus der Analyse zu keinem Korrespondenten exakt, fragt eine zweite
@@ -349,6 +360,8 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `pruef_notiz` | `false` | Grund eines Prüfhinweises als Notiz am Dokument |
 | `technische_konten` | `[]` | Konten, die nur hochladen (Scanner, Mail-Abruf): für ihre Dokumente gelten alle eigenen Namen als „wir“ |
 | `arbeitgeber_typen` / `einzugsstellen_muster` | Lohnabrechnung, Lohnsteuer- und SV-Formulare / Krankenkassen | bei diesen Typen ist ein passender Name nie Korrespondent; die KI wird nach dem Arbeitgeber gefragt |
+| `arbeitgeber_ohne_felder` | Vertragsnummer, Rechnungsnummer, Aktenzeichen | Felder, die die KI bei den Typen aus `arbeitgeber_typen` nie füllt |
+| `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["Regex"]}]`: bei Tag A fällt der KI-Tag B weg, außer ein Muster steht im Text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |

@@ -52,6 +52,16 @@ def lauf_auswerten(dry):
             "datum": dry.get("document_date") or dry.get("datum_bisher")}   # kein neues Datum → das bisherige bleibt
 
 
+# Kept from the dry-run output next to the result: fields, tags, findings and the master data the run would
+# learn are not compared against the list, but a release measures them too (number of invalid IBANs, …).
+ROH = ("fields", "tags", "pruefen", "corr_info", "stammdaten", "fields_verworfen", "tags_verworfen")
+
+
+def roh_auswerten(dry):
+    """The parts of the dry-run output worth keeping for a later count (missing keys are left out)."""
+    return {k: dry[k] for k in ROH if k in dry}
+
+
 def bericht(ergebnisse, alt=None):
     """Zusammenfassung: Trefferquote je Feld, Abweichungen, und gegenüber `alt` Verbesserungen/Rückschritte."""
     z = {f: [0, 0] for f in FELDER}
@@ -82,7 +92,8 @@ def ein_lauf(eintrag, mit_ocr, wiederholen=1):
     if not gut:
         return laeufe[0]
     return {**gut[0], "vergleich": zusammenfassen([l["vergleich"] for l in gut]),
-            "ist_alle": [l["ist"] for l in gut] if len(gut) > 1 else None}
+            "ist_alle": [l["ist"] for l in gut] if len(gut) > 1 else None,
+            "roh_alle": [l.get("roh") for l in gut] if len(gut) > 1 else None}
 
 
 def _ein_lauf(eintrag, mit_ocr):
@@ -93,10 +104,11 @@ def _ein_lauf(eintrag, mit_ocr):
     out = subprocess.run([sys.executable, os.path.join(HIER, "classify.py")], env=env,
                          capture_output=True, text=True, timeout=900).stdout
     try:
-        ist = lauf_auswerten(json.loads(out[out.index("{"):]))
+        dry = json.loads(out[out.index("{"):])
+        ist = lauf_auswerten(dry)
     except Exception:
         return {"id": eintrag["id"], "soll": eintrag, "ist": {}, "vergleich": {}, "fehler": (out or "keine Ausgabe")[-200:]}
-    return {"id": eintrag["id"], "soll": eintrag, "ist": ist, "vergleich": vergleiche(eintrag, ist)}
+    return {"id": eintrag["id"], "soll": eintrag, "ist": ist, "vergleich": vergleiche(eintrag, ist), "roh": roh_auswerten(dry)}
 
 
 def main(argv=None):

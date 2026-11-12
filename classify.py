@@ -81,6 +81,13 @@ CFG = {
     # the form is never the correspondent (T-10: 21 payslips filed under the health insurer).
     "arbeitgeber_typen": ["Lohnabrechnung", "Gehaltsabrechnung", "Lohnsteuerbescheinigung",
                           "Meldebescheinigung zur Sozialversicherung", "Arbeitsbescheinigung"],
+    # Fields the model never fills on those types: a payslip has no contract or invoice number, the reference
+    # numbers in its header belong to the payroll (T-11: 37 payslips with such a "contract number").
+    "arbeitgeber_ohne_felder": ["Vertragsnummer", "Rechnungsnummer", "Aktenzeichen"],
+    # Tags that exclude others: [{"tag": "Vorsorge", "ohne": ["Versicherungen"], "ausser_text": ["Unfall"]}] —
+    # with "tag" set, the tags in "ohne" are not given, unless one of the "ausser_text" patterns (regular
+    # expressions, case-insensitive) is in the text (T-11: life insurances also got "Versicherungen").
+    "tag_ausschluss": [],
     "einzugsstellen_muster": r"\b(?:AOK|BKK|IKK|DAK|BARMER|HEK|hkk|KKH|Knappschaft|\w*krankenkasse|Ersatzkasse|"
                              r"Gesundheitskasse|\w*GKK|ÖGK|Einzugsstelle)\b",   # case-insensitive
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
@@ -297,9 +304,36 @@ def norm_ustid(v):
     return s if re.fullmatch(r"[A-Z]{2}[0-9A-Z]{8,12}", s) else ""
 
 
-def norm_iban(v):
+# IBAN length per country (ISO 13616 registry), for the countries seen on documents here; others only get
+# the check digits tested.
+IBAN_LAENGE = {"AT": 20, "BE": 16, "CH": 21, "CZ": 24, "DE": 22, "DK": 18, "ES": 24, "FI": 18, "FR": 27, "GB": 22,
+               "HR": 21, "HU": 28, "IE": 22, "IT": 27, "LI": 21, "LU": 20, "NL": 18, "NO": 15, "PL": 28, "PT": 25,
+               "SE": 24, "SI": 19, "SK": 24}
+
+
+def iban_gueltig(v):
+    """Does `v` carry valid IBAN check digits (ISO 13616, mod 97 = 1) and the length of its country?
+    The model builds "IBANs" from a bank code and an account number printed on old payslips; they fail
+    here (T-11: 53 such field values on one installation)."""
     s = re.sub(r"\s", "", str(v or "")).upper()
-    return s if re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", s) else ""
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", s) or IBAN_LAENGE.get(s[:2], len(s)) != len(s):
+        return False
+    return int("".join(str(int(c, 36)) for c in s[4:] + s[:4])) % 97 == 1
+
+
+def norm_iban(v, pruefen=True):
+    """An IBAN without spaces, upper case; "" if it is none. With `pruefen` (default) the check digits must
+    be valid too — an own IBAN in the config is taken as written (`pruefen=False`)."""
+    s = re.sub(r"\s", "", str(v or "")).upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", s):
+        return ""
+    return s if not pruefen or iban_gueltig(s) else ""
+
+
+def iban_im_text(iban, text):
+    """Is the IBAN printed in the text (spaces, dots and hyphens ignored)?"""
+    i = norm_iban(iban, pruefen=False)
+    return bool(i) and i in re.sub(r"[\s.\-/]", "", str(text or "")).upper()
 
 
 def norm_mail(v):
@@ -310,7 +344,7 @@ def norm_mail(v):
 def eigene_kennungen(cfg):
     e = cfg.get("eigene_kennungen") or {}
     return {"ustid": {norm_ustid(x) for x in _liste(e.get("ustid"))} - {""},
-            "iban": {norm_iban(x) for x in (e.get("iban") or []) if norm_iban(x)},
+            "iban": {norm_iban(x, pruefen=False) for x in (e.get("iban") or []) if norm_iban(x, pruefen=False)},
             "domains": set(_liste(e.get("domains"))),
             # Volle Adressen — für eine eigene Freemail-Adresse, deren Domain man nicht sperren kann.
             "email": {norm_mail(x) for x in _liste(e.get("email"))} - {""},
@@ -348,21 +382,28 @@ PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Personal|Pers|P(?=\s
 _PERSONAL_WERT = re.compile(r"\s*[.:#]?\s*([0-9A-Za-z](?:[0-9A-Za-z]|[ ./-](?=\d))*)")
 
 
-def personalnummer(wert, text=""):
-    """Is `wert` a personnel number: labelled so in the value itself, or right after such a label in the text?"""
+def personalnummer(wert, text="", als_teil=False):
+    """Is `wert` a personnel number: labelled so in the value itself, or right after such a label in the text?
+
+    With `als_teil`, a value that CONTAINS the personnel number as one of its parts counts too: payslips
+    print a reference "611 7437/ 40/88901" (form, client, personnel number) in the header and
+    "Pers.-Nr. 88901" further down, and the model took the reference as contract or invoice number (T-11)."""
     if PERSONAL_LABEL.search(str(wert or "")):
         return True
     n = norm_nummer(wert)
     if not n:
         return False
+    teile = {n}
+    if als_teil:
+        teile |= {t for t in map(norm_nummer, re.split(r"[\s/]+", str(wert))) if len(t) >= 4}
     text = str(text or "")
     for m in PERSONAL_LABEL.finditer(text):
         folgt = _PERSONAL_WERT.match(text[m.end():].split("\n", 1)[0])
-        if folgt and norm_nummer(folgt.group(1)) == n:
+        if folgt and norm_nummer(folgt.group(1)) in teile:
             return True
         # A header cell (nothing after the label in its cell): the value stands one row below.
         if not re.search(r"\d", _ZELLEN.split(text[m.end():].split("\n", 1)[0])[0]) \
-                and n in _spalte_darunter(text, m.start()):
+                and teile & _spalte_darunter(text, m.start()):
             return True
     return False
 
@@ -652,6 +693,37 @@ def stammdaten_fremd(corrs, meta, eigener_id):
 
 
 
+def ist_eigene_person(name, eigene):
+    """Is the correspondent one of us (its name contains an own name)? As in stammdaten_treffer."""
+    return any(n <= set(ctoks(name)) for n in (eigene or {}).get("namen", ()))
+
+
+# Identifier fields that never go into the entry of an own person: they are OUR numbers, and from there
+# they pulled other documents to us (T-11: an own entry with 10 numbers and 2 phone numbers).
+EIGENE_PERSON_OHNE = ("iban", "ustid", "email", "domains", "telefon", "kundennummer")
+
+
+def stammdaten_belegt(corrs, meta, eigener_id, eigene):
+    """belegt(feld, wert) → why the value must not be learned at `eigener_id`, else None (T-11).
+
+    - The value is in the entry of an own person: it is ours (own account number, own customer number at
+      a supplier), not one of the counterpart's — any field.
+    - A customer number already stored at another correspondent: it is that one's number for us (the
+      employer's personnel number, our account number at the bank), printed on a third party's form. It
+      was learned at four correspondents of one installation, each later pulling the others' documents.
+    Unlike `fremd` this is no contradiction to report: the value is dropped silently."""
+    def belegt(feld, w):
+        for c in corrs:
+            if c["id"] == eigener_id or not any(gleicher_wert(feld, w, x) for x in werte(meta(c["id"]), feld)):
+                continue
+            if ist_eigene_person(c["name"], eigene):
+                return f"eigene Kennung (steht bei {c['name']})"
+            if feld == "kundennummer":
+                return f"schon bei {c['name']} gespeichert — dessen Nummer für uns, nicht die dieses Gegenübers"
+        return None
+    return belegt
+
+
 def ohne_tabellenrest(wert):
     """Ein Wert ohne die Tabellen- und Aufzählungszeichen, die das OCR an den Rand setzt
     („| Häuser“, „| Fasanenweg 20a …“). Gilt für den Korrespondentennamen und die Stammdaten
@@ -659,7 +731,7 @@ def ohne_tabellenrest(wert):
     return str(wert or "").strip(" \t\n|·•-–—:;,")
 
 def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=False, fremd=None, kontext="",
-                          text="", verbreitet=None):
+                          text="", verbreitet=None, belegt=None, eigene_person=False):
     """Stammdaten eines Korrespondenten aus dem Dokument nachtragen.
 
     Rein: bekommt den alten Eintrag, gibt (neuer Eintrag, geschrieben, verworfen) zurück.
@@ -673,7 +745,9 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
     `text` is the document text: a number printed as a personnel number is never stored as a customer
     number. `verbreitet(feld, wert)` counts the correspondents whose documents carry an IBAN or phone
     number (None = unknown); from VERBREITET_AB on it is most likely one of ours and is neither stored
-    nor reported as "belongs to another" (T-9)."""
+    nor reported as "belongs to another" (T-9). `belegt(feld, wert)` (stammdaten_belegt) gives a reason not
+    to learn a value that is ours or another's number for us; at an `eigene_person` no identifiers are
+    stored at all (T-11)."""
     alt = dict(alt or {})
     neu, erfasst = dict(alt), dict(alt.get("erfasst") or {})
     geschrieben, verworfen = {}, {}
@@ -686,6 +760,13 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
         bisher = werte(alt, feld)
         if any(gleicher_wert(feld, w, x) for x in bisher):
             return                                              # schon da
+        if eigene_person and feld in EIGENE_PERSON_OHNE:
+            verworfen[feld] = "eigene Person — ihre Kennungen gehören in eigene_kennungen, nicht in die Stammdaten"
+            return
+        b = belegt(feld, w) if belegt else None
+        if b:
+            verworfen[feld] = b
+            return
         n = verbreitet(feld, w) if verbreitet and feld in VERBREITUNG_FELDER else None
         if n is not None and n >= VERBREITET_AB:
             verworfen[feld] = f"steht auf Dokumenten von {n} Korrespondenten — wahrscheinlich eine eigene Kennung"
@@ -728,8 +809,12 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
     roh = wert("iban")
     if roh:
         i = norm_iban(roh)
-        if not i:
+        if not norm_iban(roh, pruefen=False):
             verworfen["iban"] = "kein IBAN-Format"
+        elif not i:
+            verworfen["iban"] = "Prüfziffer falsch (ISO 13616) — keine IBAN"
+        elif text and not iban_im_text(i, text):
+            verworfen["iban"] = "steht so nicht im Text (aus Bankleitzahl und Konto zusammengesetzt?)"
         elif i in eigene["iban"]:
             verworfen["iban"] = "eigene IBAN"
         else:
@@ -1192,34 +1277,42 @@ _FREMDE_SCHRIFT = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0600-\u
 _MODELL_FLOSKEL = re.compile(r"ground truth|the image (shows|displays|contains)|as an ai\b|i cannot (read|see)", re.I)
 
 
-def wiederholung(text):
+def wiederholung(text, seiten=None):
     """A loop of the OCR model on a blank or nearly blank page (T-10, 2026-11-12): the same line again and
     again (`\\( \\therefore m = \\frac{3}{11} \\)` fifty times, „und die in der Zeitung im Fraktionischen …“
     twenty times). Returns (piece, count) or None.
 
     Only lines with a letter count — table rules („| --- |“) repeat in real documents. A real page has at
-    most a few equal lines; here one line makes at least half of the page."""
+    most a few equal lines; here one line makes at least half of the page. A line that comes at most once
+    per page of a multi-page document (`seiten`) is a page header, not a loop (T-11: a 13-page account
+    statement with "Kontenanzeige-Druck" on every page)."""
     zeilen = [" ".join(z.split()) for z in str(text or "").splitlines() if re.search(r"[^\W\d_]", z)]
     if len(zeilen) >= 6:
         z, n = __import__("collections").Counter(zeilen).most_common(1)[0]
-        if n >= 5 and n * 2 >= len(zeilen):
+        if n >= 5 and n * 2 >= len(zeilen) and not ((seiten or 1) > 1 and n <= seiten):
             return z, n
-    # Without line breaks: a long text made of a handful of words.
+    # Without line breaks: a long text made of a handful of words. A table repeats its words too (the
+    # 13-page statement: 1365 words, 92 different, 218 lines) — so only without line structure or with a
+    # vocabulary as small as a loop's.
     woerter = re.findall(r"[^\W\d_]{3,}", str(text or "").lower())
-    if len(woerter) >= 60 and len(set(woerter)) * 10 < len(woerter):
+    if (len(woerter) >= 60 and len(set(woerter)) * 10 < len(woerter)
+            and (len(zeilen) < 6 or len(set(woerter)) <= WIEDERHOLUNG_WORTSCHATZ)):
         return " ".join(woerter[:6]), len(woerter) // len(set(woerter))
     return None
 
 
-def ocr_seite_verdaechtig(text):
-    """Grund, warum der OCR-Text einer Seite erfunden aussieht — oder None."""
+WIEDERHOLUNG_WORTSCHATZ = 30
+
+
+def ocr_seite_verdaechtig(text, seiten=None):
+    """Grund, warum der OCR-Text einer Seite (oder eines Dokuments mit `seiten` Seiten) erfunden aussieht — oder None."""
     t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", str(text or ""))
     if _MODELL_FLOSKEL.search(t):
         return "Modell-Kommentar statt Seitentext"
     buchstaben = [c for c in t if c.isalpha()]
     if len(buchstaben) >= 10 and len(_FREMDE_SCHRIFT.findall(t)) / len(buchstaben) > 0.2:
         return "überwiegend fremde Schrift"
-    w = wiederholung(t)
+    w = wiederholung(t, seiten)
     if w:
         return f"Wiederholungsschleife („{w[0][:40]}“ {w[1]}×)"
     return None
@@ -1545,6 +1638,55 @@ def _behalten(cfs, cur_vals, fid):
         cfs.append({"field": fid, "value": cur_vals[fid]})
         return True
     return False
+
+
+def _feldname(name):
+    return re.sub(r"[^a-z0-9]", "", norm(name))
+
+
+def feldvorschlag_verwerfen(f, wert, text, typ=None, cfg=None):
+    """Why the model's value for custom field `f` must not be written — or None (T-11).
+
+    - An IBAN field takes only an IBAN with valid check digits that is printed in the text: on payslips
+      the model composed IBANs from bank code and account number (53 values on one installation).
+    - An identifier field (text/number) takes no personnel number and no value that contains one
+      ("611 7437/ 40/88901" next to "Pers.-Nr. 88901"); a field named for personnel numbers is exempt.
+    - On a document type issued by the employer (`arbeitgeber_typen`) the fields in
+      `arbeitgeber_ohne_felder` stay as they are: a payslip has no contract or invoice number, the
+      reference numbers in its header are how the employer files us (37 payslips on one installation).
+    A rejected value is dropped; the field keeps what it had."""
+    cfg = cfg if cfg is not None else CFG
+    if is_null(wert) or (isinstance(wert, str) and wert.strip().upper() in ("BEHALTEN", "KEEP")):
+        return None
+    name = f.get("name") or ""
+    if "iban" in _feldname(name) and f.get("data_type") in ("string", "longtext"):
+        if not norm_iban(wert):
+            return "keine gültige IBAN (Prüfziffer ISO 13616)"
+        if not iban_im_text(wert, text):
+            return "IBAN steht so nicht im Text (aus Bankleitzahl und Konto zusammengesetzt?)"
+        return None
+    if (f.get("data_type") not in ("string", "integer") or not ist_kennung(wert) or len(str(wert)) > 40
+            or PERSONAL_LABEL.search(name) or "personal" in _feldname(name)):
+        return None                     # free text, a date or amount, or a field meant for the number
+    if (typ_in(typ, cfg.get("arbeitgeber_typen") or ())
+            and _feldname(name) in {_feldname(x) for x in _roh_liste(cfg.get("arbeitgeber_ohne_felder") or [])}):
+        return f"bei „{typ}“ keine {name} (Nummern im Kopf gehören zur Abrechnung)"
+    if personalnummer(wert, text, als_teil=True):
+        return "Personalnummer bzw. enthält sie — keine Kennung des Gegenübers"
+    return None
+
+
+def felder_filtern(cfields, flds, text, typ=None, cfg=None):
+    """The model's field proposals without the rejected ones: (kept, {field name: reason})."""
+    je_name = {f["name"]: f for f in cfields}
+    behalten, verworfen = {}, {}
+    for name, wert in (flds or {}).items():
+        grund = feldvorschlag_verwerfen(je_name[name], wert, text, typ, cfg) if name in je_name else None
+        if grund:
+            verworfen[name] = grund
+        else:
+            behalten[name] = wert
+    return behalten, verworfen
 
 
 def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds=None):
@@ -1905,13 +2047,13 @@ def pruef_befunde(did, doc, content, treffer, corr_id, typ=None):
         t = teilstueck(content, doc.get("page_count"))
         if t:
             b["teilstueck"] = t
-        try:
-            r = get(f"/documents/?more_like_id={did}&page_size=5&fields=id,title,content,page_count")
-            d = dublette(content, doc.get("page_count"), [x for x in r.get("results", []) if x.get("id") != did])
-        except Exception:
-            d = None
+        aehnliche = aehnliche_holen(did, content)
+        d = dublette(content, doc.get("page_count"), aehnliche)
         if d:
             b["dublette"] = d
+        tk = None if d else teilkopie(content, doc.get("page_count"), aehnliche)
+        if tk:
+            b["teilkopie"] = tk
         sd = sammeldokument(treffer, corr_id, typ, CFG.get("sammeldokument_ausser_typen") or [])
         if sd:
             b["sammeldokument"] = sd
@@ -1924,7 +2066,7 @@ def pruef_befunde(did, doc, content, treffer, corr_id, typ=None):
 # Findings that mean "the scan is broken" rather than "the classification may be wrong" (T-10).
 KAPUTT_BEFUNDE = ("leer", "teilstueck", "ocr_erfunden")
 BEFUND_NAMEN = {"leer": "leer", "teilstueck": "Seiten fehlen", "ocr_erfunden": "OCR-Text erfunden",
-                "dublette": "Dublette", "sammeldokument": "Sammeldokument", "datum": "Datum",
+                "dublette": "Dublette", "teilkopie": "Teilkopie", "sammeldokument": "Sammeldokument", "datum": "Datum",
                 "eigene_person": "eigene Person als Korrespondent", "einzugsstelle": "Einzugsstelle statt Arbeitgeber",
                 "abbruch": "Lauf abgebrochen"}
 NOTIZ_PRAEFIX = "paperlaiss: "
@@ -2156,17 +2298,26 @@ def kennzahlen(text):
     return set(_KENNZAHL.findall(str(text or "")))
 
 
+# "Seite 2 von 3"; the OCR reads "von" also as "van"/"v0n" (T-11).
+SEITENANGABE = re.compile(r"(?:Seite|Blatt|Page)\s*:?\s*(\d{1,2})\s*(?:v[o0a]n|/|of)\s*(\d{1,2})\b", re.IGNORECASE)
+
+
 def teilstueck(text, seiten):
-    """„Seite x von y“ im Text, das Dokument hat aber weniger als y Seiten → Hinweis, sonst None."""
-    angaben = [(int(a), int(b)) for a, b in re.findall(r"(?:Seite|Blatt|Page)\s*:?\s*(\d{1,2})\s*(?:von|/|of)\s*(\d{1,2})\b",
-                                                        str(text or ""), re.I) if 1 < int(b) <= 50 and int(a) <= int(b)]
+    """„Seite x von y“ im Text, das Dokument hat aber weniger als y Seiten → Hinweis, sonst None.
+
+    Not when the text names every page 1 … y: then all pages are there, on fewer sheets — an overlong
+    scan of two pages as one, or two pages printed on one sheet (T-11)."""
+    angaben = [(int(a), int(b)) for a, b in SEITENANGABE.findall(str(text or ""))
+               if 1 < int(b) <= 50 and int(a) <= int(b)]
     if not angaben:
         # The last page announces a next one (T-10: a payslip ended in „Fortsetzung nächste Seite“, page 2
         # was missing).
         return ("„Fortsetzung nächste Seite“ am Ende — die Folgeseite fehlt"
                 if _FORTSETZUNG.search(str(text or "").strip()[-150:]) else None)
     y = max(b for _, b in angaben); n = seiten or 1
-    return f"„Seite … von {y}“, das Dokument hat {n} Seite(n)" if n < y else None
+    if n >= y or {a for a, b in angaben if b == y} >= set(range(1, y + 1)):
+        return None
+    return f"„Seite … von {y}“, das Dokument hat {n} Seite(n)"
 
 
 # Not "bitte wenden": forms print it on every front page, also on the last sheet (seen on a pension notice).
@@ -2193,10 +2344,62 @@ def dublette(text, seiten, aehnliche):
         return None
     a = anrede(text)
     for d in aehnliche or ():
-        if (kennzahlen(d.get("content")) == z and anrede(d.get("content")) == a
-                and (d.get("page_count") or 1) == (seiten or 1)):
+        if (anrede(d.get("content")) == a and (d.get("page_count") or 1) == (seiten or 1)
+                and gleiche_kennzahlen(z, kennzahlen(d.get("content")))):
             return f"wie Dokument {d.get('id')} ({str(d.get('title') or '')[:50]})"
     return None
+
+
+def gleiche_kennzahlen(a, b):
+    """The same document read twice: one set of numbers contains the other, and the larger has at most a few
+    more (max(2, an eighth)). A scan and the digital original differ by what the OCR misread or dropped
+    (T-11: a wage tax certificate and its scan, 15 of 17 numbers, the rest unread); a form letter to someone
+    else has a number of its own and is no subset."""
+    klein, gross = (a, b) if len(a) <= len(b) else (b, a)
+    return klein <= gross and len(gross - klein) <= max(2, len(gross) // 8)
+
+
+TEILKOPIE_AB = 8
+
+
+def teilkopie(text, seiten, aehnliche):
+    """A document with fewer pages whose numbers (at least TEILKOPIE_AB) all appear in a longer one → hint.
+    Partial copies (pages 1–2 of a four-page notice, scanned again on their own) were found by eye only (T-11).
+    A salutation, if this one has one, must be the same."""
+    z = kennzahlen(text)
+    if len(z) < TEILKOPIE_AB:
+        return None
+    a, n = anrede(text), seiten or 1
+    for d in aehnliche or ():
+        nd = d.get("page_count") or 1
+        if n < nd and z <= kennzahlen(d.get("content")) and (not a or anrede(d.get("content")) == a):
+            return f"Teil von Dokument {d.get('id')} ({n} von {nd} Seiten; {str(d.get('title') or '')[:50]})"
+    return None
+
+
+def _suchzahlen(text, anzahl=2):
+    """The most telling numbers of a text for a content search: amounts first, longest first."""
+    return sorted(kennzahlen(text), key=lambda z: ("," in z, len(z), z), reverse=True)[:anzahl]
+
+
+def aehnliche_holen(did, text, holen=None):
+    """Candidates for a copy: Paperless' "more like this" plus a content search for the two most telling
+    numbers (T-11: a scan and its digital original were not among the five most similar texts). Without
+    the document itself; a failed search is left out."""
+    holen = holen or get
+    felder = "&fields=id,title,content,page_count"
+    pfade = [f"/documents/?more_like_id={did}&page_size=5" + felder]
+    pfade += [f"/documents/?page_size=10&content__icontains={urllib.parse.quote(z)}" + felder for z in _suchzahlen(text)]
+    gefunden = {}
+    for p in pfade:
+        try:
+            r = holen(p)
+        except Exception:
+            continue
+        for d in (r or {}).get("results") or []:
+            if isinstance(d, dict) and d.get("id") is not None and str(d.get("id")) != str(did):
+                gefunden.setdefault(d["id"], d)
+    return list(gefunden.values())
 
 
 def typ_in(typ, namen):
@@ -2403,6 +2606,37 @@ def pass2_frage(name, kandidaten, beispiele=""):
             "Namensvariante heisst: derselbe Name anders geschrieben — NICHT ein anderer Name mit gleichem "
             "Vornamen oder einem gleichen Allerweltswort (Anna Berger ist nicht Anna Zeller). "
             "Nur bei echter Übereinstimmung, sonst null.")
+
+
+def _muster_trifft(muster, text):
+    """A config pattern (regular expression, case-insensitive) in the text; a broken one counts as plain text."""
+    try:
+        return bool(re.search(muster, text, re.IGNORECASE))
+    except re.error:
+        return str(muster).lower() in text.lower()
+
+
+def tag_ausschluss(tag_ids, vorhandene, tagid_by_norm, regeln, text):
+    """The model's tags without those a rule excludes: (kept ids, {removed tag: excluding tag}).
+
+    A rule {"tag": A, "ohne": [B, …], "ausser_text": [pattern, …]} drops B when A is on the document or among
+    the model's tags, unless a pattern is in the text. Only the model's tags are dropped; what is already on
+    the document stays (T-11: life and pension insurances got "Versicherungen" next to "Vorsorge")."""
+    alle = set(tag_ids) | set(vorhandene or ())
+    weg = {}
+    for regel in regeln or ():
+        if not isinstance(regel, dict):
+            continue
+        a = tagid_by_norm.get(norm(regel.get("tag") or ""))
+        if not a or a not in alle:
+            continue
+        if any(_muster_trifft(m, str(text or "")) for m in _roh_liste(regel.get("ausser_text") or [])):
+            continue
+        for b in _roh_liste(regel.get("ohne") or []):
+            bid = tagid_by_norm.get(norm(b))
+            if bid and bid != a and bid in tag_ids:
+                weg[bid] = regel.get("tag")
+    return [t for t in tag_ids if t not in weg], weg
 
 
 def reservierte_tags(cfg):
@@ -3041,6 +3275,9 @@ def main():
             if tid and norm(tagname_by_id[tid]) not in reserved:
                 tag_ids.append(tid)
         new_tags = [t for t in (prop.get("new_tags") or []) if t and norm(t) not in tagid_by_norm]
+        tag_ids, _tag_weg = tag_ausschluss(tag_ids, tag_ids_on, tagid_by_norm, CFG.get("tag_ausschluss"), content)
+        if _tag_weg:
+            TRACE["tags_verworfen"] = {tagname_by_id.get(t, t): f"schließt „{a}“ aus" for t, a in _tag_weg.items()}
 
     dt_id = typ_zuordnen(prop.get("document_type"), types) or typ_zuordnen(prop.get("dokumentart"), types)
     regel_typ = typ_aus_regel(types_roh, content)
@@ -3063,6 +3300,11 @@ def main():
         _mail = mail_from if mail_bestaetigt(mail_from, corr_id, mail_corr, _text, prop.get("absender")) else ""
         _anh = corr_info.startswith("exakt")
         _fremd = stammdaten_fremd(corrs, cmeta, corr_id)
+        # Own persons are all of the household (the shared list), not only the owner of this document: the
+        # entry of a household member collected 10 numbers from documents of the others (T-11).
+        _wir_alle = {"namen": eigene_kennungen(CFG)["namen"] + eigene["namen"]}
+        _belegt = stammdaten_belegt(corrs, cmeta, corr_id, _wir_alle)
+        _eigen_person = bool(corr_id) and ist_eigene_person((_c_by_id.get(corr_id) or {}).get("name", ""), _wir_alle)
         # Count the spread of a new IBAN/phone number BEFORE taking the store lock: the search is an
         # HTTP call, and the panel waits on the same lock. A value not counted here counts as unknown.
         _verbr = {}
@@ -3077,7 +3319,8 @@ def main():
                 _verbr[(_feld, _w)] = None if _ids is None else len(_ids | ({corr_id} if corr_id else set()))
         _verbreitet = lambda feld, w: _verbr.get((feld, norm_iban(w) if feld == "iban" else norm_telefon(w)))
         aenderung = lambda alt: stammdaten_nachtragen(alt, prop.get("absender"), _mail, eigene, quelle, _anh, _fremd,
-                                                      prop.get("korrespondent_kontext"), _text, _verbreitet)
+                                                      prop.get("korrespondent_kontext"), _text, _verbreitet,
+                                                      _belegt, _eigen_person)
         try:
             if corr_id and not DRY:
                 g, v = stammdaten_schreiben(corr_id, aenderung)
@@ -3124,10 +3367,21 @@ def main():
             titel_neu = None
         TRACE["titel"] = {"kennung": prop.get("titel_kennung"), "bisher": doc.get("title"), "neu": titel_neu}
 
+    # The type that will be on the document decides which field proposals count (T-11).
+    _typ_end = typ_setzen(dt_id, doc.get("document_type"), typ_ueberschreibbar(SOURCE, FORCE or FORCE_OCR)) \
+        or doc.get("document_type")
+    _typ_end_name = next((n for n, i in types.items() if i == _typ_end), None)
+    flds, _feld_weg = felder_filtern(cfields, prop.get("fields") or {}, content, _typ_end_name, CFG)
+    if _feld_weg:
+        TRACE["fields_verworfen"] = _feld_weg
+        log(f"felder-verworfen {did} | " + "; ".join(f"{k}: {x}" for k, x in _feld_weg.items()))
+
     if DRY:
         out = {"id": did, "title": titel_neu, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
-               "summary": summary, "fields": prop.get("fields"), "document_date": wirksames_datum(prop, content, doc),
+               "summary": summary, "fields": flds, "fields_verworfen": _feld_weg or None,
+               "tags_verworfen": TRACE.get("tags_verworfen"), "stammdaten": TRACE.get("stammdaten"),
+               "document_date": wirksames_datum(prop, content, doc),
                "korrespondent_ergebnis": korrespondent_ergebnis(corr_info, cname), "datum_bisher": (doc.get("created") or "")[:10],
                "pruefen": pruefen or None, "vorlauf": TRACE.get("vorlauf"),
                "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
@@ -3149,7 +3403,6 @@ def main():
     if titel_neu:
         patch["title"] = titel_neu
 
-    flds = prop.get("fields") or {}
     date_note = None
     datum = wirksames_datum(prop, content, doc)
     if datum and (doc.get("created") or "")[:10] != datum:
@@ -3175,7 +3428,10 @@ def main():
             "Korrigiere die betroffenen Feldwerte (nicht korrigierbare auf null) und gib NUR das JSON "
             "{\"fields\": {<Feldname>: <Wert|null>}} mit denselben Feldnamen zurück."})
         fix, assistant_raw = mistral_chat(messages, 900, name="korrektur")
-        flds = {**flds, **(fix.get("fields") or {})}
+        _fix, _fix_weg = felder_filtern(cfields, fix.get("fields") or {}, content, _typ_end_name, CFG)
+        if _fix_weg:
+            TRACE["fields_verworfen"] = {**(TRACE.get("fields_verworfen") or {}), **_fix_weg}
+        flds = {**flds, **_fix}
         cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
         patch["custom_fields"] = cfs
         prev = err; ok, err = patch_doc(did, patch)
@@ -3225,15 +3481,19 @@ def kontroll_befunde(doc, korrespondent, typ, aehnliche, cfg_lauf, cfg):
     if len(content.strip()) < 20:
         b["leer"] = "kein Text (leere Seite oder kaputter Scan?)"
     else:
-        g = ocr_seite_verdaechtig(content)
+        g = ocr_seite_verdaechtig(content, doc.get("page_count"))
         if g:
             b["ocr_erfunden"] = g
         t = teilstueck(content, doc.get("page_count"))
         if t:
             b["teilstueck"] = t
-        d = dublette(content, doc.get("page_count"), [x for x in aehnliche or () if x.get("id") != doc.get("id")])
+        andere = [x for x in aehnliche or () if x.get("id") != doc.get("id")]
+        d = dublette(content, doc.get("page_count"), andere)
         if d:
             b["dublette"] = d
+        tk = None if d else teilkopie(content, doc.get("page_count"), andere)
+        if tk:
+            b["teilkopie"] = tk
     n = nicht_aussteller_grund(korrespondent, typ, cfg_lauf, cfg)
     if n:
         b[n[0]] = f"„{korrespondent}“ — {n[1]}"
@@ -3267,11 +3527,7 @@ def kontrolle(ids):
             if e.code == 404:
                 continue            # deleted or in the trash
             raise
-        try:
-            r = get(f"/documents/?more_like_id={did}&page_size=5&fields=id,title,content,page_count")
-            aehnliche = r.get("results", [])
-        except Exception:
-            aehnliche = []
+        aehnliche = aehnliche_holen(did, doc.get("content") or "")
         owner = doc.get("owner")
         if owner not in konten:
             konten[owner] = konto_cfg(CFG, owner)

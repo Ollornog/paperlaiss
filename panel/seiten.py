@@ -764,6 +764,15 @@ EINSTELLUNGEN = {
     "arbeitgeber_typen": ("Korrespondenten", "Typen vom Arbeitgeber",
                           "Dokumenttypen, die der Arbeitgeber ausstellt (Lohnabrechnung, Meldebescheinigung …). Nennt die "
                           "KI dort eine Krankenkasse oder Einzugsstelle, fragt paperlaiss nach dem Arbeitgeber. Einer je Zeile."),
+    "arbeitgeber_ohne_felder": ("Felder", "Felder, die bei Typen vom Arbeitgeber leer bleiben",
+                                "Custom Fields, die die KI bei den Typen vom Arbeitgeber nie füllt (Vorgabe Vertragsnummer, "
+                                "Rechnungsnummer, Aktenzeichen): die Nummern im Kopf einer Lohnabrechnung gehören zur "
+                                "Abrechnung, nicht zu einem Vertrag. Einer je Zeile."),
+    "tag_ausschluss": ("Tags", "Tags, die andere ausschließen",
+                       "Liste von Regeln {\"tag\": \"Vorsorge\", \"ohne\": [\"Versicherungen\"], \"ausser_text\": "
+                       "[\"Unfall\"]}: steht der erste Tag am Dokument oder schlägt die KI ihn vor, vergibt sie die Tags "
+                       "aus „ohne“ nicht — außer eines der Muster (regulärer Ausdruck, ohne Groß-/Kleinschreibung) "
+                       "steht im Text. Leer = keine Regel."),
     "einzugsstellen_muster": ("Korrespondenten", "Muster Krankenkasse/Einzugsstelle",
                               "Regulärer Ausdruck (ohne Groß-/Kleinschreibung) für Namen, die bei den Typen vom "
                               "Arbeitgeber nie Korrespondent sind."),

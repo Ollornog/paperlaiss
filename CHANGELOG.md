@@ -6,6 +6,23 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-12
+
+Lehren aus einer zweiten Durchsicht aller gut 700 Dokumente einer Person (Backlog T-11). Gemessen an der Sollliste dieser Durchsicht (123 Dokumente, Trockenlauf ohne OCR, je zwei Läufe 0.5.0 gegen 0.6.0): Korrespondent 122/121 → 122/121, Typ 116/119 → 119/118, Datum 121/121 → 121/121 — gleich im Rahmen der Schwankung (Arbeitsvertrag/Vertrag, Urkunde/Bescheinigung; ein Korrespondent, der in beiden Fassungen je nach Antwort auf die Rückfrage wechselt). Gezählt in denselben Läufen: IBAN-Feldwerte mit falscher Prüfziffer 7/8 → 0/0, „Vorsorge“ und „Versicherungen“ zusammen 18/17 → 1/1. Der Kontrolllauf über alle Dokumente der Person meldet die zwei Fehlalarme nicht mehr (Seitenkopf auf 13 Seiten, überlange Seite), behält alle 7 echten Befunde und findet zwei Teilkopien (eine bisher übersehen, eine zweite Fassung mit einer Seite mehr).
+
+### Behoben
+
+- **IBAN nur mit gültiger Prüfziffer und wie gedruckt.** Ein Feld, dessen Name „IBAN“ enthält, nimmt nur eine IBAN mit gültiger Prüfziffer (ISO 13616, mod 97) und Länge ihres Landes, die so im Text steht. Die KI setzte IBANs aus Bankleitzahl und Kontonummer alter Lohnabrechnungen zusammen (53 Feldwerte auf einer Installation). Dieselbe Prüfung gilt für die Stammdaten.
+- **Keine Personal- oder Abrechnungsnummer als Vertrags-/Rechnungsnummer oder Aktenzeichen.** Ein Kennungsfeld (Text, Zahl) nimmt keine Personalnummer und keinen Wert, der eine als Teil enthält („611 7437/ 40/88901“ bei „Pers.-Nr. 88901“). Bei den Typen aus `arbeitgeber_typen` füllt die KI die Felder aus `arbeitgeber_ohne_felder` (neu, Vorgabe Vertragsnummer, Rechnungsnummer, Aktenzeichen) nie: die Nummern im Kopf einer Lohnabrechnung gehören zur Abrechnung (37 Lohnabrechnungen). Ein verworfener Vorschlag lässt das Feld, wie es war (Trace `fields_verworfen`, Logzeile `felder-verworfen`).
+- **Dubletten auch zwischen Scan und Original, Teilkopien.** Eine Dublette verlangt nicht mehr genau dieselben Zahlen: es reicht, wenn die eines Textes die des anderen bis auf wenige enthalten (die OCR verlor zwei von 17). Neu ist der Befund **Teilkopie**: ein Dokument mit weniger Seiten, dessen Zahlen (mindestens 8) alle in einem längeren stehen. Kandidaten kommen außer aus „ähnliche Dokumente“ aus einer Inhaltssuche nach den zwei größten Beträgen — die Ähnlichkeitssuche von Paperless liefert nach Löschungen bis zum nächsten Reindex gar nichts.
+- **Stammdaten: nichts Eigenes, nichts Fremdes.** Nicht gelernt wird ein Wert, der am Eintrag einer eigenen Person steht (alle Namen aus `eigene_kennungen.namen`, nicht nur der Besitzer), und eine Kundennummer, die schon bei einem anderen Korrespondenten gespeichert ist (die Personalnummer des Arbeitgebers beim Finanzamt, die eigene Kontonummer bei vier Gegenübern). Der Eintrag einer eigenen Person bekommt keine Kennungen mehr. Beides ist kein Prüfhinweis.
+- **Kontrolllauf ohne zwei Fehlalarme.** Eine Zeile, die höchstens einmal je Seite vorkommt, ist ein Seitenkopf, keine OCR-Schleife (13 Seiten „Kontenanzeige-Druck“); die Wortschleife ohne Zeilenumbrüche greift nur ohne Zeilenstruktur oder bei kleinem Wortschatz. „Seite x van/v0n y“ zählt wie „von“, und sind alle Seiten 1 … y genannt, fehlt nichts (eine überlange Seite mit zwei Seiten darin).
+
+### Hinzugefügt
+
+- `tag_ausschluss`: Tags, die andere ausschließen, `[{"tag": "Vorsorge", "ohne": ["Versicherungen"], "ausser_text": ["Berufsunfähigkeit", "\\bBU\\b", "Unfall"]}]`. Steht der erste Tag am Dokument oder schlägt die KI ihn vor, fallen ihre Tags aus „ohne“ weg, außer ein Muster steht im Text (Trace `tags_verworfen`). Eine schärfere Tag-Beschreibung hatte nicht gewirkt.
+- `eval.py` hält je Lauf Felder, Tags, Befunde und Stammdaten der Trockenlauf-Ausgabe fest (`roh`); der Trockenlauf gibt dafür `fields_verworfen`, `tags_verworfen` und `stammdaten` aus, `fields` ist schon gefiltert.
+
 ## [0.5.0] - 2026-11-12
 
 Lehren aus der Durchsicht eines Stapelscans von gut 400 Altdokumenten (Backlog T-10). Gemessen an einer Sollliste aus den Korrekturen des Tages (125 Dokumente, Trockenlauf, ohne OCR): Korrespondent 118 → 122, Typ 113 → 115 (davon Schwankung Arbeitsvertrag/Vertrag), Datum unverändert 123. Der Kontrolllauf fand im selben Stapel (419 Dokumente) alle 6 von Hand als kaputt markierten Dokumente (drei leer, drei mit fehlender Seite) und einen weiteren Kandidaten („Seite 2 von 2“ bei einer Seite).

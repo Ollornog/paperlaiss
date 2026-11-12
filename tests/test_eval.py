@@ -19,6 +19,9 @@ r.check("Auswertung: Ist aus der Trockenlauf-Ausgabe",
         ev.lauf_auswerten({"korrespondent_ergebnis": "O2", "document_type": "Rechnung", "document_date": "2026-06-11"})
         == {"korrespondent": "O2", "typ": "Rechnung", "datum": "2026-06-11"}
         and ev.lauf_auswerten({"document_date": None, "datum_bisher": "2017-04-17"})["datum"] == "2017-04-17")
+r.check("Raw output: fields, tags and findings kept, other keys and missing ones left out",
+        ev.roh_auswerten({"fields": {"IBAN": "DE00"}, "tags": ["A"], "pruefen": None, "summary": "long text"})
+        == {"fields": {"IBAN": "DE00"}, "tags": ["A"], "pruefen": None})
 _neu = [{"id": 1, "soll": {"typ": "A"}, "ist": {"typ": "A"}, "vergleich": {"typ": True}},
         {"id": 2, "soll": {"typ": "B"}, "ist": {"typ": "C"}, "vergleich": {"typ": False}}]
 _alt = [{"id": 1, "vergleich": {"typ": False}}, {"id": 2, "vergleich": {"typ": True}}]
