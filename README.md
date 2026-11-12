@@ -231,7 +231,17 @@ classifier uses it in three ways:
   reason is written as a note on the document (once per wording). A run that breaks off on an outage
   (Paperless or Mistral 429/5xx after all retries) gets the `unsicher_tag` and a note. The **control
   run** (`CLASSIFY_KONTROLLE=<ids>`) applies the checks without the model to documents already in
-  Paperless and flags what it finds; nothing else changes. The origin (`erfasst`, per value for list fields) is shown in
+  Paperless and flags what it finds; nothing else changes. Since 0.6: an IBAN (field or master data) is
+  taken only with valid check digits (ISO 13616) and as printed in the text; an identifier field takes no
+  personnel number nor a value containing one, and on the types of `arbeitgeber_typen` the fields in
+  `arbeitgeber_ohne_felder` are never filled from the model. `tag_ausschluss` lets a tag exclude others
+  (unless a pattern is in the text). A duplicate also counts when one text's numbers contain the other's
+  but for a few the OCR missed (scan of a digital original); a document with fewer pages whose numbers all
+  appear in a longer one is a **partial copy**. Candidates come from "more like this" and a content search
+  for the two largest amounts. A header on every page is no OCR loop, and "page x of y" is complete when
+  all pages 1 … y are named (an overlong scan); "van"/"v0n" count as "von". No identifier is learned that
+  is in the entry of an own person (all of `eigene_kennungen.namen`), no customer number already stored at
+  another correspondent, and the entry of an own person gets no identifiers. The origin (`erfasst`, per value for list fields) is shown in
   the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
@@ -368,6 +378,8 @@ an earlier rule consumed it in the same run.
 | `pruef_notiz` | `false` | write the reason of a finding as a note on the document |
 | `technische_konten` | `[]` | upload-only accounts (scanner, mail fetch): for their documents all own names count as "we" |
 | `arbeitgeber_typen` / `einzugsstellen_muster` | payslip, wage tax and social insurance forms / health insurers | on these types a matching name is never the correspondent; the model is asked for the employer |
+| `arbeitgeber_ohne_felder` | Vertragsnummer, Rechnungsnummer, Aktenzeichen | fields the model never fills on the types of `arbeitgeber_typen` |
+| `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["regex"]}]`: with tag A the model's tag B is dropped, unless a pattern is in the text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |

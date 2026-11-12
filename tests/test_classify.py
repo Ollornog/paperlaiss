@@ -417,7 +417,7 @@ with _tf.TemporaryDirectory() as _d:
 # die nachgetragen würden.
 classify.CORR_META.clear(); classify.CORR_META.update({"7": {"ustid": "ATU99988777"}})
 _s = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "AT48 3200 0000 1234 5864"}}],
-           text=_gut + " UID ATU99988777", korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
+           text=_gut + " UID ATU99988777 IBAN AT48 3200 0000 1234 5864", korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
 classify.CORR_META.clear()
 r.check("Verdrahtung: nur ein KI-Aufruf (Pass 1), kein Pass 0", len(_s["chat"]) == 1, str(len(_s["chat"])))
 _v = classify.pass1_nachricht_teile("", None, "", "", "", "2026-01-02", "", "a.pdf", "", "T", "I", typ_vorschlag="Mahnung")
@@ -442,14 +442,16 @@ _o = _lauf([_ok], text=_gut + " Absender: Nord Autoteile, Musterstadt",
            korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Nord Autoteile GmbH"}])
 classify.CORR_META.clear(); classify.CORR_META.update({"7": {"iban": ["AT61 1904 3002 3457 3201"]},
                                                        "8": {"iban": ["DE89 3704 0044 0532 0130 00"]}})
+# Since T-11 an IBAN is learned only if it is printed in the text.
+_ibantext = _gut + " IBAN AT48 3200 0000 1234 5864 / DE89 3704 0044 0532 0130 00"
 _a1 = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "AT48 3200 0000 1234 5864"}}],
-            korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+            text=_ibantext, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
 _a1sd = classify.TRACE.get("stammdaten") or {}
 _a2 = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00"}}],
-            korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+            text=_ibantext, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
 _a2sd = classify.TRACE.get("stammdaten") or {}
 _a3 = _lauf([{**_ok, "correspondent": "Beispiel Softwar", "absender": {"iban": "AT48 3200 0000 1234 5864"}},
-             {"match": "Beispiel Software"}], korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
+             {"match": "Beispiel Software"}], text=_ibantext, korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
 _a3sd = classify.TRACE.get("stammdaten") or {}
 classify.CORR_META.clear()
 r.check("Im Lauf: exakte Zuordnung hängt die neue IBAN an", _a1sd.get("geschrieben", {}).get("iban") == "AT48 3200 0000 1234 5864", str(_a1sd))
@@ -1158,13 +1160,13 @@ classify.log = lambda m: _log_vorher.append(m)
 try:
     # Trockenlauf: Stammdaten gegen den geladenen Stand (CORR_META) — beide Widersprüche im Trace.
     _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00", "ustid": "ATU99988777"}}],
-          korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+          text=_ibantext, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
     _pr_trace = classify.TRACE.get("pruefen") or {}
     # Echter Lauf (Store im Testordner leer, fremd prüft gegen CORR_META): IBAN eines anderen → PRÜFEN-Zeile, Tag.
     _alt_rt = classify.resolve_tag
     classify.resolve_tag = lambda idx, name: 77 if name == "KI-unsicher" else _alt_rt(idx, name)
     _pr = _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00"}}],
-                dry=False, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+                dry=False, text=_ibantext, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
     _ok_tags = _lauf([{**_ok, "correspondent": "Beispiel Software"}], dry=False,
                      korrespondenten=[{"id": 7, "name": "Beispiel Software"}])
     classify.resolve_tag = _alt_rt
@@ -1568,7 +1570,7 @@ r.check("Verdrahtung: Teilstück landet in „Prüfen“ (Tag KI-unsicher, PRÜF
         and "PRÜFEN 5" in Path(os.environ["CLASSIFY_LOG"]).read_text(encoding="utf-8"), str(classify.TRACE.get("pruefen")))
 
 # ---- T-9: false alarms and master data learned from our own identifiers.
-_IBAN_A, _IBAN_B, _IBAN_C = "DE00 1111 2222 3333 4444 55", "DE00 5555 6666 7777 8888 99", "AT00 1234 5678 9012 3456"
+_IBAN_A, _IBAN_B, _IBAN_C = "DE67 1111 2222 3333 4444 55", "DE78 5555 6666 7777 8888 99", "AT11 1234 5678 9012 3456"
 # 1. An IBAN/phone number on documents of many correspondents is most likely ours: not learned, no "belongs to".
 _fr_b = lambda feld, w: "Krankenkasse Muster" if feld in ("iban", "telefon") else None
 _nv, _gv, _vv = classify.stammdaten_nachtragen({}, {"iban": _IBAN_A, "telefon": "0662 55 44 33"}, "", _eig, _q,
@@ -1591,7 +1593,7 @@ def _holen(pfad):
     return {"results": [{"id": 1, "correspondent": 8}, {"id": 2, "correspondent": 11}, {"id": 3, "correspondent": None}]}
 r.check("Verbreitung: IBAN kompakt und in Vierergruppen gesucht, Korrespondenten gezählt (ohne leere)",
         classify.korrespondenten_mit("iban", _IBAN_A, _holen) == {8, 11} and len(_suchen) == 2
-        and any("DE0011112222333344445" in p for p in _suchen) and any("DE00%201111" in p for p in _suchen), str(_suchen))
+        and any("DE6711112222333344445" in p for p in _suchen) and any("DE67%201111" in p for p in _suchen), str(_suchen))
 r.check("Verbreitung: scheitert jede Suche → unbekannt (None)",
         classify.korrespondenten_mit("iban", _IBAN_A, lambda p: (_ for _ in ()).throw(OSError("weg"))) is None
         and classify.korrespondenten_mit("kundennummer", "123456", _holen) is None)
@@ -1601,9 +1603,11 @@ classify.CFG["unsicher_tag"] = "KI-unsicher"
 try:
     _kk = [{"id": 7, "name": "Arbeitgeber Muster"}, {"id": 8, "name": "Krankenkasse Muster"}]
     _vb = _lauf([{**_ok, "correspondent": "Arbeitgeber Muster", "absender": {"iban": _IBAN_A}}], dry=False, korrespondenten=_kk,
+                text=_gut + f" IBAN {_IBAN_A}",
                 mehr_routen={"/documents/?page_size=100": {"results": [{"id": 1, "correspondent": 8}, {"id": 2, "correspondent": 12}]}})
     _vb_pr = dict(classify.TRACE.get("pruefen") or {}); _vb_sd = dict((classify.TRACE.get("stammdaten") or {}).get("verworfen") or {})
     _vs = _lauf([{**_ok, "correspondent": "Arbeitgeber Muster", "absender": {"iban": _IBAN_A}}], dry=False, korrespondenten=_kk,
+                text=_gut + f" IBAN {_IBAN_A}",
                 mehr_routen={"/documents/?page_size=100": {"results": [{"id": 1, "correspondent": 8}]}})
     _vs_pr = dict(classify.TRACE.get("pruefen") or {})
 finally:
@@ -2129,5 +2133,188 @@ try:
 finally:
     classify.get, classify.send = _alt_get, _alt_send
 r.check("Notiz: gleicher Wortlaut nur einmal", _n1 is False and _n2 is True and len(_nz["send"]) == 1)
+
+
+# ---- T-11: lessons from a second review of one person's 727 documents (2026-11-12) ----
+# 1. IBAN only with valid check digits and as printed — the model composed IBANs from bank code + account.
+_IB_OK = "DE89 3704 0044 0532 0130 00"
+r.check("T-11 IBAN: check digits (ISO 13616) and country length decide",
+        classify.iban_gueltig(_IB_OK) and classify.iban_gueltig("AT61 1904 3002 3457 3201")
+        and not classify.iban_gueltig("DE88 3704 0044 0532 0130 00")          # one check digit off
+        and not classify.iban_gueltig("DE892307070001807023")                 # bank code + account, 20 chars
+        and not classify.iban_gueltig("DE77 0320 6676 4664") and not classify.iban_gueltig("kein")
+        and not classify.iban_gueltig("DE29 1234 5678 9012 3456"))                # check digits fit, 20 chars for DE
+r.check("T-11 IBAN: norm_iban checks by default, the own list in the config is taken as written",
+        classify.norm_iban(_IB_OK) == "DE89370400440532013000" and classify.norm_iban("DE00 1234 5678 9012 34") == ""
+        and classify.norm_iban("DE00 1234 5678 9012 34", pruefen=False) == "DE0012345678901234")
+_F_IBAN = {"id": 22, "name": "IBAN", "data_type": "string"}
+r.check("T-11 IBAN field: invalid or not printed is rejected, a printed valid one is kept",
+        "Prüfziffer" in (classify.feldvorschlag_verwerfen(_F_IBAN, "DE892307070001807023", "BLZ 23070700 Konto 1807023") or "")
+        and "nicht im Text" in (classify.feldvorschlag_verwerfen(_F_IBAN, _IB_OK, "Konto 0532013000") or "")
+        and classify.feldvorschlag_verwerfen(_F_IBAN, _IB_OK, "IBAN: DE89 3704 0044 0532 0130 00") is None
+        and classify.feldvorschlag_verwerfen(_F_IBAN, None, "") is None
+        and classify.feldvorschlag_verwerfen(_F_IBAN, "BEHALTEN", "") is None)
+_nt, _gt, _vt = classify.stammdaten_nachtragen({}, {"iban": "DE88 3704 0044 0532 0130 00"}, "", _eig, _q,
+                                               text="IBAN DE88 3704 0044 0532 0130 00")
+_nt2, _gt2, _vt2 = classify.stammdaten_nachtragen({}, {"iban": _IB_OK}, "", _eig, _q, text="Konto 0532013000 BLZ 37040044")
+r.check("T-11 master data: wrong check digits or an IBAN not printed is not learned",
+        "iban" not in _nt and "Prüfziffer" in _vt.get("iban", "") and "iban" not in _nt2
+        and "nicht im Text" in _vt2.get("iban", ""), f"{_vt} {_vt2}")
+
+# 2. Personnel and payroll numbers are no contract/invoice number.
+_PS = "Abrechnung der Brutto/Netto-Bezüge\n611 7437/ 40/88901\nPersonal-Nr. | Geburtsdatum\n...\nPers.-Nr. 88901 Abt.-Nr. 00040\n"
+_F_VN = {"id": 20, "name": "Vertragsnummer", "data_type": "string"}
+_F_PN = {"id": 30, "name": "Personalnummer", "data_type": "string"}
+r.check("T-11 personnel number: a value containing it counts only with als_teil",
+        classify.personalnummer("611 7437/ 40/88901", _PS, als_teil=True)
+        and not classify.personalnummer("611 7437/ 40/88901", _PS)
+        and not classify.personalnummer("4711 0815", _PS, als_teil=True))
+r.check("T-11 fields: payroll reference on a payslip and a personnel number elsewhere are rejected",
+        "Lohnabrechnung" in (classify.feldvorschlag_verwerfen(_F_VN, "13599/INGHH", "13599/INGHH", "Lohnabrechnung") or "")
+        and "Personalnummer" in (classify.feldvorschlag_verwerfen(_F_VN, "611 7437/ 40/88901", _PS, "Rechnung") or ""))
+r.check("T-11 fields: a contract number on an invoice and a field meant for the number are kept",
+        classify.feldvorschlag_verwerfen(_F_VN, "V-2026-0042", "Vertrag V-2026-0042", "Rechnung") is None
+        and classify.feldvorschlag_verwerfen(_F_PN, "88901", _PS, "Lohnabrechnung") is None
+        and classify.feldvorschlag_verwerfen({"id": 35, "name": "Notiz", "data_type": "longtext"},
+                                             "Pers.-Nr. 88901 laut Abrechnung", _PS, "Lohnabrechnung") is None)
+r.check("T-11 fields: the list of blocked fields comes from the config",
+        classify.CFG["arbeitgeber_ohne_felder"] == ["Vertragsnummer", "Rechnungsnummer", "Aktenzeichen"]
+        and classify.feldvorschlag_verwerfen(_F_VN, "13599/INGHH", "", "Lohnabrechnung",
+                                             {"arbeitgeber_typen": ["Lohnabrechnung"], "arbeitgeber_ohne_felder": []}) is None)
+_FF = [{"id": 20, "name": "Vertragsnummer", "data_type": "string"}, {"id": 22, "name": "IBAN", "data_type": "string"},
+       {"id": 2, "name": "Betrag", "data_type": "monetary"}]
+_fl = _lauf([{**_ok, "document_type": "Lohnabrechnung",
+              "fields": {"Vertragsnummer": "611 7437/ 40/88901", "IBAN": "DE892307070001807023", "Betrag": "884,47"}}],
+            dry=False, text=_gut + "\n" + _PS, felder=_FF, feldwerte=[{"field": 20, "value": "alt-1"}],
+            typen=[{"id": 1, "name": "Lohnabrechnung"}, {"id": 2, "name": "Rechnung"}])
+_flc = {c["field"]: c["value"] for c in (_fl.get("patch") or [{}])[0].get("custom_fields", [])}
+r.check("T-11 wiring: rejected proposals are not written, the field keeps its value, the amount is written",
+        _flc.get(20) == "alt-1" and 22 not in _flc and _flc.get(2) == "EUR884.47"
+        and set(classify.TRACE.get("fields_verworfen") or {}) == {"Vertragsnummer", "IBAN"}, f"{_flc} {classify.TRACE.get('fields_verworfen')}")
+
+# 3. "Vorsorge" excludes "Versicherungen", unless disability or accident is in the text.
+_TA = [{"tag": "Vorsorge", "ohne": ["Versicherungen"], "ausser_text": ["Berufsunfähigkeit", r"\bBU\b", "Unfall"]}]
+_tn = {"vorsorge": 1, "versicherungen": 2, "steuer": 3}
+r.check("T-11 tags: excluded next to the excluding tag (proposed or already there), kept with an exception in the text",
+        classify.tag_ausschluss([1, 2, 3], [], _tn, _TA, "Lebensversicherung Stand 2025") == ([1, 3], {2: "Vorsorge"})
+        and classify.tag_ausschluss([2], [1], _tn, _TA, "Rentenversicherung")[0] == []
+        and classify.tag_ausschluss([1, 2], [], _tn, _TA, "mit BU-Zusatzversicherung")[0] == [1, 2]
+        and classify.tag_ausschluss([1, 2], [], _tn, _TA, "Unfallversicherung")[0] == [1, 2]
+        and classify.tag_ausschluss([2, 3], [], _tn, _TA, "Kfz-Haftpflicht")[0] == [2, 3]
+        and classify.tag_ausschluss([1, 2], [], _tn, [], "x")[0] == [1, 2]
+        and classify.tag_ausschluss([1, 2], [], _tn, [{"tag": "Vorsorge", "ohne": ["Versicherungen"], "ausser_text": ["(kaputt"]}],
+                                    "Lebensversicherung")[0] == [1])
+_tg = _lauf([{**_ok, "tags": ["Vorsorge", "Versicherungen"]}], dry=False,
+            alle_tags=[{"id": 1, "name": "Vorsorge"}, {"id": 2, "name": "Versicherungen"}],
+            cfg={"tagging_enabled": True, "tag_ausschluss": _TA}, text=_gut + " Kapitallebensversicherung")
+r.check("T-11 wiring: the excluded tag is not written",
+        (_tg.get("patch") or [{}])[0].get("tags") == [1] and classify.TRACE.get("tags_verworfen") == {"Versicherungen": "schließt „Vorsorge“ aus"},
+        f"{(_tg.get('patch') or [{}])[0].get('tags')} {classify.TRACE.get('tags_verworfen')}")
+r.check("T-11 tags: no rule by default", classify.CFG["tag_ausschluss"] == [])
+
+# 4. Copies: numbers of one contained in the other (a scan misses some), partial copies with fewer pages.
+_lst = "Lohnsteuerbescheinigung 2019 " + " ".join(f"{100 + i},{i:02d}" for i in range(15))
+r.check("T-11 duplicate: scan with two numbers unread is a copy, a letter with its own number is not",
+        classify.dublette(_lst, 1, [{"id": 9, "title": "Original", "content": _lst + " 48.546,03 8.504,28", "page_count": 1}])
+        == "wie Dokument 9 (Original)"
+        and classify.dublette(_lst + " 1234567", 1, [{"id": 9, "content": _lst + " 7654321", "page_count": 1}]) is None
+        and classify.dublette(_lst, 1, [{"id": 9, "content": _lst + " 1,11 2,22 3,33", "page_count": 1}]) is None)
+_lang = _lst + " " + " ".join(f"{300 + i},{i:02d}" for i in range(20))
+r.check("T-11 partial copy: fewer pages, all numbers in the longer one → hint; the longer one and too few numbers not",
+        (classify.teilkopie(_lst, 2, [{"id": 8, "title": "Ganz", "content": _lang, "page_count": 4}]) or "").startswith("Teil von Dokument 8 (2 von 4")
+        and classify.teilkopie(_lang, 4, [{"id": 7, "content": _lst, "page_count": 2}]) is None
+        and classify.teilkopie(_lst, 4, [{"id": 8, "content": _lang, "page_count": 4}]) is None
+        and classify.teilkopie("Seite 1,00 2,00 3,00", 1, [{"id": 8, "content": _lang + " 1,00 2,00 3,00", "page_count": 4}]) is None
+        and classify.teilkopie(_lst, 2, [{"id": 8, "content": _lang.replace("114,14", ""), "page_count": 4}]) is None)
+_ah = []
+def _ah_holen(p):
+    _ah.append(p)
+    return {"results": [{"id": 5}, {"id": 6, "content": "a"}]} if "more_like" in p else {"results": [{"id": 6}, {"id": 7}]}
+_ahl = classify.aehnliche_holen(5, "Betrag 48.546,03 und 8.504,28 am 01.01.2019", _ah_holen)
+r.check("T-11 candidates: more-like-this plus a content search for the two largest amounts, without itself",
+        [d["id"] for d in _ahl] == [6, 7] and len(_ah) == 3 and "48.546%2C03" in _ah[1] and "8.504%2C28" in _ah[2], f"{_ah} {_ahl}")
+# Wiring: the classifying run finds the longer document through the content search (not "more like this").
+_tkl = _lauf([_ok], text=_gut.replace("Sehr geehrte Frau Muster, ", "") + "\n" + _lst, seiten=2,
+             mehr_routen={"/documents/?more_like_id": {"results": []},
+                          "/documents/?page_size=10&content__icontains=": {"results": [
+                              {"id": 8, "title": "Ganz", "content": _lang, "page_count": 4}]}})
+r.check("T-11 wiring: the run reports a partial copy found by the content search",
+        "Teil von Dokument 8" in ((classify.TRACE.get("pruefen") or {}).get("teilkopie") or ""), str(classify.TRACE.get("pruefen")))
+_alt_k = {n: getattr(classify, n) for n in ("get", "DRY")}
+classify.get = lambda p, raw=False: ({"id": 4, "content": _lst, "tags": [], "owner": None, "page_count": 2} if p == "/documents/4/"
+                                     else {"results": [{"id": 8, "content": _lang, "page_count": 4}]} if "content__icontains" in p
+                                     else {"results": []})
+classify.DRY = True
+try:
+    _tkk = classify.kontrolle([4])
+finally:
+    for _n, _v in _alt_k.items():
+        setattr(classify, _n, _v)
+r.check("T-11 wiring: the control run searches candidates by content too", "teilkopie" in _tkk.get(4, {}), str(_tkk))
+r.check("T-11 control run: a partial copy is reported (unsicher, not kaputt)",
+        "teilkopie" in _kb({"id": 1, "content": _lst, "page_count": 2}, ae=[{"id": 8, "content": _lang, "page_count": 4}])
+        and classify.befund_tags({"teilkopie": "x"}, 1, 2) == [1])
+
+# 5. Master data: nothing learned that is ours or another's number for us.
+_bc = [{"id": 1, "name": "Erika Muster"}, {"id": 2, "name": "Arbeitgeber Muster GmbH"}, {"id": 3, "name": "Bank Muster"}]
+_bm = {1: {"kundennummer": ["46/752/00470"], "telefon": ["+49 40 1234567"]}, 2: {"kundennummer": ["73702/1"]},
+       3: {"kundennummer": ["730 1807023"]}}
+_be = classify.eigene_kennungen({"eigene_kennungen": {"namen": ["Erika Muster"]}})
+_bel = classify.stammdaten_belegt(_bc, lambda i: _bm.get(i, {}), 4, _be)
+r.check("T-11 store: a value at the own person or a customer number at another is taken",
+        "eigene Kennung" in (_bel("kundennummer", "46/752/00470") or "") and "eigene Kennung" in (_bel("telefon", "040 1234567") or "")
+        and "Arbeitgeber Muster" in (_bel("kundennummer", "73702/1") or "") and "Bank Muster" in (_bel("kundennummer", "7301807023") or "")
+        and _bel("kundennummer", "K-4711") is None and _bel("telefon", "0662 1") is None
+        and classify.stammdaten_belegt(_bc, lambda i: _bm.get(i, {}), 3, _be)("kundennummer", "730 1807023") is None)
+_nb, _gb, _vb5 = classify.stammdaten_nachtragen({}, {"kundennummer": "73702/1", "telefon": "+49 40 1234567"}, "", _eig, _q,
+                                                belegt=_bel)
+r.check("T-11 store: taken values are not learned and are no contradiction to check",
+        not _gb and "kundennummer" in _vb5 and not any(x.startswith(("gehört schon zu", "andere USt-ID")) for x in _vb5.values()), str(_vb5))
+_ne, _ge, _ve = classify.stammdaten_nachtragen({}, {"kundennummer": "K-4711", "telefon": "0662 99 88 77", "adresse": "Weg 1"},
+                                               "", _eig, _q, eigene_person=True)
+r.check("T-11 store: no identifiers at the own person's entry, the address still",
+        _ge == {"adresse": "Weg 1"} and "eigene Person" in _ve.get("kundennummer", "") and "telefon" in _ve, f"{_ge} {_ve}")
+classify.CORR_META.clear(); classify.CORR_META.update({"2": {"kundennummer": ["73702/1"]}})
+try:
+    _sb = _lauf([{**_ok, "correspondent": "Finanzamt Muster", "absender": {"kundennummer": "73702/1"}}],
+                korrespondenten=[{"id": 2, "name": "Arbeitgeber Muster GmbH"}, {"id": 5, "name": "Finanzamt Muster"}])
+    _sb_sd = dict(classify.TRACE.get("stammdaten") or {}); _sb_pr = dict(classify.TRACE.get("pruefen") or {})
+    # A document of Max from Erika: for this run Erika is a counterpart, but she belongs to the household.
+    _se = _lauf([{**_ok, "correspondent": "Erika Muster", "document_type": "Brief", "absender": {"kundennummer": "K-4711"}}],
+                korrespondenten=[{"id": 1, "name": "Erika Muster"}], typen=[{"id": 1, "name": "Brief"}],
+                cfg={"eigene_kennungen": {"namen": ["Erika Muster", "Max Muster"]}, "kennungen_je_konto": True},
+                besitzer={"username": "max", "first_name": "Max", "last_name": "Muster"})
+    _se_sd = dict(classify.TRACE.get("stammdaten") or {})
+finally:
+    classify.CORR_META.clear()
+r.check("T-11 wiring: a customer number of the employer is not learned at the tax office, no check flag",
+        not _sb_sd.get("geschrieben") and "Arbeitgeber Muster" in (_sb_sd.get("verworfen") or {}).get("kundennummer", "")
+        and "kundennummer" not in _sb_pr, f"{_sb_sd} {_sb_pr}")
+r.check("T-11 wiring: nothing learned at the own person's entry",
+        not _se_sd.get("geschrieben") and "eigene Person" in (_se_sd.get("verworfen") or {}).get("kundennummer", ""), str(_se_sd))
+
+# 6. Control run: page headers are no loop, all pages named means nothing is missing, "van" for "von".
+_W = ("Miete Sollstellung Saldovortrag Gutschrift Lastschrift Nebenkosten Heizung Wasser Strom Abfall Grundsteuer "
+      "Versicherung Hausmeister Aufzug Treppenhaus Garten Reinigung Schornstein Wartung Rauchmelder Kabel Antenne "
+      "Verwaltung Mahnung Zinsen Kaution Rueckzahlung Abrechnung Vorauszahlung Erstattung Korrektur Umbuchung Storno "
+      "Saldo Konto Beleg Journal Buchung Datum Betrag Haben Soll Gegenkonto Ausgleich Split").split()
+# 13 pages, each with the header and one booking line (half the lines are the header, as in a short statement).
+_kopf = "".join(f"Kontenanzeige-Druck\n{_W[i]} {_W[i + 13]} {_W[i + 26]} {i}0,00\n" for i in range(13))
+r.check("T-11 repetition: a header once per page of a 13-page statement is no loop, as one page it is",
+        classify.wiederholung(_kopf, 13) is None and classify.wiederholung("Kopfzeile\n" * 6 + "Text eins\nText zwei\n", 13) is None
+        and classify.wiederholung("Kopfzeile\n" * 6 + "Text eins\nText zwei\n") is not None)
+# A long statement: 600 words from a vocabulary of 45 (the real one: 1365 words, 92 different, 218 lines).
+_tab = "\n".join(f"| {i % 28 + 1:02d}.01.2020 | " + " | ".join(_W[(i * 7 + k) % 45] for k in range(6)) + f" | {500 + i},00 |"
+                 for i in range(100))
+r.check("T-11 repetition: a long table repeats its words but is no loop; a loop without line breaks still is",
+        classify.wiederholung(_tab) is None and classify.wiederholung("und die in der Zeitung " * 30) is not None)
+r.check("T-11 pages: OCR 'van'/'v0n' read as 'von'; all pages named on fewer sheets is complete",
+        classify.teilstueck("Seite 1 von 2 … Seite 2 van 2", 1) is None
+        and classify.teilstueck("Seite 1 von 3 … Seite 3 v0n 3", 2) is not None
+        and classify.teilstueck("Seite 1 van 2", 1) is not None
+        and classify.teilstueck("Seite 1 von 11 Seite 8 von 11", 8) is not None)
+r.check("T-11 control run: the multi-page header document and the overlong page have no finding",
+        _kb({"id": 1, "content": _kopf, "page_count": 13}) == {}
+        and _kb({"id": 1, "content": _gut + " Seite 1 von 2 " + _gut + " Seite 2 van 2", "page_count": 1}) == {})
 
 sys.exit(r.done())
