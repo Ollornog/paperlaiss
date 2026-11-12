@@ -15,5 +15,5 @@ tinysesam[oidc,argon2]==0.25.1
 authlib==1.9.1
 # joserfc kommt über tinysesam/authlib; 1.7.5 trägt CVE-2026-119284.
 joserfc==1.7.7
-pypdf[crypto]==6.21.4
+pypdf[crypto]==7.0.0
 reportlab==5.1.0
