@@ -259,6 +259,9 @@ classifier uses it in three ways:
   is split and checked part by part, a cost centre ("Kostenstelle") is never one; the name similarity that
   picks the pass-2 candidates also looks at aliases, and a proposal that starts with a candidate's whole
   name (two words or more, "Deutsche Bank Privat- und Geschäftskunden AG" → "Deutsche Bank") goes to pass 2.
+  Since 0.9: on the types of `monatsletzter_typen` the date is the last day of the billing month, decided in code
+  from "Abrechnungsmonat …" / "Monat/Jahr …" (never from a correction line), unless a labelled date of issue is
+  printed; a VAT ID is only learned when the text prints it.
   The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to

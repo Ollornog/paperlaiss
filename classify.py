@@ -92,6 +92,11 @@ CFG = {
     # and none of our own persons is flagged for checking (T-12: a stack scan of one person held the tax
     # notices and payslips of a former partner). Per account: konten[<username>]["fremde_namen"].
     "fremde_namen": [],
+    # Types whose date is the LAST day of the billing month when the document has no date of issue (a payslip
+    # names only "Abrechnungsmonat Juni 2023" or "Monat/Jahr 8 / 99"). Decided in code from the text, not
+    # left to the model: it proposed the first day in 43 of 67 payslips, and the month of a correction
+    # ("Rückrechnung März 2022") instead of the billing month (T-14). Empty = off.
+    "monatsletzter_typen": [],
     "einzugsstellen_muster": r"\b(?:AOK|BKK|IKK|DAK|BARMER|HEK|hkk|KKH|\w*Knappschaft|\w*krankenkasse|Ersatzkasse|"
                              r"Gesundheitskasse|\w*GKK|ÖGK|Einzugsstelle)\b",   # case-insensitive
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
@@ -332,6 +337,12 @@ def norm_iban(v, pruefen=True):
     if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", s):
         return ""
     return s if not pruefen or iban_gueltig(s) else ""
+
+
+def kennung_im_text(wert, text):
+    """Is an identifier (a VAT ID "DE 113 822 785") printed in the text, spaces, dots and hyphens ignored?"""
+    w = re.sub(r"[\s.\-/]", "", str(wert or "")).upper()
+    return bool(w) and w in re.sub(r"[\s.\-/]", "", str(text or "")).upper()
 
 
 def iban_im_text(iban, text):
@@ -840,6 +851,10 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
             verworfen["ustid"] = "kein USt-ID-Format"
         elif u in eigene["ustid"]:
             verworfen["ustid"] = "eigene USt-ID"
+        elif text and not kennung_im_text(u, text):
+            # The model copied it from a candidate in the prompt (T-14: every letter of an employer got the
+            # VAT ID of its group parent, which the letters do not print, and a "belongs to" finding).
+            verworfen["ustid"] = "steht so nicht im Text"
         else:
             setze("ustid", u)
     roh = wert("iban")
@@ -1551,11 +1566,108 @@ def monat_belegt(iso, text):
     return bool(re.search(zahl, t) or re.search(name, t, re.IGNORECASE))
 
 
+_MONAT_NR = {**{n.lower(): i for i, n in enumerate(_MONATE, 1)}, "maerz": 3, "marz": 3, "jänner": 1, "jaenner": 1}
+_MONAT_NAME = "|".join(sorted(_MONAT_NR, key=len, reverse=True))
+# The billing month, in order of trust: a labelled "Abrechnungsmonat"/"Abrechnungszeitraum", then the
+# "Monat/Jahr" box of old payslips, then "Abrechnung für <Monat> <Jahr>". A correction line
+# ("Rückrechnung März 2022") is never one of these — it names the corrected month, not the billing month.
+_ABRECHNUNGSMONAT = [
+    re.compile(rf"Abrechnungs(?:monat|zeitraum)\s*:?\s*({_MONAT_NAME})\s+((?:19|20)\d\d)\b", re.IGNORECASE),
+    re.compile(r"Abrechnungs(?:monat|zeitraum)\s*:?\s*(0?[1-9]|1[0-2])\s*[./]\s*((?:19|20)?\d\d)(?![\d.])", re.IGNORECASE),
+    re.compile(r"Monat\s*/\s*Jahr[\s:\-|]*?(0?[1-9]|1[0-2])\s*/\s*((?:19|20)?\d\d)(?!\d)", re.IGNORECASE),
+    re.compile(rf"(?:Entgelt|Gehalts|Lohn|Verdienst|Bezüge)?abrechnung\s+(?:für\s+)?(?:den\s+Monat\s+)?({_MONAT_NAME})\s+((?:19|20)\d\d)\b",
+               re.IGNORECASE),
+]
+
+
+# Table layout of the OCR: the labels of the header stand one under the other, their values follow later in the
+# same order ("Rückrechnung / Abrechnungsmonat / … / Januar 2022 / Juni 2022").
+_LABEL_ALLEIN = re.compile(r"^[ \t]*Abrechnungsmonat[ \t:]*$", re.IGNORECASE | re.MULTILINE)
+_MONAT_JAHR_WERT = re.compile(rf"\b({_MONAT_NAME})\s+((?:19|20)\d\d)\b", re.IGNORECASE)
+
+
+def _abrechnungsmonat_spalte(text):
+    """The billing month of a header whose labels and values the OCR wrote as separate columns, or None."""
+    m = _LABEL_ALLEIN.search(text)
+    if not m:
+        return None
+    davor = [z.strip() for z in text[:m.start()].splitlines()[-3:] if z.strip()]
+    index = sum(1 for z in davor if re.fullmatch(r"R[üu]ckrechnung:?", z, re.IGNORECASE))
+    werte = _MONAT_JAHR_WERT.findall(text[m.end():m.end() + 400])
+    if len(werte) <= index:
+        return None
+    return _MONAT_NR.get(werte[index][0].lower()), int(werte[index][1])
+
+
+def abrechnungsmonat(text):
+    """(year, month) of the billing month named in the text, or None."""
+    spalte = _abrechnungsmonat_spalte(str(text or ""))
+    if spalte and spalte[0]:
+        return spalte[1], spalte[0]
+    for rx in _ABRECHNUNGSMONAT:
+        m = rx.search(str(text or ""))
+        if not m:
+            continue
+        mon = _MONAT_NR.get(m.group(1).lower()) if not m.group(1).isdigit() else int(m.group(1))
+        jahr = int(m.group(2))
+        if jahr < 100:
+            jahr += 1900 if jahr >= 50 else 2000
+        if mon and 1950 <= jahr <= 2035:
+            return jahr, mon
+    return None
+
+
+_DATUM_ETIKETT = r"(?:Erstellungs|Ausstellungs|Druck|Abrechnungs)?datum|Datum|erstellt am|wurde am|, den|[A-ZÄÖÜ][a-zäöüß]+,"
+
+
+def ausstellungsdatum(iso, text):
+    """Does the text print `iso` as a date of issue — after a label ("Erstellungsdatum", "Datum", "Hamburg, den")?
+    ("Die Abrechnung wurde am 17.07.2018 … erstellt" counts.) A date in a list ("03.10.2022 - 03.10.2022: Feiertag")
+    is none (T-14: payslips kept a holiday or a day of leave as their date)."""
+    try:
+        tag = datetime.date.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return False
+    t, m, j = tag.day, tag.month, tag.year
+    formen = {f"{t:02d}.{m:02d}.{j}", f"{t}.{m}.{j}", f"{t:02d}.{m:02d}.{j % 100:02d}", f"{t}.{m}.{j % 100:02d}"}
+    datum = "|".join(re.escape(f).replace(r"\.", r"\.\s*") for f in sorted(formen, key=len, reverse=True))
+    return bool(re.search(rf"(?:{_DATUM_ETIKETT})\s*:?\s*(?:{datum})(?![\d])", str(text or "")))
+
+
+def _monatsletzter(jahr, monat):
+    return ((datetime.date(jahr, monat, 28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)).isoformat()
+
+
+def monatsletzter_datum(datum, text, typ, typen):
+    """The date of a document of the `monatsletzter_typen`: the last day of the billing month (T-14).
+
+    A date of issue stays: the proposal is kept when the text prints it after a label (`ausstellungsdatum`).
+    Otherwise the billing month from the text decides; without one, the month of the proposal if the text names
+    it as month and year (`monat_belegt`)."""
+    if not typ_in(typ, typen):
+        return datum
+    if datum and ausstellungsdatum(datum, text):
+        return datum                                            # a date of issue
+    am = abrechnungsmonat(text)
+    if am:
+        return _monatsletzter(*am)
+    if datum and monat_belegt(datum, text):
+        tag = datetime.date.fromisoformat(datum)
+        return _monatsletzter(tag.year, tag.month)
+    return datum
+
+
 def wirksames_datum(prop, content, doc):
     """Das Datum, das tatsächlich geschrieben würde: KI-Vorschlag, nur mit Beleg im Text und nicht
     der Importtag einer Office-Datei. Eine Funktion für Lauf und Trockenlauf, damit der Trockenlauf
-    (und die Testsammlung) dasselbe zeigt wie ein echter Lauf."""
+    (und die Testsammlung) dasselbe zeigt wie ein echter Lauf. Bei den `monatsletzter_typen` entscheidet
+    der Code (T-14)."""
     datum = dokument_datum(prop)
+    if CFG.get("monatsletzter_typen"):
+        neu = monatsletzter_datum(datum, content, prop.get("document_type"), CFG.get("monatsletzter_typen"))
+        if neu != datum:
+            TRACE["datum_monatsletzter"] = {"vorschlag": datum, "gesetzt": neu}
+            return neu
     if datum and not datum_belegt(datum, content) and not monat_belegt(datum, content):
         TRACE["datum_ohne_beleg"] = datum
         return None

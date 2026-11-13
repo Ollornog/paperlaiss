@@ -6,6 +6,27 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-13
+
+Lohnabrechnungs-Datum im Code statt durch die KI und USt-ID nur aus dem Text (Backlog T-14).
+
+### Hinzugefügt
+
+- **`monatsletzter_typen`** (Vorgabe `[]`): Bei diesen Typen (etwa „Lohnabrechnung“) ist das Datum der letzte Tag
+  des Abrechnungsmonats, entschieden im Code. Der Monat kommt aus „Abrechnungsmonat …“ bzw. „Abrechnungszeitraum …“
+  (auch wenn das OCR Etiketten und Werte als Spalten schreibt), aus dem Feld „Monat/Jahr 8 / 99“ alter Abrechnungen
+  oder aus „Abrechnung für <Monat> <Jahr>“ — nie aus einer Zeile „Rückrechnung März 2022“. Ein Ausstellungsdatum mit
+  Etikett („Erstellungsdatum“, „Datum“, „wurde am … erstellt“, „<Ort>, den“) bleibt; ein Datum aus einer Liste
+  („03.10.2022 - 03.10.2022: Feiertag“) ist keines. Anlass: Die KI schlug in 43 von 67 Abrechnungen den Monatsersten
+  vor und bei Rückrechnungen den korrigierten Monat. Gemessen an derselben Sollliste: 19 → 67 von 67; über den Bestand
+  einer Installation (286 Abrechnungen) 132 Daten korrigiert, kein Monat verschoben.
+
+### Behoben
+
+- **USt-ID aus dem Prompt.** Das Modell übernahm die USt-ID eines Kandidaten aus dem Prompt (die Konzernmutter), die auf
+  den Briefen der Tochter nicht steht; jeder Brief bekam den Hinweis „gehört schon zu …“. Eine USt-ID wird jetzt nur
+  gelernt (und nur gemeldet), wenn sie im Text steht (`kennung_im_text`).
+
 ## [0.8.0] - 2026-11-13
 
 Lehren aus einer vierten Durchsicht (Backlog T-13): gelochte Rückseiten im Duplex-Scan, Papierscans digitaler

@@ -777,6 +777,10 @@ EINSTELLUNGEN = {
                      "Namen von Menschen, deren Dokumente nicht ins Archiv gehören (etwa eine frühere Partnerin). Nennt "
                      "ein Dokument einen davon und keine eigene Person, wird es zum Prüfen markiert. Je Konto auch unter "
                      "konten.<Benutzer>.fremde_namen. Einer je Zeile."),
+    "monatsletzter_typen": ("Felder", "Datum = Monatsletzter",
+                            "Dokumenttypen ohne Ausstellungsdatum, deren Datum der letzte Tag des Abrechnungsmonats ist "
+                            "(Lohnabrechnung). paperlaiss liest den Monat aus „Abrechnungsmonat …“ bzw. „Monat/Jahr …“, "
+                            "nicht aus einer Rückrechnung; ein Ausstellungsdatum im Text bleibt. Leer = aus. Einer je Zeile."),
     "einzugsstellen_muster": ("Korrespondenten", "Muster Krankenkasse/Einzugsstelle",
                               "Regulärer Ausdruck (ohne Groß-/Kleinschreibung) für Namen, die bei den Typen vom "
                               "Arbeitgeber nie Korrespondent sind."),
