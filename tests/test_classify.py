@@ -1160,7 +1160,7 @@ classify.log = lambda m: _log_vorher.append(m)
 try:
     # Trockenlauf: Stammdaten gegen den geladenen Stand (CORR_META) — beide Widersprüche im Trace.
     _lauf([{**_ok, "correspondent": "Beispiel Software", "absender": {"iban": "DE89 3704 0044 0532 0130 00", "ustid": "ATU99988777"}}],
-          text=_ibantext, korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
+          text=_ibantext + " UID ATU 99988777", korrespondenten=[{"id": 7, "name": "Beispiel Software"}, {"id": 8, "name": "Andere Firma"}])
     _pr_trace = classify.TRACE.get("pruefen") or {}
     # Echter Lauf (Store im Testordner leer, fremd prüft gegen CORR_META): IBAN eines anderen → PRÜFEN-Zeile, Tag.
     _alt_rt = classify.resolve_tag
@@ -2456,5 +2456,56 @@ finally:
 r.check("T-13 run: the OCR dropped a letter, the alias finds the correspondent among 25 closer names — pass 2 assigns it",
         len(_tb["chat"]) == 2 and [p.get("correspondent") for p in _tb.get("patch", [])][:1] == [549],
         f"chat={len(_tb['chat'])} {_tb.get('patch')} {classify.TRACE.get('correspondent')}")
+
+# ==== T-14: payslip date = last day of the billing month (in code), VAT ID only from the text
+_T = ["Lohnabrechnung"]
+r.check("T-14 billing month: label, old 'Monat/Jahr' box, 'Abrechnung für'; a correction line is not one",
+        classify.abrechnungsmonat("Rückrechnung März 2022\nAbrechnungsmonat       Juni 2022") == (2022, 6)
+        and classify.abrechnungsmonat("VERDIENSTABRECHNUNG Monat/Jahr----\n   8 / 99") == (1999, 8)
+        and classify.abrechnungsmonat("Abrechnungsmonat 04.2005/ 2") == (2005, 4)
+        and classify.abrechnungsmonat("Entgeltabrechnung für Februar 2024") == (2024, 2)
+        and classify.abrechnungsmonat("Rückrechnung März 2022") is None and classify.abrechnungsmonat("") is None)
+r.check("T-14 month end: first day → last day of the billing month, also from a correction month and without proposal",
+        classify.monatsletzter_datum("2023-06-01", "Abrechnungsmonat Juni 2023", "Lohnabrechnung", _T) == "2023-06-30"
+        and classify.monatsletzter_datum("2022-03-01", "Rückrechnung März 2022\nAbrechnungsmonat Juni 2022", "Lohnabrechnung", _T) == "2022-06-30"
+        and classify.monatsletzter_datum(None, "Abrechnungsmonat Februar 2024", "Lohnabrechnung", _T) == "2024-02-29"
+        and classify.monatsletzter_datum("1999-08-01", "Monat/Jahr 8 / 99", "Lohnabrechnung", _T) == "1999-08-31"
+        and classify.monatsletzter_datum("2024-03-01", "Gehalt März 2024", "Lohnabrechnung", _T) == "2024-03-31"
+        and classify.monatsletzter_datum("2022-06-01", "Eintritt 01.06.2022 Abrechnungsmonat Juni 2022", "Lohnabrechnung", _T)
+        == "2022-06-30")
+r.check("T-14 month end: a date of issue stays, other types and an empty list are untouched",
+        classify.monatsletzter_datum("2005-05-05", "Erstellungsdatum 05.05.2005 Abrechnungsmonat 04.2005/ 2", "Lohnabrechnung", _T) == "2005-05-05"
+        and classify.monatsletzter_datum("2024-02-01", "Abrechnungsmonat Februar 2024", "Rechnung", _T) == "2024-02-01"
+        and classify.monatsletzter_datum("2024-02-01", "Abrechnungsmonat Februar 2024", "Lohnabrechnung", []) == "2024-02-01"
+        and classify.monatsletzter_datum("2024-02-01", "Lohn", "Lohnabrechnung", _T) == "2024-02-01"
+        and classify.monatsletzter_datum("2018-07-17", "Abrechnungsmonat Juni 2018\nDie Abrechnung wurde am 17.07.2018 um 11:25 erstellt.",
+                                         "Lohnabrechnung", _T) == "2018-07-17"
+        and classify.monatsletzter_datum("2022-07-01", "Abrechnungsmonat Juni 2022 Erstellungsdatum 01.07.2022", "Lohnabrechnung", _T)
+        == "2022-07-01"
+        and classify.monatsletzter_datum("2022-10-03", "Abrechnungsmonat Oktober 2022\n03.10.2022 - 03.10.2022: Feiertag",
+                                         "Lohnabrechnung", _T) == "2022-10-31")
+r.check("T-14 billing month: OCR columns (labels first, values later in the same order), correction first",
+        classify.abrechnungsmonat("Hamburg\n\nRückrechnung\nAbrechnungsmonat\n\nKostenstelle\n\nSeite |\n\nJanuar 2022\nJuni 2022\n")
+        == (2022, 6)
+        and classify.abrechnungsmonat("Hamburg\nAbrechnungsmonat\n\nKostenstelle\n\nJuni 2022\n") == (2022, 6)
+        and classify.ausstellungsdatum("2011-06-10", "Datum: 10.06.2011") and classify.ausstellungsdatum("2025-07-28", "Hamburg, den 28.07.2025")
+        and not classify.ausstellungsdatum("2022-10-03", "03.10.2022 - 03.10.2022: Feiertag"))
+_alt_ml = classify.CFG.get("monatsletzter_typen")
+try:
+    classify.CFG["monatsletzter_typen"] = _T
+    _w1 = classify.wirksames_datum({"document_date": "2022-01-01", "document_type": "Lohnabrechnung"},
+                                   "Rückrechnung Januar 2022\nAbrechnungsmonat Juni 2022", {})
+    classify.CFG["monatsletzter_typen"] = []
+    _w2 = classify.wirksames_datum({"document_date": "2022-06-01", "document_type": "Lohnabrechnung"}, "Abrechnungsmonat Juni 2022", {})
+finally:
+    classify.CFG["monatsletzter_typen"] = _alt_ml
+r.check("T-14 wiring: the effective date takes the month end with the key set, keeps the proposal without it",
+        _w1 == "2022-06-30" and _w2 == "2022-06-01" and classify.CFG["monatsletzter_typen"] == [], f"{_w1} {_w2}")
+_su, _, _sv = classify.stammdaten_nachtragen({}, {"ustid": "DE113822785"}, "", _eg, "Test", text="Brief ohne Kennung")
+_su2, _, _ = classify.stammdaten_nachtragen({}, {"ustid": "DE113822785"}, "", _eg, "Test", text="USt.-ID Nr. DE 113 822 785")
+r.check("T-14 VAT ID: not learned (and no finding) when the text does not print it; learned when it does",
+        "ustid" not in _su and _sv.get("ustid") == "steht so nicht im Text" and _su2.get("ustid") == ["DE113822785"]
+        and classify.kennung_im_text("DE113822785", "UID DE 113.822.785") and not classify.kennung_im_text("", "x"),
+        f"{_su} {_sv} {_su2}")
 
 sys.exit(r.done())
