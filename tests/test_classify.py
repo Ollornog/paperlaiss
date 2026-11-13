@@ -2330,8 +2330,19 @@ _k1, _k2 = " ".join(_zahlen[:12] + ["9.999,01"]), " ".join(_zahlen[:12] + ["8.88
 r.check("T-12 rescan: below 15 numbers two pages stay strict too",
         classify.dublette(_k1, 2, [{"id": 9, "content": _k2, "page_count": 2}]) is None
         and classify.ocr_gleich(classify.kennzahlen(_scan1), classify.kennzahlen(_scan2)))
-r.check("T-12 rescan: one page stays strict (a form letter may carry one number of its own, T-11)",
-        classify.dublette(_scan1, 1, [{"id": 9, "content": _scan2, "page_count": 1}]) is None)
+# T-13: one page reads the same way as two (a payslip scanned from paper against the digital original); the form
+# letters of T-11 stay protected below 15 numbers (see "fewer than 15 numbers stay strict" below).
+_orig = "Sehr geehrter Herr Muster,\n" + " ".join(_zahlen + ["53,32", "73702"])
+_papier = "Sehr geehrter Herr Muster,\n" + " ".join(_zahlen[:5] + ["1.135,05"] + _zahlen[6:] + ["93,92"])
+r.check("T-13 rescan: one page, the scan misread two numbers (near twins) and dropped one → copy",
+        classify.dublette(_papier, 1, [{"id": 9, "title": "Original", "content": _orig, "page_count": 1}])
+        == "wie Dokument 9 (Original)"
+        and not classify.kennzahlen(_papier) <= classify.kennzahlen(_orig))
+r.check("T-13 rescan: one page, a number of its own on each side (no twin) stays no copy, as do six more numbers",
+        classify.dublette(_orig + " 1234567", 1, [{"id": 9, "content": _orig + " 7654321", "page_count": 1}]) is None
+        and classify.dublette(_orig, 1, [{"id": 9, "content": _orig + " 1,11 2,22 3,33 4,44 5,55 6,66", "page_count": 1}]) is None
+        and classify.dublette(_scan1, 1, [{"id": 9, "content": _scan2, "page_count": 1}]) is None
+        and classify.dublette(_scan1, 2, [{"id": 9, "content": _scan2, "page_count": 2}]) is not None)
 r.check("T-12 rescan: a differing date means another edition; fewer than 15 numbers stay strict",
         classify.dublette(_scan1, 2, [{"id": 9, "content": _scan1.replace("9.999,01", "9.990,01"), "page_count": 2}]) is not None
         and classify.dublette(_scan1, 2, [{"id": 9, "content": _scan1.replace("9.999,01", "9.990,01").replace("18.07.2005", "19.07.2005"),
@@ -2399,5 +2410,51 @@ r.check("T-12 foreign person: names per account (konten.<user>.fremde_namen) plu
 # 9. A compound health insurer name is an Einzugsstelle too.
 r.check("T-12 Einzugsstelle: BUNDESKNAPPSCHAFT on a payslip",
         "einzugsstelle" in _kb({"id": 1, "content": _gut}, "BUNDESKNAPPSCHAFT", "Lohnabrechnung"))
+
+# ==== T-13: duplex backs, paper scans of digital originals, folders of letters, list values, near names
+# 1. A folder of the employer's letters: the salutation of a single letter is the second one in the folder.
+_brief1 = "Sehr geehrter Herr Muster,\nAltersfreizeit ab 22.02.2022 " + " ".join(_zahlen[:8])
+_mappe = ("Sehr geehrte Damen und Herren,\nBetriebsvereinbarung 01.01.2016\n" + _brief1 + "\n"
+          + "Sehr geehrter Herr Muster,\nHöhergruppierung " + " ".join(_zahlen[10:20]))
+r.check("T-13 partial copy: a letter inside a folder of letters (its salutation is not the first one)",
+        (classify.teilkopie(_brief1, 1, [{"id": 8, "title": "Mappe", "content": _mappe, "page_count": 48}]) or "")
+        .startswith("Teil von Dokument 8 (1 von 48")
+        and classify.teilkopie(_brief1, 1, [{"id": 8, "content": _mappe.replace("Herr Muster", "Frau Beispiel"),
+                                             "page_count": 48}]) is None
+        and classify.anreden(_mappe) == {"sehr geehrte damen und herren", "sehr geehrter herr muster"})
+# 2. Customer numbers: a list from the model is split; personnel number and cost centre are refused part by part.
+_kopf = "Firma\n007/200/73702/1\nAbrechnungsmonat Juni 2023\nKostenstelle           1160/Werkstatt ET\nPersonalnummer: 73702/1"
+_kl, _, _kvl = classify.stammdaten_nachtragen({}, {"kundennummer": "007/200/73702/1, 73702/1, 1160/Werkstatt ET"}, "",
+                                              _eg, "Test", text=_kopf)
+r.check("T-13 customer number: a list is split, personnel number and cost centre are refused, the rest stored",
+        _kl.get("kundennummer") == ["007/200/73702/1"] and classify.kennungs_teile("12,50; A-1, A-1") == ["12,50", "A-1"]
+        and classify.personalnummer("1160", _kopf, als_teil=True, etikett=classify.KOSTENSTELLE_LABEL)
+        and not classify.personalnummer("1160", "Kunde 1160", als_teil=True, etikett=classify.KOSTENSTELLE_LABEL),
+        f"{_kl} {_kvl}")
+_kl2, _, _ = classify.stammdaten_nachtragen({"kundennummer": ["007/200/73702/1"]},
+                                            {"kundennummer": "1160/Werkstatt ET, 4711815"}, "", _eg, "Test",
+                                            text=_kopf, anhaengen=True)
+r.check("T-13 customer number: after a refused part the next part of the list is still learned",
+        _kl2.get("kundennummer") == ["007/200/73702/1", "4711815"], str(_kl2))
+# 3. Near names: an alias counts for the similarity; the long form of a short name goes to pass 2.
+_al = lambda c: "Tabel Prozessdienste, TB Personaldienste" if c["id"] == 549 else ""
+r.check("T-13 name similarity: the best of name and aliases",
+        classify.namens_aehnlichkeit(classify.ctoks("abel Prozessdienste GmbH"), {"id": 549, "name": "Tabel GmbH"}, _al) > 0.9
+        and classify.namens_aehnlichkeit(classify.ctoks("abel Prozessdienste GmbH"), {"id": 549, "name": "Tabel GmbH"}) < 0.5)
+_hf13 = {"deutsche": 9, "bank": 4, "post": 2}
+r.check("T-13 name rule: the candidate's whole name at the start of the proposal (two words or more) → pass 2",
+        classify.pass2_plausibel("Deutsche Bank Privat- und Geschäftskunden AG", "Deutsche Bank", "", _hf13)[0]
+        and not classify.pass2_plausibel("Deutsche Bank Privat- und Geschäftskunden AG", "Deutsche Post AG", "", _hf13)[0]
+        and not classify.pass2_plausibel("Bank Austria Filiale", "Bank", "", _hf13)[0])
+_viele = [{"id": 600 + i, "name": f"Abel Nr{i}"} for i in range(25)] + [{"id": 549, "name": "Tabel GmbH"}]
+classify.CORR_META.clear(); classify.CORR_META["549"] = {"aliase": ["Tabel Prozessdienste"]}
+try:
+    _tb = _lauf([{**_ok, "correspondent": "abel Prozessdienste GmbH"}, {"match": "Tabel GmbH"}], dry=False,
+                korrespondenten=_viele)
+finally:
+    classify.CORR_META.clear()
+r.check("T-13 run: the OCR dropped a letter, the alias finds the correspondent among 25 closer names — pass 2 assigns it",
+        len(_tb["chat"]) == 2 and [p.get("correspondent") for p in _tb.get("patch", [])][:1] == [549],
+        f"chat={len(_tb['chat'])} {_tb.get('patch')} {classify.TRACE.get('correspondent')}")
 
 sys.exit(r.done())

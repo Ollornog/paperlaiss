@@ -384,15 +384,19 @@ def eigene_nummer(x, eigene):
 PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Persona\s?[lI1|]|Pers|P(?=\s*\.\s*-))\s*\.?\s*-?\s*(?:nummer|nr|no)\b\.?",
                             re.IGNORECASE)     # "P.-Nr." only with dot and hyphen: "P Nr" may be a postcode
 _PERSONAL_WERT = re.compile(r"\s*[.:#]?\s*([0-9A-Za-z](?:[0-9A-Za-z]|[ ./-](?=\d))*)")
+# A cost centre ("Kostenstelle 1160/Werkstatt") is the employer's account for the job, not a number under which
+# the counterpart files us (T-13: learned as customer number from the payslip header, combined with others).
+KOSTENSTELLE_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Kostenstelle|Kst\s*\.)", re.IGNORECASE)
 
 
-def personalnummer(wert, text="", als_teil=False):
+def personalnummer(wert, text="", als_teil=False, etikett=PERSONAL_LABEL):
     """Is `wert` a personnel number: labelled so in the value itself, or right after such a label in the text?
 
     With `als_teil`, a value that CONTAINS the personnel number as one of its parts counts too: payslips
     print a reference "611 7437/ 40/88901" (form, client, personnel number) in the header and
-    "Pers.-Nr. 88901" further down, and the model took the reference as contract or invoice number (T-11)."""
-    if PERSONAL_LABEL.search(str(wert or "")):
+    "Pers.-Nr. 88901" further down, and the model took the reference as contract or invoice number (T-11).
+    `etikett` is the label pattern (default: personnel number; KOSTENSTELLE_LABEL for a cost centre)."""
+    if etikett.search(str(wert or "")):
         return True
     n = norm_nummer(wert)
     if not n:
@@ -401,13 +405,13 @@ def personalnummer(wert, text="", als_teil=False):
     if als_teil:
         teile |= {t for t in map(norm_nummer, re.split(r"[\s/]+", str(wert))) if len(t) >= 4}
     text = str(text or "")
-    for m in PERSONAL_LABEL.finditer(text):
+    for m in etikett.finditer(text):
         folgt = _PERSONAL_WERT.match(text[m.end():].split("\n", 1)[0])
         if folgt and norm_nummer(folgt.group(1)) in teile:
             return True
         # A header cell (nothing after the label in its cell): the value stands one row below.
         if not re.search(r"\d", _ZELLEN.split(text[m.end():].split("\n", 1)[0])[0]) \
-                and teile & _spalte_darunter(text, m.start()):
+                and teile & _spalte_darunter(text, m.start(), etikett):
             return True
     return False
 
@@ -415,7 +419,7 @@ def personalnummer(wert, text="", als_teil=False):
 _ZELLEN = re.compile(r"\s*\|\s*|\s{2,}|\t")
 
 
-def _spalte_darunter(text, pos):
+def _spalte_darunter(text, pos, etikett=PERSONAL_LABEL):
     """Numbers in the cell below the label at `pos`: a payslip header row ("Personal-Nr. | Geburtsdatum | …")
     with the values in the next non-empty row (T-10: personnel numbers were learned as customer numbers of
     the health insurer that is named on the same form)."""
@@ -424,7 +428,7 @@ def _spalte_darunter(text, pos):
     if ende < 0:
         return set()
     kopf = [z for z in _ZELLEN.split(text[anfang:ende]) if z.strip()]
-    spalte = next((i for i, z in enumerate(kopf) if PERSONAL_LABEL.search(z)), None)
+    spalte = next((i for i, z in enumerate(kopf) if etikett.search(z)), None)
     folgende = (z for z in text[ende + 1:].split("\n")[:3] if z.strip() and not set(z.strip()) <= set("|-: "))
     zeile = next(folgende, None)
     if spalte is None or zeile is None:
@@ -749,6 +753,13 @@ def stammdaten_belegt(corrs, meta, eigener_id, eigene):
     return belegt
 
 
+def kennungs_teile(wert):
+    """The parts of an identifier value that lists several ("A, B; C"), each at most 60 characters, no repeats.
+    A comma inside a number ("12,50") is no separator: only a comma or semicolon followed by a space splits."""
+    teile = (ohne_tabellenrest(x) for x in re.split(r"\s*[,;]\s+|\s*;\s*", str(wert or "")))
+    return list(dict.fromkeys(t[:60] for t in teile if t))
+
+
 def ohne_tabellenrest(wert):
     """Ein Wert ohne die Tabellen- und Aufzählungszeichen, die das OCR an den Rand setzt
     („| Häuser“, „| Fasanenweg 20a …“). Gilt für den Korrespondentennamen und die Stammdaten
@@ -864,13 +875,17 @@ def stammdaten_nachtragen(alt, absender, mail_from, eigene, quelle, anhaengen=Fa
         else:
             setze("telefon", t)
     setze("adresse", wert("adresse")[:300])
-    kn = wert("kundennummer")[:60]
-    if kn and eigene_nummer(kn, eigene):
-        verworfen["kundennummer"] = "eigene Nummer (gilt bei jedem Gegenüber)"
-    elif kn and personalnummer(kn, text):
-        verworfen["kundennummer"] = "Personalnummer — keine Kennnummer des Gegenübers"
-    else:
-        setze("kundennummer", kn)
+    # The model sometimes returns several numbers as one value ("007/200/73702/1, 73702/1, 1160/Werkstatt"); each
+    # part is checked and stored on its own (T-13: four such lists stood at one employer).
+    for kn in kennungs_teile(wert("kundennummer")):
+        if eigene_nummer(kn, eigene):
+            verworfen["kundennummer"] = "eigene Nummer (gilt bei jedem Gegenüber)"
+        elif personalnummer(kn, text):
+            verworfen["kundennummer"] = "Personalnummer — keine Kennnummer des Gegenübers"
+        elif personalnummer(kn, text, als_teil=True, etikett=KOSTENSTELLE_LABEL):
+            verworfen["kundennummer"] = "Kostenstelle — keine Kennnummer des Gegenübers"
+        else:
+            setze("kundennummer", kn)
     # Was das Gegenüber ist („Kfz-Werkstatt in Salzburg“) — nur in einen leeren Kontext. Bis 2026-09-27
     # verlangten die Prompts diesen Satz schon, aber niemand speicherte ihn.
     setze("kontext", "" if is_null(kontext) else str(kontext).strip()[:300])
@@ -2445,6 +2460,11 @@ def anrede(text):
     return norm(m.group(1)) if m else ""
 
 
+def anreden(text):
+    """Every salutation line of a text, normalised — a compilation of letters has one per letter."""
+    return {norm(m.group(1)) for m in ANREDE.finditer(str(text or ""))}
+
+
 def dublette(text, seiten, aehnliche):
     """Ein ähnliches Dokument mit denselben Beträgen/Daten, derselben Anrede und gleicher Seitenzahl → Hinweis.
 
@@ -2460,12 +2480,12 @@ def dublette(text, seiten, aehnliche):
         # Both need numbers: three birth dates and a postcode shared with a form of the same wording are no
         # evidence (T-12: two powers of attorney in opposite directions were reported as copies).
         if (len(zd) >= 5 and anrede(d.get("content")) == a and (d.get("page_count") or 1) == (seiten or 1)
-                and gleiche_kennzahlen(z, zd, ocr=(seiten or 1) >= 2)):
+                and gleiche_kennzahlen(z, zd, ocr=True, einseitig=(seiten or 1) < 2)):
             return f"wie Dokument {d.get('id')} ({str(d.get('title') or '')[:50]})"
     return None
 
 
-def gleiche_kennzahlen(a, b, ocr=False):
+def gleiche_kennzahlen(a, b, ocr=False, einseitig=False):
     """The same document read twice: one set of numbers contains the other, and the larger has at most a few
     more (max(2, an eighth)). A scan and the digital original differ by what the OCR misread or dropped
     (T-11: a wage tax certificate and its scan, 15 of 17 numbers, the rest unread); a form letter to someone
@@ -2473,10 +2493,13 @@ def gleiche_kennzahlen(a, b, ocr=False):
     klein, gross = (a, b) if len(a) <= len(b) else (b, a)
     if klein <= gross and len(gross - klein) <= max(2, len(gross) // 8):
         return True
-    # With `ocr` (documents of two pages or more) also two OCR readings of one paper. A one-page letter may
-    # differ from a copy of the same form in one number of its own (T-11); a multi-page notice is not
-    # issued twice with a single number changed.
-    return ocr and ocr_gleich(a, b)
+    # With `ocr` also two OCR readings of one paper (ocr_gleich). Until T-13 only from two pages on: a one-page
+    # letter may differ from a copy of the same form in one number of its own (T-11). With `einseitig` the
+    # differing numbers must look like misreadings: those of one side all have a near twin on the other
+    # (ocr_zwillinge); a number of its own does not. A one-page payslip scanned from paper has 50 numbers and
+    # misreads one or two (T-13: six such scans of digital originals were missed; over 1,700 documents no
+    # false pair).
+    return ocr and ocr_gleich(a, b) and (not einseitig or ocr_zwillinge(a, b))
 
 
 OCR_GLEICH_AB = 15
@@ -2496,20 +2519,58 @@ def ocr_gleich(a, b):
             and not any(_ist_datum(z) for z in a ^ b))
 
 
+def _abstand(a, b):
+    """Edit distance (insert, delete, replace) of two short strings."""
+    vorher = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        jetzt = [i]
+        for j, y in enumerate(b, 1):
+            jetzt.append(min(vorher[j] + 1, jetzt[j - 1] + 1, vorher[j - 1] + (x != y)))
+        vorher = jetzt
+    return vorher[-1]
+
+
+def _zwilling(z, andere):
+    """Has the number `z` a near twin among `andere`: at most two digits read differently, or (from six digits)
+    a cut-off reading of the same number?"""
+    dz = re.sub(r"\D", "", z)
+    for y in andere:
+        dy = re.sub(r"\D", "", y)
+        if min(len(dz), len(dy)) >= 3 and _abstand(dz, dy) <= 2:
+            return True
+        if min(len(dz), len(dy)) >= 6 and (dz in dy or dy in dz):
+            return True
+    return False
+
+
+def ocr_zwillinge(a, b):
+    """The numbers only one side has look like OCR misreadings: every one of one side has a near twin on the
+    other side, and what the other side has beyond that (what this OCR dropped) stays within the tolerance of
+    `gleiche_kennzahlen` (max(2, an eighth)). Two letters of one form with a number each of their own
+    (1234567, 7654321), or one with three numbers more, are no copy (T-11)."""
+    nur_a, nur_b = a - b, b - a
+    grenze = max(2, max(len(a), len(b)) // 8)
+    for eins, anderes in ((nur_a, nur_b), (nur_b, nur_a)):
+        if all(_zwilling(z, anderes) for z in eins) and sum(not _zwilling(z, eins) for z in anderes) <= grenze:
+            return True
+    return False
+
+
 TEILKOPIE_AB = 8
 
 
 def teilkopie(text, seiten, aehnliche):
     """A document with fewer pages whose numbers (at least TEILKOPIE_AB) all appear in a longer one → hint.
     Partial copies (pages 1–2 of a four-page notice, scanned again on their own) were found by eye only (T-11).
-    A salutation, if this one has one, must be the same."""
+    A salutation, if this one has one, must be one of the longer document's: a compilation of letters has one per
+    letter, not only the first (T-13: an employment contract inside a 48-page folder of the employer's letters)."""
     z = kennzahlen(text)
     if len(z) < TEILKOPIE_AB:
         return None
     a, n = anrede(text), seiten or 1
     for d in aehnliche or ():
         nd = d.get("page_count") or 1
-        if n < nd and z <= kennzahlen(d.get("content")) and (not a or anrede(d.get("content")) == a):
+        if n < nd and z <= kennzahlen(d.get("content")) and (not a or a in anreden(d.get("content"))):
             return f"Teil von Dokument {d.get('id')} ({n} von {nd} Seiten; {str(d.get('title') or '')[:50]})"
     return None
 
@@ -2689,6 +2750,22 @@ def _vorname_passt(a, b):
     return _gleich(a, b) or (len(k) >= 2 and l.startswith(k) and len(l) - len(k) >= 3)
 
 
+def namens_aehnlichkeit(at, c, alias=None):
+    """How close the proposed name (tokens `at`) is to correspondent `c`: word overlap or string similarity,
+    the best over its name and its aliases. Until T-13 only the name counted: the OCR dropped the first letter of
+    "Tabel Prozessdienste GmbH" (an alias of "Tabel GmbH"), the correspondent was not among the 20 closest names
+    and a new one was created."""
+    ak = " ".join(at)
+    best = 0.0
+    for nm in [c.get("name")] + [a for a in str((alias(c) if alias else "") or "").split(",") if a.strip()]:
+        bt = ctoks(nm)
+        if not at or not bt:
+            continue
+        ov = len(set(at) & set(bt)) / min(len(set(at)), len(set(bt)))
+        best = max(best, ov, difflib.SequenceMatcher(None, ak, " ".join(bt)).ratio())
+    return best
+
+
 def pass2_plausibel(vorschlag, name, alias="", haeufigkeit=None):
     """Ist der Vorschlag eine Namensvariante dieses bestehenden Korrespondenten? (ja/nein, Grund)
 
@@ -2708,6 +2785,12 @@ def pass2_plausibel(vorschlag, name, alias="", haeufigkeit=None):
         return True, "nichts zu vergleichen"
     if all(any(_gleich(x, y) for y in b) for x in a):
         return True, "Vorschlag steckt im Namen"
+    # The proposal starts with the whole name of the candidate (two words or more): the long form of a short
+    # name, "Deutsche Bank Privat- und Geschäftskunden AG" for "Deutsche Bank" (T-13: rule 3 refused it, both
+    # words are common, and a second Deutsche Bank was created). Pass 2 still decides.
+    nb = ctoks(name)
+    if len(nb) >= 2 and len(a) > len(nb) and all(_gleich(x, y) for x, y in zip(a, nb)):
+        return True, "Name des Kandidaten steht am Anfang des Vorschlags"
     if _personenname(vorschlag) and _personenname(name):
         pa, pb = ctoks(vorschlag), ctoks(name)
         if not _gleich(pa[-1], pb[-1]):
@@ -3340,13 +3423,7 @@ def main():
         corr_name = regel_k["name"]
     elif corr_name:
         at = ctoks(corr_name); ak = " ".join(at)
-        def cscore(c):
-            bt = ctoks(c["name"])
-            if not at or not bt:
-                return 0.0
-            ov = len(set(at) & set(bt)) / min(len(set(at)), len(set(bt)))
-            return max(ov, difflib.SequenceMatcher(None, ak, " ".join(bt)).ratio())
-        scored = sorted(((cscore(c), c) for c in corrs), key=lambda x: -x[0])
+        scored = sorted(((namens_aehnlichkeit(at, c, calias), c) for c in corrs), key=lambda x: -x[0])
         exact = next((c for s, c in scored if ak and " ".join(ctoks(c["name"])) == ak), None)
         # The name the model gave is a known ALIAS (T-10: a staffing agency's short name — the search had
         # found the correspondent by exactly that alias, the run still created a new one).

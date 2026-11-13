@@ -6,6 +6,39 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-13
+
+Lehren aus einer vierten Durchsicht (Backlog T-13): gelochte Rückseiten im Duplex-Scan, Papierscans digitaler
+Originale, Einzelbriefe aus einer Sammelmappe, Kundennummern als Liste, Namensvarianten bei der Neuanlage.
+
+### Behoben
+
+- **Gelochte leere Rückseiten** (`leerseiten.py`). Die Lochung (zwei runde, dunkle Flecken, gut 5 mm, rund 11 mm vom
+  Rand) galt als Inhalt; keine der 41 leeren Rückseiten eines Stapels fiel weg, und Original und Scan hatten danach
+  verschiedene Seitenzahlen. Jetzt zählen bis zu vier runde oder ovale, gefüllte Flecken von 4–9,5 mm mit der Mitte
+  höchstens 25 mm vom Blattrand nicht als Inhalt. Gemessen an den 298 Seiten des Stapels und der Gegenstücke: 40 von 41
+  leeren Seiten fallen (die letzte trägt einen Randstrichcode), keine der 257 Seiten mit Inhalt.
+- **Einseitiger Papierscan eines digitalen Originals.** Ein Lohnzettel hat rund 55 Kennzahlen, das OCR verliest eine
+  oder zwei; Teilmenge und T-12-Regel (erst ab zwei Seiten) griffen nicht. Jetzt gilt die OCR-Regel auch für eine
+  Seite, wenn die abweichenden Zahlen nach Lesefehlern aussehen: Jede Zahl der einen Seite hat auf der anderen einen
+  nahen Zwilling (höchstens zwei Ziffern anders, ab sechs Ziffern auch abgeschnitten), der Rest der anderen bleibt in
+  der Toleranz. Ein Serienbrief mit eigener Nummer (T-11) bleibt keine Kopie.
+- **Teilkopie aus einer Sammelmappe.** Verglichen wurde nur die erste Anrede des längeren Dokuments; jetzt jede
+  (`anreden`).
+- **Kundennummer als Liste.** „007/200/73702/1, 73702/1, 1160/Werkstatt ET AVG“ wurde als ein Wert gelernt. Jetzt wird
+  geteilt (`kennungs_teile`), jeder Teil einzeln geprüft; eine Kostenstelle („Kostenstelle“, „Kst.“) wird nie gelernt.
+- **Namensvarianten bei der Neuanlage.** Die Kandidaten für Pass 2 wurden nur nach dem Namen gewählt, nicht nach den
+  Aliasen (`namens_aehnlichkeit`): „abel Prozessdienste GmbH“ (OCR ohne T, Alias „Tabel Prozessdienste“) wurde neu
+  angelegt. Und ein Vorschlag, der mit dem ganzen Namen eines Kandidaten beginnt („Deutsche Bank Privat- und
+  Geschäftskunden AG“ → „Deutsche Bank“, ab zwei Wörtern), besteht jetzt die Namensregel; zuordnen tut weiter Pass 2.
+
+- **Messung** (Kontrolllauf trocken auf der Installation des Anlasses, 78 Zweitscans und Teilkopien im Stapel):
+  0.7.0 erkannte 47, 0.8.0 erkennt 54 (sechs einseitige Papierscans, ein doppelter Kontoauszug, ein Arbeitsvertrag in
+  der Sammelmappe). Mit den Rückseiten entfernt, wie es der Import künftig tut, kommen die 15 mehrseitigen dazu (69).
+  Offen: ein Scan mit einer in drei Ziffern verlesenen Zahl, zwei Lohnsteuerbescheinigungen mit schlechtem OCR, eine
+  Einzelseite eines Kontoauszugs und fünf Briefe mit weniger als acht Kennzahlen. Über alle rund 1.700 Dokumente:
+  neu nur diese Paare, kein Fehlalarm.
+
 ## [0.7.0] - 2026-11-13
 
 Lehren aus einer dritten Durchsicht eines Stapelscans (Backlog T-12): Zweitscans, Abrechnungsmonate, Datum auf

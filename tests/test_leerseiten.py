@@ -57,6 +57,45 @@ _faelle = [
 ]
 _falsch = [(n, e) for n, e, soll in _faelle if e[0] != soll]
 r.check("Entscheidung: weiß und Staub fallen, jedes Zeichen, Haar oder Strich bleibt", not _falsch, str(_falsch))
+# ---- T-13: punched holes. The back of a punched sheet from a duplex scan shows two dark discs of about 5.5 mm,
+# 11 mm from the edge, 80 mm apart (DIN); measured: about 800 dark points each, the page stayed ("more than 400").
+_MM = 150 / 25.4
+
+
+def scheibe(cx_mm, cy_mm, d_mm=5.5, wert=0, ring=False):
+    """A filled disc (or a ring of one point) as rows of runs, for `raster`."""
+    r_, cx, cy, aus = d_mm * _MM / 2, cx_mm * _MM, cy_mm * _MM, []
+    for yy in range(int(cy - r_), int(cy + r_) + 1):
+        dy = yy - cy
+        if abs(dy) > r_:
+            continue
+        hb = (r_ * r_ - dy * dy) ** 0.5
+        x0, x1 = int(round(cx - hb)), int(round(cx + hb))
+        if ring:            # a line of about 0.5 mm: points whose distance from the centre is r-3 … r
+            aus += [(xx, yy, 1, 1, wert) for xx in range(x0, x1 + 1) if ((xx - cx) ** 2 + dy * dy) ** 0.5 >= r_ - 3]
+        else:
+            aus.append((x0, yy, x1 - x0 + 1, 1, wert))
+    return aus
+
+
+_rechts = scheibe(199, 108) + scheibe(199, 188)
+_lochfaelle = [
+    ("zwei Lochungen am rechten Rand (Rückseite)", leer(_rechts), True),
+    ("zwei Lochungen am linken Rand, dazu Staub", leer(scheibe(11, 108) + scheibe(11, 188) + _staub), True),
+    ("vier Lochungen (Vierfachlocher)", leer(scheibe(11, 40) + scheibe(11, 120) + scheibe(11, 200) + scheibe(11, 280)), True),
+    ("Lochungen plus ein Zeichen", leer(_rechts + [(620, 1600, 5, 10, 0)]), False),
+    ("runder Fleck in der Seitenmitte", leer(scheibe(105, 148)), False),
+    ("fünf runde Flecken am Rand", leer(sum((scheibe(11, 30 + 50 * i) for i in range(5)), [])), False),
+    ("Kreis (Ring) am Rand", leer(scheibe(199, 108, ring=True) + scheibe(199, 188, ring=True)), False),
+    ("Balken 5 × 12 mm am Rand", leer([(1170, 600, 30, 71, 0)]), False),
+    ("großer Kreis (12 mm) am Rand", leer(scheibe(199, 108, d_mm=12)), False),
+    ("vom Einzug verzogene Lochungen (5,8 × 8,6 mm)", leer([(1160, 600, 34, 51, 0), (1160, 1070, 34, 51, 0)]), True),
+    ("schmaler Strich 4 × 9 mm am Rand", leer([(1160, 600, 24, 53, 0)]), False),
+]
+_lochfalsch = [(n, e) for n, e, soll in _lochfaelle if e[0] != soll]
+r.check("T-13 Lochung: gelochte leere Rückseiten fallen; Zeichen, Flecken in der Mitte, Ringe, Balken, fünf Flecken nicht",
+        not _lochfalsch, str(_lochfalsch))
+r.check("T-13 Lochung: der Grund nennt sie", "2 Lochung" in leer(_rechts)[1], leer(_rechts)[1])
 r.check("Entscheidung: nennt den Grund", "mm" in leer([(620, 1600, 5, 10, 0)])[1] and "Staub" in leer(_staub)[1],
         f"{leer([(620, 1600, 5, 10, 0)])} {leer(_staub)}")
 r.check("PGM: Kommentarzeile von Ghostscript wird übersprungen",
