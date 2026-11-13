@@ -11,6 +11,10 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 Lehren aus einer vierten Durchsicht (Backlog T-13): gelochte Rückseiten im Duplex-Scan, Papierscans digitaler
 Originale, Einzelbriefe aus einer Sammelmappe, Kundennummern als Liste, Namensvarianten bei der Neuanlage.
 
+### Sicherheit
+
+- Panel: `opentelemetry-api` 1.45.1 → 1.45.2 (CVE-2026-126360, von `pip-audit` im PR gefunden; über fastapi).
+
 ### Behoben
 
 - **Gelochte leere Rückseiten** (`leerseiten.py`). Die Lochung (zwei runde, dunkle Flecken, gut 5 mm, rund 11 mm vom
