@@ -88,7 +88,11 @@ CFG = {
     # with "tag" set, the tags in "ohne" are not given, unless one of the "ausser_text" patterns (regular
     # expressions, case-insensitive) is in the text (T-11: life insurances also got "Versicherungen").
     "tag_ausschluss": [],
-    "einzugsstellen_muster": r"\b(?:AOK|BKK|IKK|DAK|BARMER|HEK|hkk|KKH|Knappschaft|\w*krankenkasse|Ersatzkasse|"
+    # Names of people whose documents do not belong here ("Erika Muster"): a document that names one of them
+    # and none of our own persons is flagged for checking (T-12: a stack scan of one person held the tax
+    # notices and payslips of a former partner). Per account: konten[<username>]["fremde_namen"].
+    "fremde_namen": [],
+    "einzugsstellen_muster": r"\b(?:AOK|BKK|IKK|DAK|BARMER|HEK|hkk|KKH|\w*Knappschaft|\w*krankenkasse|Ersatzkasse|"
                              r"Gesundheitskasse|\w*GKK|ÖGK|Einzugsstelle)\b",   # case-insensitive
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
     "mail_context_field": "",          # optional: Herkunft-Kontext (Mail-/Chat-Anschreiben) fürs Prompt
@@ -377,7 +381,7 @@ def eigene_nummer(x, eigene):
 
 # A personnel number is how an employer files US, not a number of the employer: two employers' numbers
 # were learned as "customer numbers" and pulled later payslips to the wrong correspondent (T-9).
-PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Personal|Pers|P(?=\s*\.\s*-))\s*\.?\s*-?\s*(?:nummer|nr|no)\b\.?",
+PERSONAL_LABEL = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:Persona\s?[lI1|]|Pers|P(?=\s*\.\s*-))\s*\.?\s*-?\s*(?:nummer|nr|no)\b\.?",
                             re.IGNORECASE)     # "P.-Nr." only with dot and hyphen: "P Nr" may be a postcode
 _PERSONAL_WERT = re.compile(r"\s*[.:#]?\s*([0-9A-Za-z](?:[0-9A-Za-z]|[ ./-](?=\d))*)")
 
@@ -470,7 +474,9 @@ def konto_cfg(cfg, owner_id, benutzer=None):
             + _roh_liste(eigen.get(feld)) + _roh_liste(alle.get(feld))))
     if not e["namen"]:
         return cfg
-    return {**cfg, "eigene_kennungen": e, "_konto": u["username"]}
+    fremde = _roh_liste(eigen.get("fremde_namen")) + _roh_liste(alle.get("fremde_namen"))
+    return {**cfg, "eigene_kennungen": e, "_konto": u["username"],
+            **({"fremde_namen": list(dict.fromkeys(fremde))} if fremde else {})}
 
 def _domain_passt(dom, domains):
     return any(dom == d or dom.endswith("." + d) for d in domains)
@@ -625,6 +631,23 @@ ANHAENGBAR = {"iban", "email", "domains", "telefon", "kundennummer"}
 MAX_WERTE = 10
 
 
+def strassen(adresse):
+    """Street and house number of an address, spelling folded ("Musterstr. 5" = "MUSTERSTRASSE 5" =
+    "Musterstraße 5"); a postcode-and-town part has no street and gives nothing.
+
+    The own address was learned as the address of eight correspondents (it is the addressee block on every
+    letter) because "Musterstr. 5" and "Musterstraße 5" were different values (T-12)."""
+    erg = set()
+    for teil in re.split(r"[,;\n]", str(adresse or "")):
+        t = re.sub(r"['’`]", "", teil.strip().lower().replace("ß", "ss"))
+        m = re.search(r"([a-zäöü][a-zäöü.\- ]{2,}?)\s*(\d+\s*[a-z]?)\s*$", t)
+        if not m:
+            continue
+        name = re.sub(r"(strasse|str\.?)$", "str", re.sub(r"[\s\-]+", "", m.group(1)).rstrip("."))
+        erg.add(name.replace(".", "") + re.sub(r"\s+", "", m.group(2)))
+    return erg
+
+
 def gleicher_wert(feld, a, b):
     """Derselbe Wert in einem Stammdatenfeld, unabhängig von der Schreibweise."""
     if feld == "iban":
@@ -635,6 +658,8 @@ def gleicher_wert(feld, a, b):
         return bool(norm_mail(a)) and norm_mail(a) == norm_mail(b)
     if feld == "telefon":
         return telefon_gleich(a, b)
+    if feld == "adresse":
+        return bool(strassen(a) & strassen(b))
     k = lambda v: re.sub(r"^(www\.|@)|[\s.\-/]", "", str(v or "")).upper()
     return bool(k(a)) and k(a) == k(b)
 
@@ -1491,12 +1516,32 @@ def datum_belegt(iso, text):
 
 
 
+def monat_belegt(iso, text):
+    """Is 'YYYY-MM-DD' the first or last day of a month that the text names as month and year only?
+
+    Payslips carry no date of issue, only the billing month ("Monat/Jahr 8 / 99", "12/1998", "März 2005").
+    The model then proposes the last (or first) day of that month, and `datum_belegt` rejected it: the date
+    stayed the day of the import (T-12: 15 payslips of one employer)."""
+    try:
+        tag = datetime.date.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return False
+    letzter = (tag.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
+    if tag.day not in (1, letzter.day):
+        return False
+    t = str(text or "")
+    j, jj, m = str(tag.year), str(tag.year)[2:], tag.month
+    zahl = rf"(?<![\d.,/])0?{m}\s*[./]\s*(?:{j}|{jj})(?![\d.,])"
+    name = rf"\b{_MONATE[m - 1]}\s+{j}\b" + (rf"|\bJänner\s+{j}\b" if m == 1 else "")
+    return bool(re.search(zahl, t) or re.search(name, t, re.IGNORECASE))
+
+
 def wirksames_datum(prop, content, doc):
     """Das Datum, das tatsächlich geschrieben würde: KI-Vorschlag, nur mit Beleg im Text und nicht
     der Importtag einer Office-Datei. Eine Funktion für Lauf und Trockenlauf, damit der Trockenlauf
     (und die Testsammlung) dasselbe zeigt wie ein echter Lauf."""
     datum = dokument_datum(prop)
-    if datum and not datum_belegt(datum, content):
+    if datum and not datum_belegt(datum, content) and not monat_belegt(datum, content):
         TRACE["datum_ohne_beleg"] = datum
         return None
     if datum and office_importtag(datum, doc):
@@ -1526,6 +1571,43 @@ def sel_label(f, val):
     return val
 
 
+_WAEHRUNG_ZEICHEN = (("€", "EUR"), ("$", "USD"), ("£", "GBP"), ("DM", "DEM"), ("ÖS", "ATS"), ("öS", "ATS"),
+                     ("SFR", "CHF"), ("Fr.", "CHF"))
+
+
+def betrag_wert(v):
+    """A monetary field value for Paperless ("EUR1234.56", "DEM-12.30"), or None.
+
+    The currency stays what the document says: an ISO code in front or behind, or a sign/abbreviation (DM →
+    DEM). Until T-12 every amount became EUR (payslips in DM were stored as euros), and "2.004,98" was cut
+    to "2.004" (the German thousands point read as decimal point)."""
+    s = str(v or "").strip()
+    if not s:
+        return None
+    m = re.search(r"(?<![A-Za-z])([A-Z]{3})(?![A-Za-z])", s)
+    waehrung = m.group(1) if m else next((iso for zeichen, iso in _WAEHRUNG_ZEICHEN if zeichen in s), "EUR")
+    m = re.search(r"-?\s*\d[\d.,' ]*", s)
+    if not m:
+        return None
+    roh = re.sub(r"[\s']", "", m.group(0)).rstrip(".,")
+    negativ, roh = roh.startswith("-"), roh.lstrip("-")
+    if "," in roh and "." in roh:
+        dezimal = "," if roh.rfind(",") > roh.rfind(".") else "."
+    elif "," in roh:
+        dezimal = "," if len(roh) - roh.rfind(",") - 1 in (1, 2) else ""
+    elif "." in roh:
+        dezimal = "" if roh.count(".") > 1 or len(roh) - roh.rfind(".") - 1 == 3 else "."
+    else:
+        dezimal = ""
+    tausender = {",", "."} - {dezimal}
+    zahl = "".join(c for c in roh if c not in tausender).replace(",", ".")
+    try:
+        wert = float(zahl)
+    except ValueError:
+        return None
+    return f"{waehrung}{'-' if negativ and wert else ''}{wert:.2f}"
+
+
 def coerce_field(f, v):
     t = f["data_type"]
     try:
@@ -1534,7 +1616,7 @@ def coerce_field(f, v):
         if t == "float":
             return float(str(v).replace(",", ".").strip())
         if t == "monetary":
-            m = re.search(r"\d+[.,]?\d*", str(v)); return "EUR" + m.group(0).replace(",", ".") if m else None
+            return betrag_wert(v)
         if t == "boolean":
             return v if isinstance(v, bool) else str(v).strip().lower() in ("true", "ja", "1", "yes", "wahr")
         if t == "date":
@@ -2068,7 +2150,7 @@ KAPUTT_BEFUNDE = ("leer", "teilstueck", "ocr_erfunden")
 BEFUND_NAMEN = {"leer": "leer", "teilstueck": "Seiten fehlen", "ocr_erfunden": "OCR-Text erfunden",
                 "dublette": "Dublette", "teilkopie": "Teilkopie", "sammeldokument": "Sammeldokument", "datum": "Datum",
                 "eigene_person": "eigene Person als Korrespondent", "einzugsstelle": "Einzugsstelle statt Arbeitgeber",
-                "abbruch": "Lauf abgebrochen"}
+                "abbruch": "Lauf abgebrochen", "fremde_person": "fremde Person"}
 NOTIZ_PRAEFIX = "paperlaiss: "
 
 
@@ -2189,6 +2271,24 @@ def eigene_person_befund(korrespondent, typ, eigene_namen, eigene_typen):
     return None
 
 
+def _woerter(text):
+    return set(re.findall(r"[a-zäöüß]+", str(text or "").lower()))
+
+
+def fremde_person_befund(text, eigene_namen, fremde_namen):
+    """The text names one of `fremde_namen` and none of our own persons → hint, else None (T-12).
+
+    A name counts when all its words are in the text, in any order ("Schulz, Erika", "FRAU ERIKA SCHULZ").
+    A document of both (a joint tax notice) names an own person too and is no finding."""
+    w = _woerter(text)
+    if not w or any(_woerter(n) and _woerter(n) <= w for n in eigene_namen or ()):
+        return None
+    for n in fremde_namen or ():
+        if _woerter(n) and _woerter(n) <= w:
+            return f"nennt nur „{n}“, keine eigene Person — gehört das Dokument hierher?"
+    return None
+
+
 def datum_befund(vorschlag, wirksam, doc):
     """No usable document date, so the date stays the import day → hint, else None (T-9: it stayed silently).
 
@@ -2293,9 +2393,21 @@ def korrespondent_ergebnis(corr_info, bisher=None):
 _KENNZAHL = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d{1,2}\.\d{1,2}\.(?:19|20)?\d{2}\b|\b\d{5,}\b")
 
 
+# A billing month on its own ("Abrechnungsmonat 03.2005/2", "Bezüge 04/2000"), not the tail of a full date. Two
+# correction slips of one day differ only in it (T-12: January and March 2005 were reported as copies).
+_MONAT_JAHR = re.compile(r"(?<![\d.,/])(0?[1-9]|1[0-2])\s?[./]\s?((?:19|20)\d{2})(?![\d.,])")
+
+
 def kennzahlen(text):
-    """Beträge, Daten und lange Ziffernfolgen — was zwei Fassungen desselben Dokuments gemeinsam haben."""
-    return set(_KENNZAHL.findall(str(text or "")))
+    """Beträge, Daten, lange Ziffernfolgen und Abrechnungsmonate („MM/JJJJ“) — was zwei Fassungen desselben
+    Dokuments gemeinsam haben."""
+    t = str(text or "")
+    return set(_KENNZAHL.findall(t)) | {f"{int(m):02d}/{j}" for m, j in _MONAT_JAHR.findall(t)}
+
+
+def _ist_datum(z):
+    """A date or billing month among the numbers of `kennzahlen`."""
+    return bool(re.fullmatch(r"\d{1,2}\.\d{1,2}\.(?:19|20)?\d{2}|\d{2}/(?:19|20)\d{2}", z))
 
 
 # "Seite 2 von 3"; the OCR reads "von" also as "van"/"v0n" (T-11).
@@ -2344,19 +2456,44 @@ def dublette(text, seiten, aehnliche):
         return None
     a = anrede(text)
     for d in aehnliche or ():
-        if (anrede(d.get("content")) == a and (d.get("page_count") or 1) == (seiten or 1)
-                and gleiche_kennzahlen(z, kennzahlen(d.get("content")))):
+        zd = kennzahlen(d.get("content"))
+        # Both need numbers: three birth dates and a postcode shared with a form of the same wording are no
+        # evidence (T-12: two powers of attorney in opposite directions were reported as copies).
+        if (len(zd) >= 5 and anrede(d.get("content")) == a and (d.get("page_count") or 1) == (seiten or 1)
+                and gleiche_kennzahlen(z, zd, ocr=(seiten or 1) >= 2)):
             return f"wie Dokument {d.get('id')} ({str(d.get('title') or '')[:50]})"
     return None
 
 
-def gleiche_kennzahlen(a, b):
+def gleiche_kennzahlen(a, b, ocr=False):
     """The same document read twice: one set of numbers contains the other, and the larger has at most a few
     more (max(2, an eighth)). A scan and the digital original differ by what the OCR misread or dropped
     (T-11: a wage tax certificate and its scan, 15 of 17 numbers, the rest unread); a form letter to someone
     else has a number of its own and is no subset."""
     klein, gross = (a, b) if len(a) <= len(b) else (b, a)
-    return klein <= gross and len(gross - klein) <= max(2, len(gross) // 8)
+    if klein <= gross and len(gross - klein) <= max(2, len(gross) // 8):
+        return True
+    # With `ocr` (documents of two pages or more) also two OCR readings of one paper. A one-page letter may
+    # differ from a copy of the same form in one number of its own (T-11); a multi-page notice is not
+    # issued twice with a single number changed.
+    return ocr and ocr_gleich(a, b)
+
+
+OCR_GLEICH_AB = 15
+
+
+def ocr_gleich(a, b):
+    """The same paper scanned twice: each OCR misreads a few numbers of its own, so neither set contains the
+    other (T-12: eleven tax notices scanned a second time, 88–98 % of the numbers shared). Both have at least
+    OCR_GLEICH_AB numbers, share 88 % of the smaller set and 75 % of the union, and none of the differing
+    numbers is a date or billing month: two editions of a form (a notice and its correction, two monthly
+    statements) differ exactly there. Measured on 1,400 documents of one installation: of the multi-page
+    pairs only the rescans."""
+    if min(len(a), len(b)) < OCR_GLEICH_AB:
+        return False
+    gemeinsam = len(a & b)
+    return (gemeinsam >= 0.88 * min(len(a), len(b)) and gemeinsam >= 0.75 * len(a | b)
+            and not any(_ist_datum(z) for z in a ^ b))
 
 
 TEILKOPIE_AB = 8
@@ -2379,7 +2516,8 @@ def teilkopie(text, seiten, aehnliche):
 
 def _suchzahlen(text, anzahl=2):
     """The most telling numbers of a text for a content search: amounts first, longest first."""
-    return sorted(kennzahlen(text), key=lambda z: ("," in z, len(z), z), reverse=True)[:anzahl]
+    return sorted((z for z in kennzahlen(text) if "/" not in z), key=lambda z: ("," in z, len(z), z),
+                  reverse=True)[:anzahl]
 
 
 def aehnliche_holen(did, text, holen=None):
@@ -3088,7 +3226,7 @@ def main():
             th = "Auswahl: " + " | ".join(o["label"] for o in (f.get("extra_data") or {}).get("select_options", []))
         else:
             th = {"string": "Text", "longtext": "Text", "integer": "Ganzzahl", "float": "Zahl",
-                  "monetary": "Betrag z.B. EUR12.34", "boolean": "true/false", "date": "YYYY-MM-DD", "url": "URL"}.get(t, t)
+                  "monetary": "Betrag mit der Währung des Dokuments als ISO-Code, z.B. EUR12.34 oder DEM1620.20 (DM)", "boolean": "true/false", "date": "YYYY-MM-DD", "url": "URL"}.get(t, t)
         cur = cur_vals.get(f["id"]); cur = sel_label(f, cur) if t == "select" else cur
         zusatz = f" {UNBELEGT_HINWEIS}" if f["id"] in unbelegt else ""
         return f"- {f['name']} ({th}), aktuell: {cur if cur not in (None, '') else '—'}{zusatz}"
@@ -3350,6 +3488,10 @@ def main():
                               CFG.get("eigene_typen") or [])
     if ep:
         pruefen["eigene_person"] = ep
+    fp = fremde_person_befund(content, (CFG_LAUF.get("eigene_kennungen") or {}).get("namen"),
+                              CFG_LAUF.get("fremde_namen"))
+    if fp:
+        pruefen["fremde_person"] = fp
     if _verworfen and _verworfen[0] not in pruefen:
         pruefen[_verworfen[0]] = _verworfen[1]
     db = datum_befund(dokument_datum(prop), wirksames_datum(prop, content, doc), doc)
@@ -3494,6 +3636,10 @@ def kontroll_befunde(doc, korrespondent, typ, aehnliche, cfg_lauf, cfg):
         tk = None if d else teilkopie(content, doc.get("page_count"), andere)
         if tk:
             b["teilkopie"] = tk
+    fp = fremde_person_befund(content, (cfg_lauf.get("eigene_kennungen") or {}).get("namen"),
+                              cfg_lauf.get("fremde_namen"))
+    if fp:
+        b["fremde_person"] = fp
     n = nicht_aussteller_grund(korrespondent, typ, cfg_lauf, cfg)
     if n:
         b[n[0]] = f"„{korrespondent}“ — {n[1]}"

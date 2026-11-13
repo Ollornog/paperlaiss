@@ -7,7 +7,10 @@ That makes one common household rule impossible to express with workflows alone:
 * a document of the *hub* account (the one who files most papers) that carries the tag of a
   person is handed over: the person becomes owner, the hub keeps view and change rights;
 * a document of anyone else that carries the tag of another person is *shared*: the owner stays,
-  the tagged person gets view and change rights.
+  the tagged person gets view and change rights;
+* a document still owned by an *upload account* (a scanner that uploads as itself and sets the owner
+  afterwards) is handed over like a hub document: the uploader may never get to set the owner (it lost
+  the network after the upload, and ten scans stayed with the upload account).
 
 A Paperless workflow with a webhook action sends the document id to the panel (`POST /route`);
 the panel reads the document and applies `plan()`. The webhook carries no decision, only the id:
@@ -44,6 +47,21 @@ def _groups(perms: dict | None, kind: str) -> list[int]:
     return [int(g) for g in ((perms or {}).get(kind) or {}).get("groups") or []]
 
 
+def parse_users(text: str) -> list[str]:
+    """`"scanner, mailbot"` → `["scanner", "mailbot"]` (usernames as Paperless stores them; empty entries dropped)."""
+    return [u.strip() for u in (text or "").split(",") if u.strip()]
+
+
+def wanted_users(persons: dict[str, str], hub: str, uploaders: list[str]) -> list[str]:
+    """Usernames whose ids the webhook has to look up: the persons, the hub and the upload accounts."""
+    return sorted(set(persons.values()) | ({hub} if hub else set()) | set(uploaders))
+
+
+def uploader_ids(uploaders: list[str], user_ids: dict[str, int]) -> frozenset[int]:
+    """Ids of the upload accounts that exist; an unknown name is skipped."""
+    return frozenset(user_ids[u] for u in uploaders if u in user_ids)
+
+
 def targets(tag_names: list[str], persons: dict[str, str], user_ids: dict[str, int]) -> list[int]:
     """User ids of the persons whose tags the document carries. Unknown usernames are skipped."""
     found = set()
@@ -54,7 +72,8 @@ def targets(tag_names: list[str], persons: dict[str, str], user_ids: dict[str, i
     return sorted(found)
 
 
-def plan(owner: int | None, tagged: list[int], perms: dict | None, hub: int | None) -> tuple[dict | None, str]:
+def plan(owner: int | None, tagged: list[int], perms: dict | None, hub: int | None,
+         uploaders: frozenset[int] | set[int] = frozenset()) -> tuple[dict | None, str]:
     """Decide the change for one document.
 
     owner   current owner id (None = no owner)
@@ -62,6 +81,7 @@ def plan(owner: int | None, tagged: list[int], perms: dict | None, hub: int | No
     perms   Paperless `permissions` of the document (`full_perms=true`):
             {"view": {"users": [...], "groups": [...]}, "change": {...}}
     hub     user id of the hub account, or None (then documents are only ever shared)
+    uploaders  user ids of upload accounts; their documents are handed over like the hub's
 
     Returns (patch, reason). `patch` is the body for `PATCH /api/documents/<id>/` or None when
     nothing has to change.
@@ -74,7 +94,12 @@ def plan(owner: int | None, tagged: list[int], perms: dict | None, hub: int | No
         return None, "document has no owner"
     others = [u for u in tagged if u != hub]
     new_owner = owner
-    if hub is not None and owner == hub and len(others) == 1:
+    if owner in uploaders and len(tagged) == 1:
+        new_owner = tagged[0]
+        reason = "handed over from the upload account"
+    elif owner in uploaders:
+        reason = "several persons tagged, shared instead of handed over"
+    elif hub is not None and owner == hub and len(others) == 1:
         new_owner = others[0]
         reason = "handed over"
     elif hub is not None and owner == hub and len(others) > 1:

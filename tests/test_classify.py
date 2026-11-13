@@ -2317,4 +2317,87 @@ r.check("T-11 control run: the multi-page header document and the overlong page 
         _kb({"id": 1, "content": _kopf, "page_count": 13}) == {}
         and _kb({"id": 1, "content": _gut + " Seite 1 von 2 " + _gut + " Seite 2 van 2", "page_count": 1}) == {})
 
+# ==== T-12: rescans, billing months, payslip dates, currencies, own address, foreign persons
+# 1. The same paper scanned twice: each OCR misreads other numbers, neither set contains the other.
+_zahlen = [f"{1000 + 37 * i:,}".replace(",", ".") + f",{i % 100:02d}" for i in range(28)] + ["12 345 67890", "18.07.2005"]
+_scan1 = "Sehr geehrter Herr Muster,\n" + " ".join(_zahlen[:26] + ["9.999,01", "8.888,02"] + _zahlen[28:])
+_scan2 = "Sehr geehrter Herr Muster,\n" + " ".join(_zahlen[2:] + ["7.777,03"])
+r.check("T-12 rescan: two OCR readings of a two-page notice (88 % shared, no date differs) are a copy",
+        not classify.kennzahlen(_scan1) <= classify.kennzahlen(_scan2) and not classify.kennzahlen(_scan2) <= classify.kennzahlen(_scan1)
+        and classify.dublette(_scan1, 2, [{"id": 9, "title": "Bescheid", "content": _scan2, "page_count": 2}])
+        == "wie Dokument 9 (Bescheid)")
+_k1, _k2 = " ".join(_zahlen[:12] + ["9.999,01"]), " ".join(_zahlen[:12] + ["8.888,02"])
+r.check("T-12 rescan: below 15 numbers two pages stay strict too",
+        classify.dublette(_k1, 2, [{"id": 9, "content": _k2, "page_count": 2}]) is None
+        and classify.ocr_gleich(classify.kennzahlen(_scan1), classify.kennzahlen(_scan2)))
+r.check("T-12 rescan: one page stays strict (a form letter may carry one number of its own, T-11)",
+        classify.dublette(_scan1, 1, [{"id": 9, "content": _scan2, "page_count": 1}]) is None)
+r.check("T-12 rescan: a differing date means another edition; fewer than 15 numbers stay strict",
+        classify.dublette(_scan1, 2, [{"id": 9, "content": _scan1.replace("9.999,01", "9.990,01"), "page_count": 2}]) is not None
+        and classify.dublette(_scan1, 2, [{"id": 9, "content": _scan1.replace("9.999,01", "9.990,01").replace("18.07.2005", "19.07.2005"),
+                                           "page_count": 2}]) is None
+        and classify.dublette(" ".join(_zahlen[:12] + ["1.111,11"]), 1,
+                              [{"id": 9, "content": " ".join(_zahlen[:12] + ["2.222,22"]), "page_count": 1}]) is None)
+# 2. Two correction slips of one day differ only in the billing month.
+_korr = "Verdienstabrechnung Erstellungsdatum 05.05.2005 Abrechnungsmonat {} Personal-Nr. 04711 59,83 5,38 65,21 0,00 1234567 10010010 01.09.2004"
+r.check("T-12 billing month: part of the numbers, not the tail of a full date; two months are no copy",
+        "01/2005" in classify.kennzahlen(_korr.format("01.2005/ 2")) and "05/2005" not in classify.kennzahlen(_korr.format("01.2005/ 2"))
+        and classify.dublette(_korr.format("01.2005/ 2"), 1, [{"id": 9, "content": _korr.format("03.2005/ 2"), "page_count": 1}]) is None
+        and classify.dublette(_korr.format("01.2005/ 2"), 1, [{"id": 9, "content": _korr.format("01.2005/ 2"), "page_count": 1}]) is not None)
+# 3. The other document needs numbers too: three shared dates of a form with the same wording are no evidence.
+r.check("T-12 copy: the candidate needs at least five numbers as well",
+        classify.dublette("Vollmacht 01.04.1990 15.06.1960 54321 02.03.2026 07.07.2001", 2,
+                          [{"id": 9, "content": "Vollmacht 01.04.1990 15.06.1960 54321", "page_count": 2}]) is None)
+# 4. A payslip names only the month: first or last day of it is backed by the text.
+r.check("T-12 date: month and year alone back the first or last day of that month",
+        classify.monat_belegt("1999-08-31", "Monat/Jahr----\n   8 / 99") and classify.monat_belegt("1998-12-01", "Abrechnung 12/1998")
+        and classify.monat_belegt("2005-03-31", "Abrechnungsmonat 03.2005/ 2") and classify.monat_belegt("2005-03-31", "für März 2005")
+        and classify.monat_belegt("2018-01-31", "Jänner 2018") and classify.monat_belegt("2024-02-29", "Februar 2024"))
+r.check("T-12 date: not a day inside the month, not another month or year, not a full date's tail",
+        not classify.monat_belegt("1999-08-15", "8 / 99") and not classify.monat_belegt("1999-09-30", "8 / 99")
+        and not classify.monat_belegt("1998-08-31", "8 / 99") and not classify.monat_belegt("2005-05-31", "Datum 05.05.2005")
+        and not classify.monat_belegt("kaputt", "8 / 99"))
+r.check("T-12 date: the effective date takes the month-end of a payslip, the import day stays without it",
+        classify.wirksames_datum({"document_date": "1999-08-31"}, "VERDIENSTABRECHNUNG Monat/Jahr 8 / 99", {}) == "1999-08-31"
+        and classify.wirksames_datum({"document_date": "1999-08-20"}, "VERDIENSTABRECHNUNG Monat/Jahr 8 / 99", {}) is None)
+# 5. Amounts keep the document's currency and the German thousands point.
+_mon = {"data_type": "monetary"}
+r.check("T-12 amount: DM becomes DEM, an ISO code stays, German and English number formats, sign",
+        classify.coerce_field(_mon, "1.620,20 DM") == "DEM1620.20" and classify.coerce_field(_mon, "DEM1620.20") == "DEM1620.20"
+        and classify.coerce_field(_mon, "CHF 5.50") == "CHF5.50" and classify.coerce_field(_mon, "2.004,98") == "EUR2004.98"
+        and classify.coerce_field(_mon, "1,234.56 USD") == "USD1234.56" and classify.coerce_field(_mon, "1,234 USD") == "USD1234.00" and classify.coerce_field(_mon, "-12,30 €") == "EUR-12.30"
+        and classify.coerce_field(_mon, "EUR12.34") == "EUR12.34" and classify.coerce_field(_mon, "1.234.567") == "EUR1234567.00"
+        and classify.coerce_field(_mon, "kein Betrag") is None)
+# 6. The own address is not learned as a correspondent's address, whatever the spelling.
+r.check("T-12 address: street spellings fold, the postcode line is no street",
+        classify.strassen("Musterstr. 5\n12345 Musterstadt") == classify.strassen("MUSTERSTRASSE 5, Deutschland")
+        == classify.strassen("Musterstraße 5") == {"musterstr5"} and classify.strassen("12345 Musterstadt") == set()
+        and classify.gleicher_wert("adresse", "Musterweg 3a", "Musterweg 3 a, 12345 Ort")
+        and not classify.gleicher_wert("adresse", "Musterweg 3", "Musterweg 4"))
+_corrs = [{"id": 1, "name": "Max Muster"}, {"id": 2, "name": "Bäckerei GmbH"}]
+_meta = {1: {"adresse": "Musterstraße 5, 12345 Musterstadt, Deutschland"}, 2: {}}.get
+_bel = classify.stammdaten_belegt(_corrs, _meta, 2, {"namen": [set(classify.ctoks("Max Muster"))]})
+r.check("T-12 address: the addressee block (own address) is refused, another street is learned",
+        bool(_bel("adresse", "Musterstr. 5\n12345 Musterstadt")) and _bel("adresse", "Am Werk 11, 54321 Anderort") is None)
+# 7. OCR splits the label: "Persona Inummer" is still a personnel number label.
+r.check("T-12 personnel number: 'Persona Inummer' (OCR) with the value two lines below",
+        classify.personalnummer("40815", "Firma\nPersona Inummer\n\n40815\nHerr") and not classify.personalnummer("40815", "Kunde\n40815"))
+# 8. A foreign person: named alone → finding; named next to an own person → none.
+_fr = {"eigene_kennungen": {"namen": ["Max Muster"]}, "fremde_namen": ["Erika Schulz", "Erika Muster"]}
+r.check("T-12 foreign person: the control run reports it with the account's names, not without them",
+        "fremde_person" in classify.kontroll_befunde({"id": 1, "content": _gut + " FRAU ERIKA SCHULZ"}, None, None, [], _fr,
+                                                     {**classify.CFG, **_fr})
+        and "fremde_person" not in _kb({"id": 1, "content": _gut + " FRAU ERIKA SCHULZ"}))
+r.check("T-12 foreign person: rules",
+        classify.fremde_person_befund("Bescheid FRAU ERIKA SCHULZ", ["Max Muster"], _fr["fremde_namen"]) is not None
+        and classify.fremde_person_befund("Frau Erika Muster Entgelt", ["Max Muster"], _fr["fremde_namen"]) is not None
+        and classify.fremde_person_befund("HERRN MAX MUSTER, FRAU ERIKA MUSTER", ["Max Muster"], _fr["fremde_namen"]) is None
+        and classify.fremde_person_befund("Frau Erika Schulz", ["Max Muster"], []) is None)
+_kf = classify.konto_cfg({**_haus, "konten": {"erika": {"fremde_namen": ["Otto Alt"]}, "*": {"fremde_namen": ["Ida Neu"]}}}, 3, _erika)
+r.check("T-12 foreign person: names per account (konten.<user>.fremde_namen) plus shared ones",
+        _kf.get("fremde_namen") == ["Otto Alt", "Ida Neu"] and not classify.konto_cfg(_haus, 3, _erika).get("fremde_namen"))
+# 9. A compound health insurer name is an Einzugsstelle too.
+r.check("T-12 Einzugsstelle: BUNDESKNAPPSCHAFT on a payslip",
+        "einzugsstelle" in _kb({"id": 1, "content": _gut}, "BUNDESKNAPPSCHAFT", "Lohnabrechnung"))
+
 sys.exit(r.done())

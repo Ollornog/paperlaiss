@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 6/11 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 7/12 erledigt
 
 ## Aufgaben
 
@@ -22,6 +22,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ◐ **[T-9](T-9-lehren-aus-einer-grosen-nacharbeit-fehlalarme-stam.md)** Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent · M-1
 * ☑ **[T-10](T-10-kaputte-scans-uberlast-alias-und-kontrolllauf.md)** Kaputte Scans, Überlast, Alias-Treffer und ein Kontrolllauf · M-1
 * ☑ **[T-11](T-11-feldfilter-tag-ausschluss-dubletten-und-stammdaten.md)** Feldfilter, Tag-Ausschluss, Dubletten und Stammdaten aus einer zweiten Durchsicht · M-1
+* ☑ **[T-12](T-12-zweitscans-abrechnungsmonate-wahrung-und-fremde-personen.md)** Zweitscans, Abrechnungsmonate, Währung und fremde Personen aus einer dritten Durchsicht · M-1
 
 ## Entscheidungen (ADR)
 

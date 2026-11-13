@@ -157,12 +157,16 @@ else's" is not expressible with workflows alone. `POST /route` fills that gap: a
 * Document of anyone else with another person's tag: the owner stays, the person gets view and
   change rights. The hub is added too.
 * Several person tags on a hub document: shared with all of them, not handed over.
+* Document still owned by an **upload account** (`PANEL_ROUTE_UPLOADERS`, a scanner that uploads as itself
+  and sets the owner afterwards): handed over like a hub document, so a scan whose uploader lost the
+  network after the upload does not stay with the upload account.
 * Rights are only ever added, never removed; groups stay. A second call changes nothing.
 
 | Variable | Meaning |
 |---|---|
 | `PANEL_ROUTE_PERSONS` | `<tag>=<username>,…`, e.g. `Alice=alice,Bob=bob` (tag case-insensitive) |
 | `PANEL_ROUTE_HUB` | username whose documents are handed over (empty: only share) |
+| `PANEL_ROUTE_UPLOADERS` | upload accounts, comma-separated, whose documents are handed over too (empty: none) |
 | `PANEL_ROUTE_TOKEN` | secret the webhook sends as `X-Route-Token`; without it `/route` answers 503 |
 
 Workflow in Paperless: triggers *Document added* and *Document updated*, filter *has any of these
@@ -242,7 +246,13 @@ classifier uses it in three ways:
   all pages 1 … y are named (an overlong scan); "van"/"v0n" count as "von". No identifier is learned that
   is in the entry of an own person (all of `eigene_kennungen.namen`), no customer number already stored at
   another correspondent, and the entry of an own person gets no identifiers. The origin (`erfasst`, per value for list fields) is shown in
-  the Paperless dialog. The mail sender is only taken over if it demonstrably belongs to that
+  the Paperless dialog. Since 0.7: an address is compared by street and house number in any spelling
+  ("Musterstr. 5" = "Musterstraße 5"), so the own address (the addressee block) is not learned as a
+  counterpart's; a two-page document or longer also counts as a duplicate when two OCR readings of the same
+  paper share 88 % of their numbers and no date or billing month differs; billing months ("03.2005") are
+  part of the compared numbers; a date that is the first or last day of a month the text names only as
+  month and year (a payslip's "8 / 99") counts as backed by the text; amounts keep the document's currency
+  (DM → `DEM`) and German thousands points. The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
   *Exact* or *Regular expression* wins over the model when its text occurs in the document (longest
@@ -379,6 +389,7 @@ an earlier rule consumed it in the same run.
 | `technische_konten` | `[]` | upload-only accounts (scanner, mail fetch): for their documents all own names count as "we" |
 | `arbeitgeber_typen` / `einzugsstellen_muster` | payslip, wage tax and social insurance forms / health insurers | on these types a matching name is never the correspondent; the model is asked for the employer |
 | `arbeitgeber_ohne_felder` | Vertragsnummer, Rechnungsnummer, Aktenzeichen | fields the model never fills on the types of `arbeitgeber_typen` |
+| `fremde_namen` | `[]` | people whose documents do not belong here: a text naming one of them and no own person is flagged (`fremde_person`); per account also `konten.<user>.fremde_namen` |
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["regex"]}]`: with tag A the model's tag B is dropped, unless a pattern is in the text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
