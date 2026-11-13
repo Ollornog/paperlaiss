@@ -6,6 +6,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-13
+
+Nur das Panel-Abbild: neuere Abhängigkeiten. Klassifizierer und Panel-Verhalten unverändert.
+
+### Geändert
+
+- **TinySesam 0.25.5** (vorher 0.25.3 auf `main`, im Abbild v0.6.1 noch 0.25.1). Keine Schema-Änderung: Die Konten-Datenbank
+  des Panels steht seit 0.25.0 auf Schema 16 (`SCHEMA_VERSION` in 0.25.1 bis 0.25.5 unverändert). Darüber hinaus ändern
+  0.25.1 bis 0.25.5 vor allem das Gateway (B-5, B-6, B-7) und dessen Abbild, dazu einige Log- und Fehlertexte sowie die
+  Passkey-Dialoge (jetzt Englisch bzw. nach `lang`). Ein Rückweg auf v0.6.1 braucht deshalb keine Sicherung, nur den
+  alten Tag.
+- **pypdf 7.0.0** (vorher 6.21.4, Dependabot #178) und weitere Updates aus Dependabot seit v0.6.1.
+
 ### Behoben — Dependabot konnte die Generalprobe-Ziele nicht heben
 
 - `.github/generalprobe/` → `tools/generalprobe/`. Unter `.github/` darf Dependabot für docker-Dateien keinen PR anlegen
