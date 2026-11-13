@@ -773,6 +773,10 @@ EINSTELLUNGEN = {
                        "[\"Unfall\"]}: steht der erste Tag am Dokument oder schlägt die KI ihn vor, vergibt sie die Tags "
                        "aus „ohne“ nicht — außer eines der Muster (regulärer Ausdruck, ohne Groß-/Kleinschreibung) "
                        "steht im Text. Leer = keine Regel."),
+    "fremde_namen": ("Korrespondenten", "Fremde Personen",
+                     "Namen von Menschen, deren Dokumente nicht ins Archiv gehören (etwa eine frühere Partnerin). Nennt "
+                     "ein Dokument einen davon und keine eigene Person, wird es zum Prüfen markiert. Je Konto auch unter "
+                     "konten.<Benutzer>.fremde_namen. Einer je Zeile."),
     "einzugsstellen_muster": ("Korrespondenten", "Muster Krankenkasse/Einzugsstelle",
                               "Regulärer Ausdruck (ohne Groß-/Kleinschreibung) für Namen, die bei den Typen vom "
                               "Arbeitgeber nie Korrespondent sind."),

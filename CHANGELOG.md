@@ -6,6 +6,53 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+Lehren aus einer dritten Durchsicht eines Stapelscans (Backlog T-12): Zweitscans, Abrechnungsmonate, Datum auf
+Lohnabrechnungen, Währungen, die eigene Anschrift in den Stammdaten, fremde Personen, Upload-Konten beim Routing.
+
+### Behoben
+
+- **Zweitscan als Dublette.** Zwei OCR-Lesungen desselben Papiers lesen je andere Zahlen falsch, keine Menge enthält
+  die andere; elf erneut gescannte Steuerbescheide fand der Kontrolllauf nur zu vier. Jetzt gilt bei Dokumenten ab zwei
+  Seiten auch: beide mit mindestens 15 Kennzahlen, 88 % der kleineren und 75 % der Vereinigung gemeinsam, und keine der
+  abweichenden ist ein Datum oder ein Abrechnungsmonat (dort unterscheiden sich zwei Fassungen eines Formulars).
+  Gemessen über rund 1.400 Dokumente einer Installation: unter den mehrseitigen Paaren nur die Zweitscans. Einseitige
+  bleiben streng (ein Serienbrief darf eine eigene Nummer tragen, T-11).
+- **Abrechnungsmonat zählt.** Zwei Korrekturabrechnungen desselben Tags für Januar und März galten als Dublette.
+  `kennzahlen` nimmt jetzt „MM.JJJJ“ bzw. „MM/JJJJ“ (nicht als Schwanz eines vollen Datums) als `MM/JJJJ` auf.
+- **Dublette braucht Zahlen auf beiden Seiten.** Zwei Vollmachten in entgegengesetzter Richtung teilten drei Daten und
+  eine Postleitzahl und galten als Kopie. Das Gegenstück braucht jetzt ebenfalls mindestens fünf Kennzahlen.
+- **Datum auf Lohnabrechnungen.** Sie tragen nur den Abrechnungsmonat („Monat/Jahr 8 / 99“, „12/1998“, „März 2005“);
+  der Vorschlag „letzter Tag des Monats“ stand nicht im Text und wurde verworfen, 15 Abrechnungen behielten den
+  Importtag. Jetzt belegt Monat und Jahr den ersten oder letzten Tag dieses Monats (`monat_belegt`).
+- **Währung.** Jeder Betrag wurde EUR, auch DM-Beträge, und „2.004,98“ wurde zu „2.004“. Jetzt bleibt die Währung des
+  Dokuments (ISO-Code oder Zeichen, DM → `DEM`), deutsche Tausenderpunkte und Vorzeichen werden richtig gelesen; das
+  Prompt-Beispiel nennt `DEM1620.20`.
+- **Eigene Anschrift als Adresse eines Gegenübers.** Der Empfängerblock (die eigene Anschrift) stand bei acht
+  Korrespondenten, weil „Musterstr. 5“ und „Musterstraße 5“ verschiedene Werte waren. Adressen werden jetzt nach Straße
+  und Hausnummer verglichen (`strassen`); steht die Straße am Eintrag einer eigenen Person, wird sie nicht gelernt.
+- **Personalnummer mit zerrissenem Etikett.** Das OCR las „Persona Inummer“; die Nummer darunter wurde als
+  Kundennummer gelernt. Das Etikett erlaubt jetzt ein abgetrenntes, als I/1/| gelesenes „l“.
+- **Krankenkasse in Komposita.** „BUNDESKNAPPSCHAFT“ passte nicht auf `\bKnappschaft`, vier Lohnabrechnungen und
+  SV-Meldungen bekamen die Knappschaft als Korrespondenten. Vorgabe jetzt `\w*Knappschaft`.
+
+### Hinzugefügt
+
+- **`fremde_namen`** (Vorgabe `[]`, je Konto auch `konten.<Benutzer>.fremde_namen`): Nennt ein Text einen dieser Namen
+  und keine eigene Person, gibt es den Prüfhinweis `fremde_person` (Lauf und Kontrolllauf). Anlass: Steuerbescheide und
+  Lohnabrechnungen einer früheren Partnerin in einem Stapelscan.
+- **Routing: Upload-Konten** (`PANEL_ROUTE_UPLOADERS`). Ein Dokument, das noch dem Upload-Konto eines Scanners gehört,
+  wird wie ein Dokument der Zentrale übergeben. Bisher wurde es nur geteilt und blieb beim Upload-Konto, wenn der
+  Scanner nach dem Hochladen das Netz verlor (zehn Scans).
+
+- **Messung:** Paare des Stapels (14 Zweitscans, 2 Teilkopien, 16 ähnliche, aber verschiedene Dokumente): Dublette
+  vorher 6/14, nachher 12/14 (offen: ein Paar, bei dem das OCR ein Datum verlas, und ein einseitiger Zweitscan),
+  Fehlalarme vorher 3, nachher 0. Über rund 1.400 Dokumente alle Paare gleicher Seitenzahl: neu gefunden die sechs
+  mehrseitigen Zweitscans und ein doppelter Lebenslauf, weggefallen vier Fehlalarme (Korrekturabrechnungen,
+  Vollmachten). Teilkopien mit verlesenen Zahlen bleiben unerkannt (ohne Seitengrenzen im Text nicht sicher, eine
+  tolerante Regel brachte drei Fehlalarme).
+
 ## [0.6.2] - 2026-11-13
 
 Nur das Panel-Abbild: neuere Abhängigkeiten. Klassifizierer und Panel-Verhalten unverändert.

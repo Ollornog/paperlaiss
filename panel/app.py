@@ -19,7 +19,8 @@ ENV:
                   alle Variablen: README, Abschnitt Panel-Anmeldung)
   INGEST_TOKENS   optional JSON {"<token>": "<Quelle-Tag>"} für die Ingest-API
   PANEL_ROUTE_TOKEN    secret the Paperless webhook sends as X-Route-Token to POST /route; unset = 503
-  PANEL_ROUTE_PERSONS  person tags, "<tag>=<username>,…" (routing.py); PANEL_ROUTE_HUB = username of the hub
+  PANEL_ROUTE_PERSONS  person tags, "<tag>=<username>,…" (routing.py); PANEL_ROUTE_HUB = username of the hub;
+                  PANEL_ROUTE_UPLOADERS = usernames of upload accounts, comma-separated (handed over like the hub)
   EXPORT_*        Export-Knopf: EXPORT_MAX_DOKUMENTE (1000), EXPORT_MAX_MB (2000), EXPORT_AUFBEWAHRUNG_MIN
                   (20), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
 """
@@ -61,6 +62,7 @@ except Exception:
 ROUTE_TOKEN = os.environ.get("PANEL_ROUTE_TOKEN", "")
 ROUTE_PERSONS = routing.parse_persons(os.environ.get("PANEL_ROUTE_PERSONS", ""))
 ROUTE_HUB = os.environ.get("PANEL_ROUTE_HUB", "").strip()
+ROUTE_UPLOADERS = routing.parse_users(os.environ.get("PANEL_ROUTE_UPLOADERS", ""))
 
 # Felder der Config, die Geheimnisse tragen koennen: werden nie ausgeliefert und nie
 # ueber die API geschrieben. Sie gehoeren in die Umgebung (MISTRAL_KEY), nicht in eine
@@ -1053,11 +1055,12 @@ def route_document(doc_id: int) -> dict:
     if tag_ids:
         res = api_get(f"/tags/?id__in={','.join(map(str, tag_ids))}&fields=id,name&page_size={len(tag_ids)}")
         names = [t["name"] for t in res.get("results") or []]
-    wanted = sorted(set(ROUTE_PERSONS.values()) | ({ROUTE_HUB} if ROUTE_HUB else set()))
+    wanted = routing.wanted_users(ROUTE_PERSONS, ROUTE_HUB, ROUTE_UPLOADERS)
     res = api_get("/users/?page_size=1000")
     user_ids = {u["username"]: int(u["id"]) for u in res.get("results") or [] if u.get("username") in wanted}
     tagged = routing.targets(names, ROUTE_PERSONS, user_ids)
-    patch, reason = routing.plan(doc.get("owner"), tagged, doc.get("permissions"), user_ids.get(ROUTE_HUB))
+    uploaders = routing.uploader_ids(ROUTE_UPLOADERS, user_ids)
+    patch, reason = routing.plan(doc.get("owner"), tagged, doc.get("permissions"), user_ids.get(ROUTE_HUB), uploaders)
     if patch:
         api_send(f"/documents/{doc_id}/", patch, method="PATCH")
     return {"doc": doc_id, "changed": bool(patch), "reason": reason,

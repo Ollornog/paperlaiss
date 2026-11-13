@@ -118,4 +118,28 @@ chk("race: the tagged person and the hub still get view and change",
         patch["set_permissions"]["view"]["users"] == [HUB, ALICE]
         and patch["set_permissions"]["change"]["users"] == [HUB, ALICE], patch)
 
+# ---- upload account: a scanner uploads as itself and sets the owner afterwards (T-12: it lost the network after
+# the upload, ten scans stayed with the upload account). Its documents are handed over like the hub's.
+patch, why = routing.plan(UPLOADER, [ALICE], EMPTY, HUB, frozenset({UPLOADER}))
+chk("uploader: the one tagged person becomes owner", patch is not None and patch.get("owner") == ALICE
+        and why == "handed over from the upload account", (patch, why))
+chk("uploader: the hub gets view and change, the upload account nothing",
+        patch["set_permissions"]["view"]["users"] == [HUB] and patch["set_permissions"]["change"]["users"] == [HUB], patch)
+patch, why = routing.plan(UPLOADER, [ALICE, BOB], EMPTY, HUB, frozenset({UPLOADER}))
+chk("uploader: several persons tagged are shared, the owner is not written",
+        patch is not None and "owner" not in patch and why == "several persons tagged, shared instead of handed over"
+        and patch["set_permissions"]["view"]["users"] == [HUB, ALICE, BOB], (patch, why))
+patch, why = routing.plan(UPLOADER, [ALICE], EMPTY, None, frozenset({UPLOADER}))
+chk("uploader: without a hub it is handed over too", patch is not None and patch.get("owner") == ALICE, (patch, why))
+patch, why = routing.plan(ALICE, [BOB], EMPTY, HUB, frozenset({UPLOADER}))
+chk("uploader: other owners are still only shared", patch is not None and "owner" not in patch and why == "shared", (patch, why))
+patch, _ = routing.plan(ALICE, [ALICE], perms([HUB], [HUB]), HUB, frozenset({UPLOADER}))
+chk("uploader: after the hand-over a second call is a no-op", patch is None, patch)
+
+chk("uploader: env list parsed, looked up with persons and hub, unknown names skipped",
+        routing.parse_users(" scanner, ,mailbot ") == ["scanner", "mailbot"]
+        and routing.wanted_users({"alice": "alice"}, "hub", ["scanner"]) == ["alice", "hub", "scanner"]
+        and routing.wanted_users({"alice": "alice"}, "", []) == ["alice"]
+        and routing.uploader_ids(["scanner", "ghost"], {"scanner": UPLOADER, "alice": ALICE}) == frozenset({UPLOADER}))
+
 sys.exit(r.done())
