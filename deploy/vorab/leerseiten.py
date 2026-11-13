@@ -15,6 +15,12 @@ Signatur zerbräche) und solche mit eingebetteten Dateien (E-Rechnung: das XML i
 wären ALLE Seiten leer, bleibt das Dokument, wie es ist. Das Ergebnis ist deterministisch — gleiche
 Eingabe, gleiche Datei —, damit Paperless eine Dublette weiter an der Prüfsumme erkennt.
 
+Lochungen zählen nicht als Inhalt (T-13): Eine gelochte Rückseite aus dem Duplex-Scan hat zwei runde, dunkle
+Flecken von gut 5 mm, je rund 11 mm vom Blattrand; sie blieb stehen (mehr als 400 dunkle Punkte), 40 leere
+Rückseiten in einem Stapel (manche vom Einzug zu 5,8 × 8,6 mm verzogen). Ein Fleck gilt als Lochung, wenn er rund
+oder oval und gefüllt ist (4–9,5 mm, Seiten höchstens 1 : 1,6, mindestens 55 % der Box), seine Mitte höchstens 25 mm
+vom Blattrand liegt und es höchstens vier sind.
+
 Ein- und ausschalten über `leerseiten_entfernen` in classify-config.json (Standard: an). Das Skript
 endet IMMER mit 0: ein Fehler hier darf keinen Import verhindern; im Zweifel bleibt das PDF, wie es
 ist. Nur Standardbibliothek, dazu die Programme `gs` und `qpdf` aus dem Paperless-Abbild.
@@ -31,6 +37,11 @@ RAND = 0.02                     # Rand je Seite ausgelassen (Scannerkante, Schat
 DUNKEL = 160                    # Grauwert darunter zählt als Tinte (Durchscheinendes liegt heller)
 STAUB_MM = 1.0                  # ein zusammenhängender Fleck ab dieser Ausdehnung ist Inhalt
 MAX_PUNKTE = 400                # mehr dunkle Punkte: sicher keine leere Seite (Messung: höchstens 35)
+LOCH_MM = (4.0, 9.5)            # Durchmesser einer Lochung (DIN 5,5 mm); der Einzug zieht sie bis 8,6 mm lang
+LOCH_SEITEN = 1.6               # Längs : quer höchstens (gemessen bis 1,5: verzogen beim Einzug)
+LOCH_RAND_MM = 25.0             # Mitte höchstens so weit vom Blattrand (DIN: 12 mm)
+LOCH_FUELLE = 0.55              # Anteil der Box, den der Fleck füllt (Kreis: 0,79; ein Ring oder Haken weniger)
+MAX_LOECHER = 4
 STAPEL = 20                     # Seiten je Ghostscript-Aufruf (begrenzt den Platz im Temp-Ordner)
 _TINTE = bytes(1 if i < DUNKEL else 0 for i in range(256))
 
@@ -55,21 +66,33 @@ def pgm_lesen(daten):
     return w, h, daten[pos + 1:pos + 1 + w * h]
 
 
+def ist_lochung(n, breite, hoehe, mitte_x, mitte_y, w, h, dpi=DPI):
+    """Ist ein Fleck (n Punkte, Box breite × hoehe, Mitte, alles in Punkten einer Seite w × h) eine Lochung?"""
+    mm = 25.4 / dpi
+    b, hh = breite * mm, hoehe * mm
+    rand = min(mitte_x, w - 1 - mitte_x, mitte_y, h - 1 - mitte_y) * mm
+    return (LOCH_MM[0] <= min(b, hh) and max(b, hh) <= LOCH_MM[1] and max(b, hh) <= LOCH_SEITEN * min(b, hh)
+            and n >= LOCH_FUELLE * breite * hoehe and rand <= LOCH_RAND_MM)
+
+
 def seite_leer(w, h, pixel, dpi=DPI):
     """(leer?, Begründung) für eine Seite als Graustufen-Raster (eine Zeile nach der anderen, 1 Byte je Punkt)."""
     rw, rh = int(w * RAND), int(h * RAND)
+    # Platz für bis zu MAX_LOECHER Lochungen der größten Art, darüber hinaus sicher Inhalt.
+    loch_punkte = int((LOCH_MM[1] * dpi / 25.4) ** 2)
+    grenze = MAX_PUNKTE + MAX_LOECHER * loch_punkte
     punkte = []
     for y in range(rh, h - rh):
         zeile = pixel[y * w + rw:y * w + w - rw].translate(_TINTE)
         x = zeile.find(1)
         while x != -1:
-            punkte.append((y, x))
-            if len(punkte) > MAX_PUNKTE:
+            punkte.append((y, x + rw))
+            if len(punkte) > grenze:
                 return False, f"mehr als {MAX_PUNKTE} dunkle Punkte"
             x = zeile.find(1, x + 1)
     if not punkte:
         return True, "weiß"
-    # Zusammenhängende Flecken (8er-Nachbarschaft) — bei höchstens MAX_PUNKTE Punkten billig.
+    # Zusammenhängende Flecken (8er-Nachbarschaft) — bei höchstens `grenze` Punkten billig.
     offen, flecken = set(punkte), []
     while offen:
         stapel = [offen.pop()]
@@ -82,11 +105,21 @@ def seite_leer(w, h, pixel, dpi=DPI):
                     n = (y + dy, x + dx)
                     if n in offen:
                         offen.remove(n); stapel.append(n)
-        flecken.append(max(max(ys) - min(ys), max(xs) - min(xs)) + 1)
-    groesster = max(flecken) * 25.4 / dpi
+        breite, hoehe = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+        flecken.append((len(ys), breite, hoehe, (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2))
+    loecher = [f for f in flecken if ist_lochung(*f, w, h, dpi)]
+    if len(loecher) > MAX_LOECHER:          # mehr runde Flecken am Rand als ein Locher macht: Inhalt
+        loecher = []
+    rest = [f for f in flecken if f not in loecher]
+    zusatz = f", {len(loecher)} Lochung(en)" if loecher else ""
+    if sum(f[0] for f in rest) > MAX_PUNKTE:
+        return False, f"mehr als {MAX_PUNKTE} dunkle Punkte"
+    if not rest:
+        return True, "weiß" + zusatz
+    groesster = max(max(f[1], f[2]) for f in rest) * 25.4 / dpi
     if groesster >= STAUB_MM:
         return False, f"Zeichen oder Strich ({groesster:.1f} mm)"
-    return True, f"nur Staub ({len(flecken)} Punkte unter {STAUB_MM:g} mm)"
+    return True, f"nur Staub ({len(rest)} Punkte unter {STAUB_MM:g} mm){zusatz}"
 
 
 def einstellung(ordner):

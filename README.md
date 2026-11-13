@@ -252,7 +252,14 @@ classifier uses it in three ways:
   paper share 88 % of their numbers and no date or billing month differs; billing months ("03.2005") are
   part of the compared numbers; a date that is the first or last day of a month the text names only as
   month and year (a payslip's "8 / 99") counts as backed by the text; amounts keep the document's currency
-  (DM → `DEM`) and German thousands points. The mail sender is only taken over if it demonstrably belongs to that
+  (DM → `DEM`) and German thousands points. Since 0.8: a one-page document counts the same way when the
+  numbers only one side has look like misreadings (each has a near twin on the other side, the rest stays
+  within the tolerance) — a paper payslip against its digital original; a partial copy may sit anywhere in a
+  folder of letters (its salutation is one of the folder's); a customer number the model returns as a list
+  is split and checked part by part, a cost centre ("Kostenstelle") is never one; the name similarity that
+  picks the pass-2 candidates also looks at aliases, and a proposal that starts with a candidate's whole
+  name (two words or more, "Deutsche Bank Privat- und Geschäftskunden AG" → "Deutsche Bank") goes to pass 2.
+  The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
   *Exact* or *Regular expression* wins over the model when its text occurs in the document (longest
@@ -355,6 +362,9 @@ exits 0 — no step ever blocks an import. Stdlib only, plus `gs` and `qpdf` fro
 is rendered in greyscale; a page goes only if it is *completely* white — nothing on it but dust
 specks under 1 mm. A page number, a tiny counter, a barcode or a line keeps the page. Measured
 against a real archive (604 PDFs, 1962 pages): exactly the 11 blank backs go, no page with content.
+Punched holes do not count as content: a round or oval filled spot of 4–9.5 mm whose centre lies at most
+25 mm from the edge, at most four of them (the back of a punched sheet in a duplex scan; measured on a
+batch of 106 scans: 40 of 41 blank backs go, none of 257 pages with content).
 Never touched: single-page PDFs, encrypted or signed ones, PDFs with embedded files (e-invoices),
 and a document whose pages would all go. The result is deterministic, so Paperless still detects a
 duplicate by its checksum.
