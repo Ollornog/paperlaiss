@@ -833,9 +833,9 @@ starlette==1.7.0 \
     --hash=sha256:67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e \
     --hash=sha256:c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d
     # via fastapi
-tinysesam[argon2,oidc]==0.25.3 \
-    --hash=sha256:15046fa05b21a9c0f2e0a5ad4c6f4e41619ddb0be8a809046a787e9d8b56b182 \
-    --hash=sha256:b7c96f17eeefef63c326d5e92b94648639e48eda9a91da4797977c39517f7da2
+tinysesam[argon2,oidc]==0.25.5 \
+    --hash=sha256:6cbe221e394e93ec7b194b721dc02931b0f2c362a5d20bf37d24b0f6135a7a68 \
+    --hash=sha256:c84f4fb30d21a083bf1b7d6e2e974986d7f0a7838dd60ad696e37653433f06e1
     # via -r panel/requirements.in
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
