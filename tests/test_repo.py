@@ -78,6 +78,19 @@ _docker = next((e for e in re.split(r"\n  - ", _dep)[1:]
 r.check("Dependabot: der `docker`-Eintrag (Basisabbild) läuft täglich",
         re.search(r"^\s*interval:\s*daily\b", _docker, re.M) is not None,
         "monatlich verpasst das Ruhefenster neu gepushter Basis-Tags")
+# docker-Dateien nie unter .github/: Dort darf Dependabot keinen PR anlegen („The request contains invalid or unauthorized
+# changes“, dependency_file_not_supported — TinySesam .github/rehearsal 2026-11-12, connect-suite .github/grype
+# 2026-11-05). pip unter .github/audit ist nicht betroffen.
+_in_github = []
+for _e in re.split(r"\n  - ", _dep)[1:]:
+    if not re.match(r"package-ecosystem:\s*docker(-compose)?\s*$", _e.splitlines()[0]):
+        continue
+    _dirs = re.findall(r"directory:\s*(\S+)", _e)
+    for _liste in re.findall(r"directories:\s*\[([^\]]*)\]", _e):
+        _dirs += [d.strip().strip("\"'") for d in _liste.split(",") if d.strip()]
+    _in_github += [d for d in _dirs if d.strip("\"'/").split("/")[0] == ".github"]
+r.check("Dependabot: kein docker/docker-compose-Verzeichnis unter .github/ (dort entsteht kein PR)",
+        not _in_github, f"{_in_github} — die Dateien aus .github/ herausziehen")
 
 # ---- Keine private Infrastruktur
 # `admin@example.de` ist harmlos — `paperless.example.de` verrät, wo ein Paperless läuft.

@@ -15,7 +15,7 @@ on:
     tags: ["v*"]
   # GENERALPROBE auf jedem PR (PO 2026-10-11: „alles automatisieren ohne dass was bricht“): Der
   # Workflow läuft durch wie beim Tag, veröffentlicht aber in eine Wegwerf-Registry auf dem Runner
-  # (.github/generalprobe/docker-compose.yml). So nimmt ein Pflicht-Check auch die Actions ab, die
+  # (tools/generalprobe/docker-compose.yml). So nimmt ein Pflicht-Check auch die Actions ab, die
   # sonst nur am Tag laufen (Anmeldung, schiebender Bau), und ihre Dependabot-Updates mergen selbst.
   pull_request:
   workflow_dispatch:
@@ -122,7 +122,7 @@ jobs:
       # einem eigenen Container und erreicht sie nur mit `network=host`.
       - name: "Generalprobe: Wegwerf-Registry starten"
         if: github.ref_type != 'tag'
-        run: docker compose -f .github/generalprobe/docker-compose.yml up -d --wait registry
+        run: docker compose -f tools/generalprobe/docker-compose.yml up -d --wait registry
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         with:
