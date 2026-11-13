@@ -168,7 +168,7 @@ jobs:
           #   pip            — Wurzelverzeichnis (CI) und .github/audit (`audit`)
           #   uv             — panel/requirements.txt (`image`: Bau und Startprobe, `veroeffentlichen`)
           #   docker         — Basis-Abbild in panel/Dockerfile (`image`: Startprobe)
-          #   docker_compose — .github/generalprobe (`veroeffentlichen`: Registry startet, Push kommt an)
+          #   docker_compose — tools/generalprobe (`veroeffentlichen`: Registry startet, Push kommt an)
           AUTO_OEKO: "github_actions pip uv docker docker_compose"
           # Die Workflows, deren Jobs die Abnahme sind. Jeder läuft auf `pull_request` ohne Pfadfilter.
           PFLICHT_WORKFLOWS: "ci.yml audit.yml release.yml"
