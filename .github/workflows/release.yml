@@ -3,7 +3,8 @@ name: Release
 # Ein Tag löst aus. Die Reihenfolge ist Absicht: erst prüfen, dann testen, dann bauen,
 # dann veröffentlichen. Ein Release mit falscher Nummer ist schlimmer als keins —
 # es ist unauffällig falsch. Veröffentlicht werden das Panel-Abbild und die Skripte, die man in
-# Paperless einhängt (classify.py, Vorab-Schritte, Knöpfe), als Release-Anhänge mit SHA256SUMS.
+# Paperless einhängt (classify.py, Vorab-Schritte, Knöpfe, seit 0.10 der Eingang eingang.py), als Release-Anhänge
+# mit SHA256SUMS.
 # Abbild und Anhänge sind über Sigstore BEGLAUBIGT (Provenance: wer hat es wann aus welchem Commit
 # gebaut). Prüfen:
 #   gh attestation verify oci://ghcr.io/ollornog/paperlaiss:vX.Y.Z --owner Ollornog
@@ -208,7 +209,8 @@ jobs:
           set -euo pipefail
           mkdir dist
           cp classify.py deploy/vorab/vorab.py deploy/vorab/leerseiten.py deploy/vorab/mailbilder.py \
-             deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh deploy/paperless-knoepfe/paperlaiss-knoepfe.js dist/
+             deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh deploy/paperless-knoepfe/paperlaiss-knoepfe.js \
+             deploy/eingang/eingang.py dist/
           # Namen ohne ./ — so stehen sie auch als Subjekt in der Beglaubigung.
           cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - name: Skripte weitergeben
@@ -231,7 +233,7 @@ jobs:
       - name: Prüfsummen gegen die heruntergeladenen Dateien
         run: |
           cd dist
-          [ "$(grep -c . SHA256SUMS)" = "6" ] || { echo "SHA256SUMS nennt nicht genau sechs Dateien"; exit 1; }
+          [ "$(grep -c . SHA256SUMS)" = "7" ] || { echo "SHA256SUMS nennt nicht genau sieben Dateien"; exit 1; }
           sha256sum -c SHA256SUMS
 
   # ⚠️ NUR beim Tag. Kein Checkout, kein pip: lädt die fertigen Anhänge, beglaubigt sie, legt das

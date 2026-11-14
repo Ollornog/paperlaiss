@@ -307,7 +307,7 @@ the same `user:`. Upgrading from a version whose panel ran as root: see the upgr
 **Releases** ([GitHub releases](https://github.com/Ollornog/paperlaiss/releases)): each tag publishes
 the panel image `ghcr.io/ollornog/paperlaiss:<tag>` (`linux/amd64`, `linux/arm64`; no `latest`, pin
 the digest from the release notes) and attaches the scripts you mount into Paperless (`classify.py`,
-the pre-consume steps, the button files) together with `SHA256SUMS`. Both are attested:
+the pre-consume steps, the button files, since 0.10 the inbox script `eingang.py`) together with `SHA256SUMS`. Both are attested:
 `sha256sum -c SHA256SUMS`, then `gh attestation verify classify.py --owner Ollornog` or
 `gh attestation verify oci://ghcr.io/ollornog/paperlaiss:<tag> --owner Ollornog`. Take image and
 scripts from the same release.

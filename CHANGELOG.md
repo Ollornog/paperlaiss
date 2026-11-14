@@ -33,7 +33,8 @@ Allerweltsnamen, die Marke im Trace statt als Tag, ein KI-Knopf für Stammdaten 
   nach dem Konsum (Erfolg oder Dublette) wandert die Datei nach `Archiv/<JJJJ.MM.TT> <Originalname>` (Tag des Imports
   in `zeitzone`, Vorgabe Europe/Berlin; belegt → „ (2)“), ein Fehlschlag bleibt mit `<name>.fehler.txt` liegen und
   wird erst nach einer Änderung oder dem Löschen der Notiz neu versucht. `tags` je Konto gehen mit dem Upload.
-  Ohne `archiv` bleibt das alte Verhalten (löschen, `_Fehler/`).
+  Ohne `archiv` bleibt das alte Verhalten (löschen, `_Fehler/`). `eingang.py` hängt ab jetzt als siebte Datei am
+  Release (mit `SHA256SUMS` und Beglaubigung), damit eine Installation genau die Release-Fassung ausrollt.
 - **`CLASSIFY_WIE_IMPORT`** und **`eval.py --wie-import`**: Titel, Korrespondent, Typ, Datum und Felder ausblenden,
   als käme das Dokument gerade an. Ohne das stand der schon korrigierte Wert als „bisheriger Korrespondent“ im Prompt,
   und ein Treffer belegte nichts.
