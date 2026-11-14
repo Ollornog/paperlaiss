@@ -1069,18 +1069,6 @@ def schon_klassifiziert(cfg, marker_id, tag_ids_on, did, trace_dir=None):
     return klassifiziert_seit(did, trace_dir) is not None
 
 
-def wartet_auf_mail(doc, cfields, feldname):
-    """Is the document a mail import whose context is still to come? (T-15)
-
-    A mail poller uploads the attachment with the mail-context field attached EMPTY, sets the value
-    afterwards and then classifies with CLASSIFY_SOURCE=mail. The automatic post-consume run in between
-    would classify without the mail and learn from it — it waits. Until T-15 a mail poller blocked it with
-    the marker tag, which no longer exists when the trace is the marker."""
-    fid = resolve_field(cfields, feldname)
-    return bool(fid) and any(c.get("field") == fid and c.get("value") in (None, "")
-                             for c in (doc.get("custom_fields") or []))
-
-
 def nachbearbeiten(did, patch, erfolg, lesbar):
     """Ein installationseigenes Skript nach dem Writeback aufrufen.
 
@@ -3401,10 +3389,6 @@ def main():
     if automatisch and not erbe and schon_klassifiziert(CFG, marker_id, tag_ids_on, did):
         log(f"skip {did}: schon klassifiziert ("
             + (f"Marker '{CFG['marker_tag']}')" if (CFG.get("marker_tag") or "").strip() else "Trace-Marke)")); return
-    if automatisch and not SOURCE and CFG.get("mail_context_field") and any(
-            c.get("value") in (None, "") for c in (doc.get("custom_fields") or [])) and wartet_auf_mail(
-            doc, get("/custom_fields/?page_size=1000")["results"], CFG["mail_context_field"]):
-        log(f"skip {did}: wartet auf den Nachlauf des Mail-Imports (Feld '{CFG['mail_context_field']}' leer)"); return
     mark_running(did, "Start")
 
     reserved = reservierte_tags(CFG)

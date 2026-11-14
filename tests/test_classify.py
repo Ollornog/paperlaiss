@@ -2508,7 +2508,7 @@ r.check("T-14 VAT ID: not learned (and no finding) when the text does not print 
         and classify.kennung_im_text("DE113822785", "UID DE 113.822.785") and not classify.kennung_im_text("", "x"),
         f"{_su} {_sv} {_su2}")
 
-# ---- T-15: no role or two letters as a new correspondent, invented brackets, trace marker, mail wait, account tags.
+# ---- T-15: no role or two letters as a new correspondent, invented brackets, trace marker, account tags.
 _aw = classify.allerweltsname_grund
 r.check("T-15 common names: role, function, placeholder and two letters are refused",
         all(_aw(n, {}) for n in ("Arbeitgeber", "PA", "Arbeitgeber (unbekannt)", "Die Krankenkasse", "Mein Arbeitgeber GmbH",
@@ -2589,13 +2589,6 @@ r.check("T-15 trace marker: schon_klassifiziert reads only the mark, not the bar
         and not classify.schon_klassifiziert({"marker_tag": "x"}, None, [3], 5))
 _spur.unlink(missing_ok=True)
 
-_mk = [{"id": 40, "name": "Mail-Kontext", "data_type": "longtext"}]
-_w1 = _lauf([_ok], dry=False, felder=_mk, feldwerte=[{"field": 40, "value": None}], cfg={"mail_context_field": "Mail-Kontext"})
-_w2 = _lauf([_ok], dry=False, felder=_mk, feldwerte=[{"field": 40, "value": None}], cfg={"mail_context_field": "Mail-Kontext"},
-            source="mail", force=True)
-_w3 = _lauf([_ok], dry=False, felder=_mk, feldwerte=[{"field": 40, "value": "Von: a@b"}], cfg={"mail_context_field": "Mail-Kontext"})
-r.check("T-15 mail wait: empty mail-context field → the automatic run waits; the mail follow-up and a filled field run",
-        _w1["chat"] == [] and not _w1.get("patch") and len(_w2["chat"]) == 1 and len(_w3["chat"]) == 1)
 
 # ---- T-15: master data from all documents (button in the correspondent dialog)
 _se = classify.alle_eigenen_kennungen({"eigene_kennungen": {"namen": ["Martin Muster"], "iban": ["DE89 3704 0044 0532 0130 00"]},

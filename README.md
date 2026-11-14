@@ -420,7 +420,7 @@ an earlier rule consumed it in the same run.
 | `allerweltsnamen` / `korrespondent_min_zeichen` | `[]` / `3` | never create a correspondent from a role or function ("Arbeitgeber", "Personalabteilung"; built-in list plus these words or whole names), a placeholder ("unbekannt") or fewer letters/digits than the minimum ("PA") — no correspondent and a finding instead |
 | `konten.<user>.tags` | – | tags every document of that account gets (needs `kennungen_je_konto`), e.g. for uploads from the web — Paperless workflows cannot filter by owner |
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["regex"]}]`: with tag A the model's tag B is dropped, unless a pattern is in the text |
-| `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name). A document with the mail-context field attached but empty waits: a mail poller uploads it so, sets the context and then runs `CLASSIFY_SOURCE=mail` |
+| `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name). A mail poller best passes them at the upload (`custom_fields` of `post_document` as `{id: value}`): Paperless sets them before the post-consume script runs |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |

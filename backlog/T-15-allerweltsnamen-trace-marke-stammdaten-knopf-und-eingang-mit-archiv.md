@@ -29,7 +29,7 @@ created: '2026-11-14'
    und prüft jeden Wert mit den Regeln von `stammdaten_nachtragen` gegen den Text seines Dokuments; eigene Kennungen
    aller Konten nie. Knopf im Korrespondenten-Dialog, Übernahme per Haken, gespeichert erst mit „Save“. Browser-Test.
 3. `marker_tag` leer: die Marke steht im Trace (`klassifiziert`), ein späterer abgebrochener Lauf behält sie. Ein
-   Mail-Import wartet über das leere Mail-Kontext-Feld statt über den Marker-Tag (`wartet_auf_mail`).
+   Mail-Abruf übergibt den Kontext beim Upload (`custom_fields`), statt den ersten Lauf mit dem Marker-Tag zu blocken.
 4. `konten.<user>.tags`: Tags, die jedes Dokument des Kontos bekommt. `eingang.py`: `tags` je Konto.
 5. `eingang.py` mit `eingang`/`archiv`: nach dem Konsum (Erfolg oder Dublette) nach `Archiv/<JJJJ.MM.TT> <Name>`,
    Datum in `zeitzone`, Zähler bei Kollision; Fehlschlag bleibt mit `<name>.fehler.txt` liegen.
@@ -37,4 +37,4 @@ created: '2026-11-14'
 
 **Messung:** Namensregel über die 268 Korrespondenten der Installation: kein vorhandener Name wäre gesperrt, alle vier
 gelöschten Kunstnamen schon. Lohnabrechnungen mit Krankenkasse im Text (Anlass eines alten Befunds, BARMER statt
-Arbeitgeber) mit 0.9.0 wie beim Import: 11 von 11 Läufen beim Arbeitgeber. 25 Mutanten rot, `check.sh` zweimal grün.
+Arbeitgeber) mit 0.9.0 wie beim Import: 11 von 11 Läufen beim Arbeitgeber. 24 Mutanten rot, `check.sh` zweimal grün.

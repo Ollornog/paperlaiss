@@ -44,9 +44,9 @@ Allerweltsnamen, die Marke im Trace statt als Tag, ein KI-Knopf für Stammdaten 
 - **Marke im Trace** statt Tag: Mit leerem `marker_tag` setzt paperlaiss keinen Tag mehr; „schon klassifiziert“
   steht als `klassifiziert` im Trace des Dokuments, ein späterer abgebrochener Lauf behält die Marke. Mit gesetztem
   `marker_tag` bleibt alles wie bisher.
-- **Mail-Import wartet ohne Tag:** Ein Dokument, an dem das Feld `mail_context_field` leer hängt, wird beim
-  automatischen Lauf übersprungen — ein Mail-Abruf lädt so hoch, setzt den Kontext und klassifiziert danach mit
-  `CLASSIFY_SOURCE=mail`. Bisher blockte er den ersten Lauf mit dem Marker-Tag.
+- Ein Mail-Abruf, der bisher den ersten Lauf mit dem Marker-Tag blockte, übergibt Mail-Kontext und Absender
+  besser gleich beim Upload (`custom_fields` von `post_document` als `{Feld-ID: Wert}`): Paperless setzt sie vor dem
+  Post-Consume-Skript, der erste Lauf klassifiziert schon mit dem Kontext.
 
 ### Behoben
 
@@ -56,7 +56,7 @@ Allerweltsnamen, die Marke im Trace statt als Tag, ein KI-Knopf für Stammdaten 
 
 - **Messung:** Namensregel über die 268 Korrespondenten einer Installation: kein vorhandener Name gesperrt, die vier
   später von Hand gelöschten Kunstnamen schon. Lohnabrechnungen mit Krankenkasse im Text (ein alter Befund: Krankenkasse
-  statt Arbeitgeber) mit 0.9.0 wie beim Import: 11 von 11 Läufen beim Arbeitgeber, kein Code nötig. 25 Mutanten rot.
+  statt Arbeitgeber) mit 0.9.0 wie beim Import: 11 von 11 Läufen beim Arbeitgeber, kein Code nötig. 24 Mutanten rot.
 
 ## [0.9.0] - 2026-11-13
 
