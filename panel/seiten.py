@@ -782,6 +782,21 @@ EINSTELLUNGEN = {
                             "Dokumenttypen ohne Ausstellungsdatum, deren Datum der letzte Tag des Abrechnungsmonats ist "
                             "(Lohnabrechnung). paperlaiss liest den Monat aus „Abrechnungsmonat …“ bzw. „Monat/Jahr …“, "
                             "nicht aus einer Rückrechnung; ein Ausstellungsdatum im Text bleibt. Leer = aus. Einer je Zeile."),
+    "garantie_aktiv": ("Felder", "Garantie berechnen",
+                       "An: bei Käufen füllt die KI das Feld „Garantie in Jahren“, und paperlaiss rechnet das Ende "
+                       "(Belegdatum + Jahre) selbst aus — beim Klassifizieren und im täglichen Abgleich, auch nach einer "
+                       "Änderung von Hand. Wirkt nur, wenn es beide Felder gibt."),
+    "garantie_jahre_feld": ("Felder", "Feld „Garantie in Jahren“",
+                            "Name des Zahlenfelds mit den Jahren (Bruchteile erlaubt, 0.5 = 6 Monate). Leer = keine Garantie."),
+    "garantie_bis_feld": ("Felder", "Feld „Garantie bis“",
+                          "Name des Datumsfelds mit dem Ende. Es gehört paperlaiss: die KI füllt es nie, ohne Jahre wird "
+                          "es entfernt. Ein Paperless-Workflow kann davor erinnern."),
+    "garantie_standard_jahre": ("Felder", "Garantie ohne Angabe (Jahre)",
+                                "So viele Jahre setzt die KI bei einem Kauf, wenn das Dokument keine längere Garantie "
+                                "nennt (gesetzliche Gewährleistung)."),
+    "garantie_typen": ("Felder", "Typen mit Garantie",
+                       "Dokumenttypen, bei denen die KI Garantie-Jahre setzen darf (Rechnung, Kaufbeleg …). Bei anderen "
+                       "Typen wird ein Vorschlag verworfen. Leer = jeder Typ. Einer je Zeile."),
     "allerweltsnamen": ("Korrespondenten", "Keine Korrespondenten aus Allerweltsnamen",
                         "Wörter oder ganze Namen, aus denen paperlaiss nie einen NEUEN Korrespondenten anlegt — zusätzlich "
                         "zur eingebauten Liste (Arbeitgeber, Personalabteilung, Krankenkasse, Vermieter …). Ein Vorschlag, "

@@ -2646,4 +2646,127 @@ r.check("T-15 master data: excerpts keep head and tail of long documents and sto
         classify.stamm_auszuege([{"id": 1, "content": "K" * 5000 + "FUSS"}])[0][1].endswith("FUSS")
         and len(classify.stamm_auszuege([{"id": i, "content": "x" * 3000} for i in range(40)])) * 3100 <= classify.STAMM_GESAMT + 3100)
 
+# ---- T-16 warranty: years from the model (purchases only), end date always from code.
+_ge = classify.garantie_ende
+r.check("T-16 end date: date + years, fractions in months, month end clamped, ISO timestamps accepted",
+        _ge("2024-08-27", 1) == "2025-08-27" and _ge("2025-09-05", 0.5) == "2026-03-05"
+        and _ge("2024-02-29", 1) == "2025-02-28" and _ge("2024-12-01T12:00:00+00:00", 2) == "2026-12-01"
+        and _ge("2025-01-31", 1 / 12) == "2025-02-28" and _ge("2024-01-15", "1,5") == "2025-07-15"
+        and _ge("2024-01-15", "2") == "2026-01-15" and _ge("2024-11-30", 0.25) == "2025-02-28"
+        and _ge("2024-01-15", 0.3) == "2024-05-15" and _ge("2024-01-15", 2.99) == "2027-01-15",
+        str([_ge("2024-02-29", 1), _ge("2025-01-31", 1 / 12), _ge("2024-11-30", 0.25)]))
+r.check("T-16 end date: no, zero, negative, non-numeric, boolean or absurd years and a missing date give none",
+        all(_ge("2024-01-15", j) is None for j in (None, 0, -1, "", "zwei", True, False, float("nan"), float("inf"), 1e9))
+        and _ge("", 2) is None and _ge(None, 2) is None and _ge("15.01.2024", 2) is None)
+_gfj = {"id": 44, "name": "Garantie_Jahre", "data_type": "float"}
+_gfb = {"id": 27, "name": "Garantie_bis", "data_type": "date"}
+_gfs = [{"id": 1, "name": "Betrag", "data_type": "monetary"}, _gfj, _gfb]
+_gff = lambda felder, **kw: classify.garantie_felder(felder, {**classify.CFG, **kw})
+r.check("T-16 fields: both present (years integer or float) → used; one missing, wrong type or switched off → untouched",
+        _gff(_gfs) == (_gfj, _gfb)
+        and _gff([{**_gfj, "data_type": "integer"}, _gfb])[0]["data_type"] == "integer"
+        and _gff([_gfb]) == (None, None) and _gff([_gfj]) == (None, None)
+        and _gff([{**_gfj, "data_type": "string"}, _gfb]) == (None, None)
+        and _gff([_gfj, {**_gfb, "data_type": "string"}]) == (None, None)
+        and _gff(_gfs, garantie_aktiv=False) == (None, None)
+        and _gff(_gfs, garantie_jahre_feld="Garantie Jahre", garantie_bis_feld="garantie_bis") == (_gfj, _gfb)
+        and _gff(_gfs, garantie_jahre_feld="") == (None, None))
+_gcf = classify.garantie_code_feld
+r.check("T-16 code field: years being written → end date; years gone → stale end date removed; neither → nothing",
+        _gcf([{"field": 44, "value": 2}], {}, "2026-01-01", 44, 27) == {27: "2028-01-01"}
+        and _gcf([{"field": 44, "value": 2}], {27: "2099-01-01"}, "2026-01-01T12:00:00+00:00", 44, 27) == {27: "2028-01-01"}
+        and _gcf([], {27: "2030-11-30"}, "2016-01-06", 44, 27) == {27: None}
+        and _gcf([{"field": 44, "value": None}], {27: None, 44: None}, "2016-01-06", 44, 27) == {27: None}
+        and _gcf([{"field": 44, "value": 0}], {27: "2030-01-01"}, "2016-01-06", 44, 27) == {27: None}
+        and _gcf([{"field": 1, "value": "EUR5.00"}], {}, "2026-01-01", 44, 27) == {})
+_gp = classify.garantie_plan([
+    {"id": 1, "created": "2024-08-27", "custom_fields": [{"field": 44, "value": 1.0}, {"field": 27, "value": "2025-08-27"}]},
+    {"id": 2, "created": "2024-09-01", "custom_fields": [{"field": 44, "value": 1.0}, {"field": 27, "value": "2025-08-27"}]},
+    {"id": 3, "created": "2018-03-05", "custom_fields": [{"field": 27, "value": "2017-12-31"}]},
+    {"id": 4, "created": "2025-09-05", "custom_fields": [{"field": 44, "value": 0.5}]},
+    {"id": 5, "created": "2025-09-05", "custom_fields": [{"field": 44, "value": None}]},
+    {"id": 6, "created": "2025-09-05", "custom_fields": [{"field": 44, "value": None}, {"field": 27, "value": None}]},
+], 44, 27)
+r.check("T-16 reconciliation plan: right stays, changed date or years recomputed, end without years removed, new years added",
+        _gp == [(2, "2025-08-27", "2025-09-01"), (3, "2017-12-31", None), (4, None, "2026-03-05"), (6, None, None)], str(_gp))
+_gv = lambda typ, wert=2, cfg=None: classify.feldvorschlag_verwerfen(_gfj, wert, "Rechnung", typ, {**classify.CFG, **(cfg or {})})
+r.check("T-16 years only on purchase types: invoice yes, contract/insurance/none no; null always; empty list or off = any",
+        _gv("Rechnung") is None and _gv("Quittung") is None and "keine Garantie" in (_gv("Vertrag") or "")
+        and "keine Garantie" in (_gv("Versicherungsbestätigung") or "") and "keine Garantie" in (_gv(None) or "")
+        and _gv("Vertrag", None) is None and _gv("Vertrag", cfg={"garantie_typen": []}) is None
+        and _gv("Vertrag", cfg={"garantie_aktiv": False}) is None
+        and classify.feldvorschlag_verwerfen(_gfb, "2030-01-01", "x", "Vertrag", classify.CFG) is None)
+
+# Wiring: a real run writes the end date computed from the years, never the model's, and the hint reaches the model.
+_typen_g = [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Vertrag"}]
+def _patch_felder(a):
+    return {c["field"]: c["value"] for c in (a.get("patch") or [{}])[-1].get("custom_fields", [])}
+_g1 = _lauf([{**_ok, "fields": {"Garantie_Jahre": 2, "Garantie_bis": "2099-01-01"}}], felder=_gfs, typen=_typen_g, dry=False)
+r.check("T-16 wiring: years written, end = document date + years, the model's end date ignored",
+        _patch_felder(_g1).get(44) == 2.0 and _patch_felder(_g1).get(27) == "2028-01-01", str(_patch_felder(_g1)))
+r.check("T-16 wiring: the warranty hint stands at the years field in the message, the end field is not offered",
+        "GARANTIE in Jahren" in _g1["chat"][0] and "Garantie_Jahre (Zahl)" in _g1["chat"][0]
+        and "- Garantie_bis (" not in _g1["chat"][0], _g1["chat"][0][-600:])
+_g2 = _lauf([{**_ok, "fields": {"Garantie_Jahre": None}}], felder=_gfs, typen=_typen_g, dry=False,
+            feldwerte=[{"field": 44, "value": 2}, {"field": 27, "value": "2028-01-01"}])
+r.check("T-16 wiring: years cleared → end date removed", 44 not in _patch_felder(_g2) and 27 not in _patch_felder(_g2),
+        str(_patch_felder(_g2)))
+_g3 = _lauf([{**_ok, "document_type": "Vertrag", "fields": {"Garantie_Jahre": 2}}], felder=_gfs, typen=_typen_g, dry=False,
+            feldwerte=[{"field": 27, "value": "2030-11-30"}])
+r.check("T-16 wiring: on a contract the years proposal is dropped and a stale end date goes",
+        44 not in _patch_felder(_g3) and 27 not in _patch_felder(_g3), str(_patch_felder(_g3)))
+_g4 = _lauf([{**_ok, "fields": {"Garantie_bis": "2099-01-01"}}], felder=[_gfb], typen=_typen_g, dry=False)
+r.check("T-16 wiring: without a years field the end field stays an ordinary field, no hint",
+        _patch_felder(_g4).get(27) == "2099-01-01" and "GARANTIE in Jahren" not in _g4["chat"][0], str(_patch_felder(_g4)))
+_g5 = _lauf([{**_ok, "fields": {"Garantie_Jahre": 3}}], felder=_gfs, typen=_typen_g, dry=False,
+            cfg={"garantie_aktiv": False})
+r.check("T-16 wiring: switched off → no hint, no computed end date",
+        "GARANTIE in Jahren" not in _g5["chat"][0] and 27 not in _patch_felder(_g5), str(_patch_felder(_g5)))
+
+# Daily reconciliation against a fake API: pages via absolute `next` links, one bulk edit per change.
+def _abgleich(seiten, felder=None, dry=False, fehler_bei=()):
+    gesendet, gelesen = [], []
+    def get(pfad, raw=False):
+        gelesen.append(pfad)
+        if pfad.startswith("/custom_fields/"):
+            return {"results": _gfs if felder is None else felder}
+        return seiten[(classify.re.search(r"[?&]page=(\d+)", pfad) or [None, "1"])[1]]
+    def send(pfad, daten, methode="PATCH", **kw):
+        if daten["documents"][0] in fehler_bei:
+            raise RuntimeError("503")
+        gesendet.append((pfad, methode, daten))
+        return {"result": "OK"}
+    alt = (classify.get, classify.send, classify.log)
+    classify.get, classify.send, classify.log = get, send, lambda m: None
+    try:
+        return classify.garantie_abgleich(dry=dry), gesendet, gelesen
+    finally:
+        classify.get, classify.send, classify.log = alt
+_gs = {"1": {"results": [{"id": 1, "created": "2024-08-27", "custom_fields": [{"field": 44, "value": 1}, {"field": 27, "value": "2025-08-27"}]},
+                         {"id": 3, "created": "2018-03-05", "custom_fields": [{"field": 27, "value": "2017-12-31"}]}],
+             "next": "http://localhost:8000/api/documents/?custom_field_query=x&page=2&page_size=100"},
+       "2": {"results": [{"id": 4, "created": "2025-09-05", "custom_fields": [{"field": 44, "value": 0.5}]}], "next": None}}
+_ga, _gsend, _glese = _abgleich(_gs)
+r.check("T-16 reconciliation: all pages read, the query asks for either field, end removed and set by bulk edit",
+        _ga["geprueft"] == 3 and [e["id"] for e in _ga["geaendert"]] == [3, 4] and not _ga["fehler"]
+        and _glese[2] == "/documents/?custom_field_query=x&page=2&page_size=100"
+        and "exists" in classify.urllib.parse.unquote(_glese[1]) and "%5B44%2C" in _glese[1] and "%5B27%2C" in _glese[1]
+        and _gsend == [("/documents/bulk_edit/", "POST", {"documents": [3], "method": "modify_custom_fields",
+                                                         "parameters": {"add_custom_fields": {}, "remove_custom_fields": [27]}}),
+                       ("/documents/bulk_edit/", "POST", {"documents": [4], "method": "modify_custom_fields",
+                                                         "parameters": {"add_custom_fields": {"27": "2026-03-05"}, "remove_custom_fields": []}})],
+        str(_gsend))
+_gd, _gdsend, _ = _abgleich(_gs, dry=True)
+r.check("T-16 reconciliation: dry run reports the same changes and writes nothing",
+        _gdsend == [] and [e["id"] for e in _gd["geaendert"]] == [3, 4] and _gd["trocken"])
+_gf, _gfsend, _ = _abgleich(_gs, fehler_bei=(3,))
+r.check("T-16 reconciliation: a failed write is reported (exit 1) and does not stop the others",
+        [e["id"] for e in _gf["fehler"]] == [3] and [e["id"] for e in _gf["geaendert"]] == [4] and len(_gfsend) == 1)
+_gi, _gisend, _gilese = _abgleich(_gs, felder=[_gfb])
+r.check("T-16 reconciliation: without both fields nothing is read or written",
+        _gi["aktiv"] is False and not _gisend and len(_gilese) == 1 and not _gi["fehler"])
+r.check("T-16 next link: absolute API link becomes a path relative to the API base",
+        classify._api_pfad("http://localhost:8000/api/documents/?page=2") == "/documents/?page=2"
+        and classify._api_pfad("https://paper.example/api/documents/") == "/documents/")
+
 sys.exit(r.done())

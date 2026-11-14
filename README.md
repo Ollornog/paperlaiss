@@ -68,6 +68,7 @@ CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # force Mistral OCR
 CLASSIFY_KONTROLLE=1439-1859 [CLASSIFY_DRY=1] python3 classify.py # control run: checks only, no model
 CLASSIFY_STAMMDATEN=<correspondent id> python3 classify.py # master-data proposals from its documents, writes nothing
 CLASSIFY_DRY=1 CLASSIFY_WIE_IMPORT=1 CLASSIFY_DOC=<id> python3 classify.py # as on import (metadata hidden)
+CLASSIFY_GARANTIE=1 [CLASSIFY_DRY=1] python3 classify.py   # daily warranty reconciliation, no model
 ```
 
 `eval.py --wie-import` measures the same way: without it, the already corrected correspondent reaches the
@@ -278,6 +279,15 @@ classifier uses it in three ways:
   (Albatros Versicherungsdienst GmbH)" → "AVG").
   The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
+- **Warranty (since 0.11).** With a number field for the warranty in years (`garantie_jahre_feld`, default
+  `Garantie_Jahre`) and a date field for its end (`garantie_bis_feld`, default `Garantie_bis`), the model fills
+  the years on a purchase of goods (types in `garantie_typen`): `garantie_standard_jahre` (default 2, the
+  statutory period) unless the text names a longer manufacturer warranty; nothing on services, subscriptions,
+  insurances or contracts. The end date is never the model's: code sets it to document date + years (fractions
+  in months, 0.5 = 6 months) and removes it when the years are empty. `CLASSIFY_GARANTIE=1` does the same for
+  every document that carries one of the fields — run it daily (a timer), so a hand change of years or date
+  follows; exit code 1 if a write failed. A scheduled Paperless workflow on the end field (e.g. −30 days, tag and
+  mail) does the reminding. Without both fields, or with `garantie_aktiv` off, nothing changes.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
   *Exact* or *Regular expression* wins over the model when its text occurs in the document (longest
   match wins; *Any word*, *All words*, *Fuzzy* and *Auto* stay with the model — they are too coarse).
