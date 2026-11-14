@@ -103,6 +103,17 @@ CFG = {
     # left to the model: it proposed the first day in 43 of 67 payslips, and the month of a correction
     # ("Rückrechnung März 2022") instead of the billing month (T-14). Empty = off.
     "monatsletzter_typen": [],
+    # Warranty (T-16): on a purchase (types in `garantie_typen`, empty = any type) the model fills the years
+    # field — the statutory default `garantie_standard_jahre`, or a longer manufacturer warranty printed in the
+    # text; nothing for services, subscriptions, insurances, contracts. The end field is never the model's:
+    # code computes it as document date + years (0.5 = 6 months) and removes it when the years are empty, on
+    # every run and in the daily reconciliation (CLASSIFY_GARANTIE=1), so a hand change of years or date
+    # follows. Takes effect only when BOTH fields exist (years: number, end: date); `garantie_aktiv` false = off.
+    "garantie_aktiv": True,
+    "garantie_jahre_feld": "Garantie_Jahre",
+    "garantie_bis_feld": "Garantie_bis",
+    "garantie_standard_jahre": 2,
+    "garantie_typen": ["Rechnung", "Kaufbeleg", "Quittung", "Kassenbon"],
     # Never a NEW correspondent (T-15): a role or function ("Arbeitgeber", "Personalabteilung" — built-in list
     # ALLERWELTSNAMEN, extended here by words or whole names), a placeholder, or fewer letters/digits than
     # `korrespondent_min_zeichen` ("PA"). Then no correspondent and a note to check.
@@ -1914,6 +1925,10 @@ def feldvorschlag_verwerfen(f, wert, text, typ=None, cfg=None):
     if is_null(wert) or (isinstance(wert, str) and wert.strip().upper() in ("BEHALTEN", "KEEP")):
         return None
     name = f.get("name") or ""
+    if (cfg.get("garantie_aktiv", True) and _feldname(cfg.get("garantie_jahre_feld") or "")
+            and _feldname(name) == _feldname(cfg.get("garantie_jahre_feld")) and cfg.get("garantie_typen")
+            and not typ_in(typ, cfg.get("garantie_typen"))):
+        return f"bei „{typ or 'ohne Typ'}“ keine Garantie (nur bei {', '.join(cfg['garantie_typen'])})"
     if "iban" in _feldname(name) and f.get("data_type") in ("string", "longtext"):
         if not norm_iban(wert):
             return "keine gültige IBAN (Prüfziffer ISO 13616)"
@@ -1995,6 +2010,117 @@ def build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_fld
     if summary and summary_fid:
         cfs.append({"field": summary_fid, "value": summary})
     return cfs, flog
+
+
+# --- Warranty (T-16): years from the model, end date from code ---
+# The hint stands next to the years field in the per-document message, so it reaches the model only on an
+# installation that has the field (the system prompt and its cache stay as they are).
+GARANTIE_HINWEIS = (" — GARANTIE in Jahren: nur bei einem Kauf von Geräten oder Waren (Rechnung, Kaufbeleg, Quittung "
+                    "über eine Sache): {standard}, wenn das Dokument nichts anderes sagt (gesetzliche Gewährleistung); "
+                    "steht eine längere Hersteller- oder Händlergarantie im Text, deren Jahre (Monate als Bruchteil, "
+                    "6 Monate = 0.5). Bei Dienstleistungen, Reparaturen ohne genannte Garantie, Abos, Miete, "
+                    "Versicherungen, Verträgen, Gutschriften und allem ohne Kauf: null.")
+
+
+def garantie_felder(cfields, cfg=None):
+    """(years field, end field) when the installation uses the warranty feature, else (None, None).
+
+    Both fields must exist — years as a number (integer or float), end as a date — and `garantie_aktiv` must be on.
+    An installation with only one of them (an end date kept by hand) is left exactly as before."""
+    cfg = cfg if cfg is not None else CFG
+    if not cfg.get("garantie_aktiv", True):
+        return None, None
+    j_name, b_name = cfg.get("garantie_jahre_feld") or "", cfg.get("garantie_bis_feld") or ""
+    jahre = next((f for f in cfields if j_name and norm(f["name"]) == norm(j_name)
+                  and f.get("data_type") in ("integer", "float")), None)
+    bis = next((f for f in cfields if b_name and norm(f["name"]) == norm(b_name) and f.get("data_type") == "date"), None)
+    return (jahre, bis) if jahre and bis else (None, None)
+
+
+def garantie_ende(created, jahre):
+    """End of the warranty as YYYY-MM-DD: the document date (date of purchase) plus `jahre` years — or None
+    when there are no valid years. A fraction counts in whole months (0.5 → 6 months); a day the target month
+    lacks becomes its last day (29 Feb + 1 year → 28 Feb)."""
+    if jahre is None or isinstance(jahre, bool):
+        return None
+    try:
+        monate = round(float(str(jahre).replace(",", ".").strip()) * 12)
+        if monate <= 0:
+            return None
+        tag = datetime.date.fromisoformat(str(created or "")[:10])
+        j, m = divmod(tag.month - 1 + monate, 12)
+        jahr, monat = tag.year + j, m + 1
+        letzter = int(_monatsletzter(jahr, monat)[8:10])
+        return datetime.date(jahr, monat, min(tag.day, letzter)).isoformat()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def garantie_code_feld(cfs, cur_vals, created, jahre_fid, bis_fid):
+    """The end field for build_cfs' `code_flds`, from the years that WILL be written (`cfs`) and the document
+    date that will be on the document: {bis_fid: date}, {bis_fid: None} to remove an end date without years,
+    or {} when there is nothing to write or remove."""
+    jahre = next((c.get("value") for c in cfs if c.get("field") == jahre_fid), None)
+    soll = garantie_ende(created, jahre)
+    if soll is None and bis_fid not in cur_vals:
+        return {}
+    return {bis_fid: soll}
+
+
+def garantie_plan(docs, jahre_fid, bis_fid):
+    """[(document id, current end, target end)] for every document whose end date does not follow from its
+    years and its date; target None = remove the end field."""
+    plan = []
+    for d in docs:
+        werte = {c.get("field"): c.get("value") for c in d.get("custom_fields") or []}
+        soll = garantie_ende(d.get("created"), werte.get(jahre_fid))
+        ist = werte.get(bis_fid)
+        if soll is None and bis_fid in werte:
+            plan.append((d["id"], ist, None))
+        elif soll is not None and ist != soll:
+            plan.append((d["id"], ist, soll))
+    return plan
+
+
+def _api_pfad(url):
+    """An absolute `next` link of the API as a path for get() (relative to BASE)."""
+    teile = urllib.parse.urlsplit(url)
+    basis = urllib.parse.urlsplit(BASE).path.rstrip("/")
+    pfad = teile.path[len(basis):] if basis and teile.path.startswith(basis) else teile.path
+    return pfad + (f"?{teile.query}" if teile.query else "")
+
+
+def garantie_abgleich(dry=None):
+    """Daily reconciliation (CLASSIFY_GARANTIE=1): bring every end date in line with years and document date.
+
+    Catches what the classifier does not see: years or date changed by hand, years emptied. Reads only the
+    documents that carry one of the two fields; writes each change as one bulk edit of that field, nothing else.
+    Returns a summary; `fehler` non-empty means the run failed (exit code 1)."""
+    dry = DRY if dry is None else dry
+    jf, bf = garantie_felder(get("/custom_fields/?page_size=200")["results"])
+    if not jf:
+        return {"aktiv": False, "grund": "aus oder Felder fehlen", "geprueft": 0, "geaendert": [], "fehler": []}
+    q = urllib.parse.quote(json.dumps(["OR", [[jf["id"], "exists", True], [bf["id"], "exists", True]]]))
+    docs, pfad = [], f"/documents/?custom_field_query={q}&page_size=100&fields=id,created,custom_fields"
+    while pfad:
+        seite = get(pfad)
+        docs += seite.get("results") or []
+        pfad = _api_pfad(seite["next"]) if seite.get("next") else None
+    geaendert, fehler = [], []
+    for did, ist, soll in garantie_plan(docs, jf["id"], bf["id"]):
+        eintrag = {"id": did, "bisher": ist, "neu": soll}
+        if not dry:
+            try:
+                send("/documents/bulk_edit/", {"documents": [did], "method": "modify_custom_fields", "parameters": {
+                    "add_custom_fields": {str(bf["id"]): soll} if soll else {},
+                    "remove_custom_fields": [] if soll else [bf["id"]]}}, "POST")
+            except Exception as e:
+                fehler.append({**eintrag, "fehler": repr(e)[:200]})
+                log(f"garantie-fail {did}: {e!r}")
+                continue
+        geaendert.append(eintrag)
+        log(f"{'DRY ' if dry else ''}garantie {did} | {bf['name']} {ist or '—'} -> {soll or 'entfernt'}")
+    return {"aktiv": True, "geprueft": len(docs), "geaendert": geaendert, "fehler": fehler, "trocken": bool(dry)}
 
 
 # Zeitüberschreitung beim Speichern: kein Feldfehler, keine Reparatur (2026-10-11). Eine abgebrochene
@@ -3455,6 +3581,10 @@ def main():
     # Felder, die NICHT von der KI gesteuert werden (behalten): Sonderfelder + manuelle Felder
     manual_fids = {resolve_field(cfields, n) for n in (CFG.get("manual_fields") or [])}
     skip_fids = {x for x in (summary_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
+    # Warranty (T-16): the end date is code's, never the model's — out of the model's fields, set below.
+    g_jahre, g_bis = garantie_felder(cfields)
+    if g_bis:
+        skip_fids.add(g_bis["id"])
 
     # Take back what the previous run set, if nobody has touched the classification since (T-9). Before
     # the prompt: the model must not see the old run's values as "current" and keep them.
@@ -3556,6 +3686,8 @@ def main():
                   "monetary": "Betrag mit der Währung des Dokuments als ISO-Code, z.B. EUR12.34 oder DEM1620.20 (DM)", "boolean": "true/false", "date": "YYYY-MM-DD", "url": "URL"}.get(t, t)
         cur = cur_vals.get(f["id"]); cur = sel_label(f, cur) if t == "select" else cur
         zusatz = f" {UNBELEGT_HINWEIS}" if f["id"] in unbelegt else ""
+        if g_jahre and f["id"] == g_jahre["id"]:
+            zusatz += GARANTIE_HINWEIS.format(standard=CFG.get("garantie_standard_jahre", 2))
         return f"- {f['name']} ({th}), aktuell: {cur if cur not in (None, '') else '—'}{zusatz}"
     fieldspec = "\n".join(fspec(f) for f in ai_flds)
 
@@ -3854,7 +3986,20 @@ def main():
         TRACE["fields_verworfen"] = _feld_weg
         log(f"felder-verworfen {did} | " + "; ".join(f"{k}: {x}" for k, x in _feld_weg.items()))
 
+    def _cfs_bauen(datum_end):
+        """build_cfs plus the warranty end date that follows from the years being written (T-16)."""
+        cfs_, flog_ = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
+        if g_bis:
+            code_flds.pop(g_bis["id"], None)
+            g = garantie_code_feld(cfs_, cur_vals, datum_end, g_jahre["id"], g_bis["id"])
+            if g:
+                code_flds.update(g)
+                cfs_, flog_ = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
+        return cfs_, flog_
+    code_flds = {}
+
     if DRY:
+        _, _flog = _cfs_bauen(wirksames_datum(prop, content, doc) or doc.get("created"))
         out = {"id": did, "title": titel_neu, "correspondent": corr_name, "corr_info": corr_info, "document_type": dt,
                "tags": [tagname_by_id.get(i) for i in tag_ids], "new_tags": new_tags,
                "summary": summary, "fields": flds, "fields_verworfen": _feld_weg or None,
@@ -3862,6 +4007,7 @@ def main():
                "document_date": wirksames_datum(prop, content, doc),
                "korrespondent_ergebnis": korrespondent_ergebnis(corr_info, cname), "datum_bisher": (doc.get("created") or "")[:10],
                "pruefen": pruefen or None, "vorlauf": TRACE.get("vorlauf"),
+               "garantie_bis": _flog.get(g_bis["name"]) if g_bis else None,
                "needs_ocr": prop.get("needs_ocr"), "ocr": ocr_note}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         log(f"DRY {did} | {corr_info} | typ={dt} | tags={[tagname_by_id.get(i) for i in tag_ids]} | {ocr_note}{stamm_info}"
@@ -3886,8 +4032,7 @@ def main():
     if datum and (doc.get("created") or "")[:10] != datum:
         patch["created"] = f"{datum}T12:00:00+00:00"
         date_note = f"{(doc.get('created') or '?')[:10]} -> {datum}"
-    code_flds = {}
-    cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
+    cfs, field_log = _cfs_bauen(patch.get("created") or doc.get("created"))
     patch["custom_fields"] = cfs
     TRACE["writeback"] = {"document_type": dt, "title": patch.get("title"), "tags": [tagname_by_id.get(i) for i in tag_ids],
                           "new_tags": new_tags, "correspondent": corr_info,
@@ -3910,7 +4055,7 @@ def main():
         if _fix_weg:
             TRACE["fields_verworfen"] = {**(TRACE.get("fields_verworfen") or {}), **_fix_weg}
         flds = {**flds, **_fix}
-        cfs, field_log = build_cfs(cfields, cur_vals, flds, summary, summary_fid, skip_fids, code_flds)
+        cfs, field_log = _cfs_bauen(patch.get("created") or doc.get("created"))
         patch["custom_fields"] = cfs
         prev = err; ok, err = patch_doc(did, patch)
         TRACE["repair"].append({"round": rounds, "error": prev, "correction": fix.get("fields"), "ok": ok, "error_after": None if ok else err})
@@ -4247,6 +4392,11 @@ if __name__ == "__main__":
                                               [int(x) for x in _doks.split(",") if x.strip().isdigit()] if _doks else None),
                          ensure_ascii=False))
         sys.exit(0)
+    if os.environ.get("CLASSIFY_GARANTIE") == "1":
+        # CLASSIFY_GARANTIE=1 [CLASSIFY_DRY=1]: daily reconciliation of the warranty end dates, no model (T-16).
+        _g = garantie_abgleich()
+        print(json.dumps(_g, ensure_ascii=False))
+        sys.exit(1 if _g["fehler"] else 0)
     if os.environ.get("CLASSIFY_KONTROLLE"):
         # CLASSIFY_KONTROLLE="1439-1859,1900" [CLASSIFY_DRY=1]: checks only, no model (T-10).
         print(json.dumps(kontrolle(ids_lesen(os.environ["CLASSIFY_KONTROLLE"])), ensure_ascii=False, indent=1))

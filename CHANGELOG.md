@@ -6,6 +6,26 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-14
+
+Garantie in Jahren, Ende aus dem Code (Backlog T-16).
+
+### Hinzugefügt
+
+- **Garantie:** Gibt es ein Zahlenfeld für die Garantie in Jahren (`garantie_jahre_feld`, Vorgabe `Garantie_Jahre`)
+  und ein Datumsfeld für ihr Ende (`garantie_bis_feld`, Vorgabe `Garantie_bis`), füllt die KI bei einem Kauf von
+  Geräten oder Waren die Jahre: `garantie_standard_jahre` (Vorgabe 2, gesetzliche Gewährleistung), eine längere
+  Hersteller- oder Händlergarantie aus dem Text, bei Dienstleistungen, Abos, Versicherungen und Verträgen nichts. Der
+  Hinweis steht an der Feldzeile der Nachricht, der System-Prompt bleibt gleich. Nur bei den `garantie_typen`
+  (Vorgabe Rechnung, Kaufbeleg, Quittung, Kassenbon; leer = jeder Typ), sonst wird der Vorschlag verworfen.
+- **Das Ende rechnet der Code:** Belegdatum + Jahre (Bruchteile in Monaten, 0.5 = 6 Monate, 29.02. + 1 Jahr =
+  28.02.). Die KI bekommt das Feld nicht mehr angeboten; ohne Jahre wird es entfernt.
+- **Täglicher Abgleich `CLASSIFY_GARANTIE=1`** (mit `CLASSIFY_DRY=1` nur zeigen): liest alle Dokumente mit einem der
+  beiden Felder und stellt das Ende per Massenbearbeitung nur dieses Felds richtig — so folgt es einer Änderung von
+  Jahren oder Datum von Hand. Ein gescheiterter Schreibzugriff hält die übrigen nicht auf, der Lauf endet dann mit 1.
+- **`garantie_aktiv`** (Vorgabe an): aus = alles wie bisher. Ohne beide Felder ändert sich ebenfalls nichts; eine
+  Installation mit nur einem Ende-Feld behält es als gewöhnliches Feld.
+
 ## [0.10.1] - 2026-11-14
 
 ### Behoben
