@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from kern import (KORR_FELDER, sperre_oeffnen, korr_anzeige, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
-                  config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf)
+                  config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf, vorschlag_aus_ausgabe)
 import exportlogik
 import exportpdf
 import huelle
@@ -446,6 +446,37 @@ async def korr_schreiben(cid: int, request: Request):
             store.pop(str(cid), None)
         schreibe_json(CORR_STORE, store)
     return {"ok": True, "werte": eintrag}
+
+
+def run_stammdaten(cid, ids):
+    """classify.py in the master-data mode: proposals only, nothing written (T-15)."""
+    env = dict(os.environ)
+    env.update({"CLASSIFY_STAMMDATEN": str(cid), "CLASSIFY_STAMMDATEN_DOKS": ",".join(map(str, ids)),
+                "CLASSIFY_DRY": "1", "PAPERLESS_API": BASE, "PAPERLESS_TOKEN": TOK, "MISTRAL_KEY": MISTRAL_KEY,
+                "CLASSIFY_CONFIG": CONFIG, "CLASSIFY_LOG": LOG, "CLASSIFY_SOURCE": "knopf"})
+    try:
+        r = subprocess.run(["python3", CLASSIFY_PY], env=env, capture_output=True, text=True, timeout=300)
+        return vorschlag_aus_ausgabe(r.stdout)
+    except Exception as e:
+        return {"fehler": repr(e)[:300]}
+
+
+@app.post("/knopf/korrespondent/{cid}/vorschlag")
+def korr_vorschlag(cid: int, request: Request):
+    """KI-Knopf im Korrespondenten-Dialog: Stammdaten aus den Dokumenten, die DIESER Nutzer sehen darf, als
+    Vorschlag. Übernommen wird im Dialog, gespeichert erst mit „Save“ (T-15)."""
+    erlaubt, _ = knopf_nutzer_rechte(request, [cid], art="correspondents")
+    if not erlaubt:
+        raise HTTPException(403, "Diesen Korrespondenten darfst du in Paperless nicht ändern")
+    sichtbar = als_nutzer(request, f"/documents/?correspondent__id={cid}&ordering=-created&page_size=30&fields=id")
+    ids = [d["id"] for d in (sichtbar.get("results") or []) if isinstance(d.get("id"), int)]
+    if not ids:
+        return {"dokumente": 0, "vorschlag": {}, "verworfen": {}}
+    with PARALLEL:
+        erg = run_stammdaten(cid, ids)
+    if erg.get("fehler"):
+        raise HTTPException(502, "paperlaiss: " + erg["fehler"])
+    return erg
 
 
 @app.get("/knopf/status")

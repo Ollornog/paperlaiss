@@ -66,7 +66,12 @@ CLASSIFY_DRY=1  CLASSIFY_DOC=<id>  python3 classify.py     # print only, write n
 CLASSIFY_FORCE=1 CLASSIFY_DOC=<id> python3 classify.py     # redo an already-classified document
 CLASSIFY_FORCE_OCR=1 CLASSIFY_DOC=<id> python3 classify.py # force Mistral OCR
 CLASSIFY_KONTROLLE=1439-1859 [CLASSIFY_DRY=1] python3 classify.py # control run: checks only, no model
+CLASSIFY_STAMMDATEN=<correspondent id> python3 classify.py # master-data proposals from its documents, writes nothing
+CLASSIFY_DRY=1 CLASSIFY_WIE_IMPORT=1 CLASSIFY_DOC=<id> python3 classify.py # as on import (metadata hidden)
 ```
+
+`eval.py --wie-import` measures the same way: without it, the already corrected correspondent reaches the
+model as the "current correspondent", and a hit proves nothing.
 
 A document type that is already set is replaced only on a real import (no `CLASSIFY_SOURCE`, no
 `CLASSIFY_FORCE`), by the button in Paperless and from the panel. Manual runs with `CLASSIFY_FORCE`
@@ -190,7 +195,13 @@ Edited **in Paperless itself**: the buttons script adds a section *paperlaiss* t
 edit dialog (context, aliases, e-mail, mail domains, customer number, VAT ID, phone, address; each
 value of a list field as a line with edit and delete, a new one via the input with „+“),
 saved together with Paperless' *Save* — allowed for whoever may change that correspondent in
-Paperless. The file can also be filled from outside (your master data system, a script). The
+Paperless. Since 0.10 the section has a button **KI: Stammdaten aus den Dokumenten vorschlagen**: paperlaiss
+reads the correspondent's documents that this user may see (newest 30, letterhead and footer of each), asks the
+model once and checks every value by the rules of the automatic run — it must stand verbatim in one of the
+documents (shown as its source), no own identifier of any account (`eigene_kennungen`, `konten`), no personnel
+number, no value another correspondent holds, IBAN check digit. The proposals come with check boxes (a
+replacement for an address or context already filled is never ticked in advance); *Übernehmen* puts the ticked
+ones into the fields above, *Save* stores them. Nothing is written before. The file can also be filled from outside (your master data system, a script). The
 classifier uses it in three ways:
 
 - **Finding candidates, without an LLM call.** Before the analysis, paperlaiss searches the text for
@@ -262,6 +273,9 @@ classifier uses it in three ways:
   Since 0.9: on the types of `monatsletzter_typen` the date is the last day of the billing month, decided in code
   from "Abrechnungsmonat …" / "Monat/Jahr …" (never from a correction line), unless a labelled date of issue is
   printed; a VAT ID is only learned when the text prints it.
+  Since 0.10: a role, a placeholder or two letters never become a new correspondent (`allerweltsnamen`,
+  `korrespondent_min_zeichen`), and a bracket the text does not print is dropped before matching ("AVG
+  (Albatros Versicherungsdienst GmbH)" → "AVG").
   The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Fixed assignment first.** A document type or correspondent whose matching in Paperless is set to
@@ -293,7 +307,7 @@ the same `user:`. Upgrading from a version whose panel ran as root: see the upgr
 **Releases** ([GitHub releases](https://github.com/Ollornog/paperlaiss/releases)): each tag publishes
 the panel image `ghcr.io/ollornog/paperlaiss:<tag>` (`linux/amd64`, `linux/arm64`; no `latest`, pin
 the digest from the release notes) and attaches the scripts you mount into Paperless (`classify.py`,
-the pre-consume steps, the button files) together with `SHA256SUMS`. Both are attested:
+the pre-consume steps, the button files, since 0.10 the inbox script `eingang.py`) together with `SHA256SUMS`. Both are attested:
 `sha256sum -c SHA256SUMS`, then `gh attestation verify classify.py --owner Ollornog` or
 `gh attestation verify oci://ghcr.io/ollornog/paperlaiss:<tag> --owner Ollornog`. Take image and
 scripts from the same release.
@@ -395,7 +409,7 @@ an earlier rule consumed it in the same run.
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour |
 | `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |
 | `tagging_enabled` | `false` | AI assigns content tags (off: type/correspondent/fields only) |
-| `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal |
+| `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal; empty = no tag, the mark sits invisibly in the document's trace (`traces/<id>.json`, key `klassifiziert`) |
 | `unsicher_tag` | – | optional flag tag (by name) |
 | `kaputt_tag` | – | optional tag for a broken scan (blank pages, missing pages, invented OCR text); empty = `unsicher_tag` |
 | `pruef_notiz` | `false` | write the reason of a finding as a note on the document |
@@ -403,8 +417,10 @@ an earlier rule consumed it in the same run.
 | `arbeitgeber_typen` / `einzugsstellen_muster` | payslip, wage tax and social insurance forms / health insurers | on these types a matching name is never the correspondent; the model is asked for the employer |
 | `arbeitgeber_ohne_felder` | Vertragsnummer, Rechnungsnummer, Aktenzeichen | fields the model never fills on the types of `arbeitgeber_typen` |
 | `fremde_namen` | `[]` | people whose documents do not belong here: a text naming one of them and no own person is flagged (`fremde_person`); per account also `konten.<user>.fremde_namen` |
+| `allerweltsnamen` / `korrespondent_min_zeichen` | `[]` / `3` | never create a correspondent from a role or function ("Arbeitgeber", "Personalabteilung"; built-in list plus these words or whole names), a placeholder ("unbekannt") or fewer letters/digits than the minimum ("PA") — no correspondent and a finding instead |
+| `konten.<user>.tags` | – | tags every document of that account gets (needs `kennungen_je_konto`), e.g. for uploads from the web — Paperless workflows cannot filter by owner |
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["regex"]}]`: with tag A the model's tag B is dropped, unless a pattern is in the text |
-| `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name) |
+| `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name). A mail poller best passes them at the upload (`custom_fields` of `post_document` as `{id: value}`): Paperless sets them before the post-consume script runs |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |

@@ -37,4 +37,10 @@ _bs = ev.bericht([{"id": 3, "soll": {"typ": "A"}, "ist": {"typ": "A"}, "ist_alle
 r.check("Bericht: schwankend ist kein Rückschritt, zählt aber nicht als Treffer",
         _bs["rueckschritte"] == [] and _bs["quote"]["typ"] == "0/1" and len(_bs["schwankend"]) == 1, str(_bs))
 
+_u = ev.lauf_umgebung({"id": 7}, False, True, basis={})
+_u2 = ev.lauf_umgebung({"id": 7}, True, False, basis={})
+r.check("T-15 eval: dry run always; --wie-import blanks the metadata, OCR only with --mit-ocr",
+        _u["CLASSIFY_DRY"] == "1" and _u["CLASSIFY_WIE_IMPORT"] == "1" and _u["CLASSIFY_NO_OCR"] == "1"
+        and "CLASSIFY_WIE_IMPORT" not in _u2 and "CLASSIFY_NO_OCR" not in _u2 and _u2["CLASSIFY_DOC"] == "7")
+
 sys.exit(r.done())

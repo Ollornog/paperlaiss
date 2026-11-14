@@ -2,7 +2,7 @@
 # Das Tor vor jedem Push: Fach- und Hygiene-Tests.
 #
 #   scripts/check.sh            # alles
-#   scripts/check.sh --fast     # (hier gleichbedeutend — es gibt keinen Browser-Test)
+#   scripts/check.sh --fast     # ohne den Browser-Test (tests/test_browser.py, braucht Chrome)
 #
 # Der pre-push-Hook (.githooks/pre-push) ruft dieses Skript. Einmalig pro Klon:
 #   git config core.hooksPath .githooks

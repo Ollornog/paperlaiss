@@ -457,6 +457,26 @@ KORR_FELDER = (
 _LISTE = {f for f, _, art in KORR_FELDER if art == "liste"}
 
 
+def vorschlag_aus_ausgabe(ausgabe):
+    """The proposals classify.py printed in the master-data mode (CLASSIFY_STAMMDATEN, T-15): its last JSON line,
+    reduced to fields of the dialog. Anything else is an error the dialog shows."""
+    for zeile in reversed(str(ausgabe or "").strip().splitlines()):
+        try:
+            d = json.loads(zeile)
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if d.get("fehler"):
+            return {"fehler": str(d["fehler"])[:300]}
+        felder = {f for f, _, _ in KORR_FELDER}
+        vorschlag = {f: [x for x in liste if isinstance(x, dict) and str(x.get("wert") or "").strip()]
+                     for f, liste in (d.get("vorschlag") or {}).items() if f in felder and isinstance(liste, list)}
+        return {"korrespondent": d.get("korrespondent"), "dokumente": int(d.get("dokumente") or 0),
+                "vorschlag": {f: v for f, v in vorschlag.items() if v}, "verworfen": d.get("verworfen") or {}}
+    return {"fehler": "keine Antwort vom Klassifizierer"}
+
+
 def sperre_oeffnen(pfad):
     """Die Sperrdatei für flock öffnen — nur lesend (flock braucht kein Schreibrecht), angelegt mit 0666.
 

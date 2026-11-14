@@ -405,4 +405,14 @@ r.check("Nacharbeit: alle vier Zugänge rufen guard() zuerst",
             isinstance(f.body[0], _ast2.Expr) and getattr(getattr(f.body[0].value, "func", None), "id", None) == "guard"
             for f in _na_routen.values()))
 
+# ---- T-15: master-data proposals from classify.py, reduced to the dialog's fields
+_va = kern.vorschlag_aus_ausgabe('log line\n{"korrespondent": "X AG", "dokumente": 3, "vorschlag": {"iban": [{"wert": "DE02", '
+                                 '"dokument": 1}], "geheim": [{"wert": "x"}], "telefon": [{"wert": ""}]}, "verworfen": {"iban": ["a: b"]}}\n')
+r.check("T-15 proposals: last JSON line, only dialog fields, empty values dropped",
+        _va == {"korrespondent": "X AG", "dokumente": 3, "vorschlag": {"iban": [{"wert": "DE02", "dokument": 1}]},
+                "verworfen": {"iban": ["a: b"]}}, str(_va))
+r.check("T-15 proposals: an error or no JSON becomes an error for the dialog",
+        kern.vorschlag_aus_ausgabe('{"fehler": "Korrespondent 9 nicht gefunden"}') == {"fehler": "Korrespondent 9 nicht gefunden"}
+        and "fehler" in kern.vorschlag_aus_ausgabe("Traceback …") and "fehler" in kern.vorschlag_aus_ausgabe(""))
+
 sys.exit(r.done())
