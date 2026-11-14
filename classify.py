@@ -2766,9 +2766,29 @@ def dublette(text, seiten, aehnliche):
         # Both need numbers: three birth dates and a postcode shared with a form of the same wording are no
         # evidence (T-12: two powers of attorney in opposite directions were reported as copies).
         if (len(zd) >= 5 and anrede(d.get("content")) == a and (d.get("page_count") or 1) == (seiten or 1)
-                and gleiche_kennzahlen(z, zd, ocr=True, einseitig=(seiten or 1) < 2)):
+                and gleiche_kennzahlen(z, zd, ocr=True, einseitig=(seiten or 1) < 2)
+                and gleiche_reihenfolge(text, d.get("content"))):
             return f"wie Dokument {d.get('id')} ({str(d.get('title') or '')[:50]})"
     return None
+
+
+def _datumsfolge(text, nur):
+    """The dates of `text` that are in `nur`, in the order of their first appearance."""
+    folge = []
+    for m in _KENNZAHL.finditer(str(text or "")):
+        z = m.group(0)
+        if z in nur and z not in folge and _ist_datum(z):
+            folge.append(z)
+    return folge
+
+
+def gleiche_reihenfolge(a, b):
+    """Do the dates both texts share appear in the same order? A copy keeps the order of its original. Two mirrored
+    documents of one form do not: two powers of attorney in opposite directions name the same two birth dates, each
+    with the grantor first (T-17: with five numbers on both sides the sets were equal and one was reported as a copy
+    of the other)."""
+    gemeinsam = kennzahlen(a) & kennzahlen(b)
+    return _datumsfolge(a, gemeinsam) == _datumsfolge(b, gemeinsam)
 
 
 def gleiche_kennzahlen(a, b, ocr=False, einseitig=False):
@@ -2981,6 +3001,19 @@ def titel_ohne_unbelegtes(title, content):
     teile = [t for t in str(title or "").split() if not (ist_kennung(t) and not im_text_belegt(t, s))]
     return re.sub(r"\s+", " ", " ".join(teile)).strip(" -–—:·|")
 
+# Words that join two parts of a word list ("Kauf- und Mietvertrag", "Haftpflicht-/Hausratversicherung").
+_BINDEWORT = {"und", "oder", "sowie", "bzw", "bzw.", "u.", "&", "+", "/"}
+
+
+def _haengt_an(woerter, i):
+    """Is word `i` joined to a neighbour: a joining word before or after it ("General- und Vorsorgevollmacht",
+    "Mietvertrag und Kaufvertrag"), or a slash inside it ("Haftpflicht-/Hausratversicherung")? Then dropping it
+    leaves a fragment."""
+    vor = woerter[i - 1].lower() if i > 0 else ""
+    nach = woerter[i + 1].lower() if i + 1 < len(woerter) else ""
+    return vor in _BINDEWORT or nach in _BINDEWORT or "/" in woerter[i].strip("/")
+
+
 def titel_bilden(korrespondent, typ, kennung):
     """Der Titel aus dem Muster „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27), etwa
     „Beispiel GmbH – Rechnung 12/2026“. Fehlt ein Teil, fällt er weg; ohne Dokumentart UND Kennung
@@ -2995,9 +3028,18 @@ def titel_bilden(korrespondent, typ, kennung):
             k = k[len(vorn):].strip(" -–—:·|")
     # Wörter, die nur die Dokumentart wiederholen („Kaufvertrag“, „Ersatzteilrechnung“ bei Rechnung).
     t = str(typ or "").strip().lower()
+    ersetzt = False
     if t:
-        k = " ".join(w for w in k.split() if not w.strip(",.;:").lower().endswith(t)).strip(" -–—:·|")
-    rest = " ".join(x for x in (str(typ or "").strip(), k) if x)
+        woerter = k.split()
+        weg = [i for i, w in enumerate(woerter) if w.strip(",.;:").lower().endswith(t)]
+        if any(_haengt_an(woerter, i) for i in weg):
+            # The compound is joined to another word ("General- und Vorsorgevollmacht", "Strom- und Gasrechnung"):
+            # dropping it leaves a fragment ("General- und"). The identifier names the type itself, so it replaces
+            # the type in the title (before 0.11.1: "Vollmacht General- und").
+            ersetzt = True
+        else:
+            k = " ".join(w for i, w in enumerate(woerter) if i not in weg).strip(" -–—:·|")
+    rest = k if ersetzt else " ".join(x for x in (str(typ or "").strip(), k) if x)
     if not rest:
         return None
     t = f"{str(korrespondent).strip()} – {rest}" if str(korrespondent or "").strip() else rest

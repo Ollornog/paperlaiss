@@ -277,6 +277,10 @@ classifier uses it in three ways:
   Since 0.10: a role, a placeholder or two letters never become a new correspondent (`allerweltsnamen`,
   `korrespondent_min_zeichen`), and a bracket the text does not print is dropped before matching ("AVG
   (Albatros Versicherungsdienst GmbH)" → "AVG").
+  Since 0.11.1: a word of the identifier that repeats the document type is only dropped when it stands alone
+  ("Ersatzteilrechnung 60565557"); joined to a neighbour ("General- und Vorsorgevollmacht") the identifier stays
+  whole and replaces the type in the title. A copy also has the dates both texts share in the same order, so two
+  mirrored documents of one form (powers of attorney in opposite directions) are no duplicate.
   The mail sender is only taken over if it demonstrably belongs to that
   correspondent. Writes are serialised with a file lock shared with the panel.
 - **Warranty (since 0.11).** With a number field for the warranty in years (`garantie_jahre_feld`, default

@@ -6,6 +6,25 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-14
+
+Abgehackte Titel und spiegelbildliche Dokumente als Dublette (Backlog T-17).
+
+### Behoben
+
+- **Titel ohne Bruchstück:** Wiederholt ein Wort der Kennung die Dokumentart („Ersatzteilrechnung“ bei Rechnung), fällt
+  es weg. Hing es mit einem Nachbarwort zusammen („General- und Vorsorgevollmacht“, „Strom- und Gasrechnung“,
+  „Haftpflicht-/Hausratversicherung“), blieb ein Bruchstück stehen: „Vollmacht General- und“. Jetzt bleibt die Kennung
+  dann ganz und ersetzt die Dokumentart: „Name – General- und Vorsorgevollmacht“. Einzelne Wörter wie
+  „Ersatzteilrechnung 60565557“ und Kennungen, die mit der Dokumentart beginnen („Lohnabrechnung 10/2026“), bleiben wie
+  bisher.
+- **Spiegelbildliche Dokumente sind keine Dublette:** Zwei Vollmachten in Gegenrichtung (Vollmachtgeber und
+  Bevollmächtigter vertauscht) tragen dieselben Geburtsdaten, Postleitzahlen und dasselbe Datum. Hatten beide mindestens
+  fünf Zahlen, waren die Mengen gleich und die zweite galt als Kopie der ersten (seit 0.7 griff nur die Mindestzahl).
+  Jetzt müssen die gemeinsamen Daten auch in derselben Reihenfolge stehen; eine Kopie behält sie, ein spiegelbildliches
+  Formular nennt die Person des Dokuments zuerst. Beträge und andere Zahlen zählen dafür nicht, zwei OCR-Lesungen nehmen
+  Tabellenspalten manchmal in anderer Reihenfolge.
+
 ## [0.11.0] - 2026-11-14
 
 Garantie in Jahren, Ende aus dem Code (Backlog T-16).
