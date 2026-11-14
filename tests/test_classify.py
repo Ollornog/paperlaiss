@@ -496,7 +496,13 @@ _nk_unl = _lauf([{**_ok, "correspondent": "Beispielportal", "needs_ocr": True},
                  {**_ok, "correspondent": "Beispielportal", "needs_ocr": True}, {"match": None}], text=_kurz, dry=False, korr=98,
                 korrespondenten=[{"id": 98, "name": "Eigenfirma e.U."}])
 r.check("Korrespondent: kurzer, von der KI lesbar gemeldeter Beleg → neuer Absender wird angelegt",
-        ("/correspondents/", {"name": "Beispielportal"}) in _nk.get("send", []), str(_nk.get("send")))
+        ("/correspondents/", {"name": "Beispielportal", "owner": None}) in _nk.get("send", []), str(_nk.get("send")))
+# ---- T-18: a new correspondent has no owner (Paperless would make the calling service account the owner, and then no
+# person without superuser could see it).
+_t18 = [d for p_, d in _nk.get("send", []) if p_ == "/correspondents/"]
+r.check("T-18: a new correspondent is created with owner None",
+        bool(_t18) and all("owner" in d and d["owner"] is None for d in _t18), str(_t18))
+
 r.check("Korrespondent: meldet die KI auch nach OCR unlesbar, bleibt der bisherige (kein Anlegen)",
         not any(p == "/correspondents/" for p, _ in _nk_unl.get("send", []))
         and all(x.get("correspondent") == 98 for x in _nk_unl.get("patch", [])), str(_nk_unl.get("send")))
@@ -2587,7 +2593,7 @@ classify.TRACE.clear()
 _t3 = _lauf([{**_ok, "correspondent": "Concordia (Rechtsschutz)"}], dry=False,
             text=_gut + " Concordia (Rechtsschutz) Leistungsabteilung")
 r.check("T-15 wiring: a bracket printed in the text is part of the new name",
-        ("/correspondents/", {"name": "Concordia (Rechtsschutz)"}) in _t3.get("send", []), str(_t3.get("send")))
+        ("/correspondents/", {"name": "Concordia (Rechtsschutz)", "owner": None}) in _t3.get("send", []), str(_t3.get("send")))
 
 _martin = {"username": "martin", "first_name": "Martin", "last_name": "Muster", "email": ""}
 _kt = {"kennungen_je_konto": True, "konten": {"martin": {"tags": ["Martin", "Gibt es nicht"]}}}

@@ -415,4 +415,14 @@ r.check("T-15 proposals: an error or no JSON becomes an error for the dialog",
         kern.vorschlag_aus_ausgabe('{"fehler": "Korrespondent 9 nicht gefunden"}') == {"fehler": "Korrespondent 9 nicht gefunden"}
         and "fehler" in kern.vorschlag_aus_ausgabe("Traceback …") and "fehler" in kern.vorschlag_aus_ausgabe(""))
 
+# ---- T-18: objects the panel creates have no owner. Paperless makes the calling account the owner unless the
+# request names one; a tag owned by the panel's service account is invisible to every person without superuser.
+_anlagen = [c for c in _ast2.walk(_app) if isinstance(c, _ast2.Call) and getattr(c.func, "id", None) == "api_send"
+            and c.args and isinstance(c.args[0], _ast2.Constant) and c.args[0].value in ("/tags/", "/correspondents/",
+            "/document_types/", "/storage_paths/")]
+r.check("T-18: every object the panel creates is sent with owner None",
+        bool(_anlagen) and all(isinstance(c.args[1], _ast2.Dict) and any(
+            isinstance(k, _ast2.Constant) and k.value == "owner" and isinstance(v, _ast2.Constant) and v.value is None
+            for k, v in zip(c.args[1].keys, c.args[1].values)) for c in _anlagen))
+
 sys.exit(r.done())

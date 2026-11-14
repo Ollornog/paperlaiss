@@ -6,6 +6,17 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-11-15
+
+Neue Stammdaten ohne Besitzer (Backlog T-18).
+
+### Behoben
+
+- **Neue Korrespondenten und Tags gehören niemandem:** Paperless macht beim Anlegen das aufrufende Konto zum Besitzer,
+  solange die Anfrage keinen nennt. Läuft paperlaiss unter einem eigenen Dienstkonto, waren neue Korrespondenten (und
+  die Quelle-Tags der Ingest-API) für jede Person ohne Superuser unsichtbar. Jetzt gehen sie mit `owner: null` hinaus und
+  sind wie der übrige Bestand für alle Konten sichtbar.
+
 ## [0.11.1] - 2026-11-14
 
 Abgehackte Titel und spiegelbildliche Dokumente als Dublette (Backlog T-17).

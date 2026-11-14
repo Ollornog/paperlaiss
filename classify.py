@@ -3909,7 +3909,9 @@ def main():
                 elif DRY:
                     corr_info = f"NEU='{corr_name}' (dry)"
                 else:
-                    nc = send("/correspondents/", {"name": corr_name}, "POST")
+                    # No owner (T-18): Paperless makes the calling account the owner unless the request names one.
+                    # A correspondent owned by the service account is invisible to every person without superuser.
+                    nc = send("/correspondents/", {"name": corr_name, "owner": None}, "POST")
                     corr_id = nc["id"]; corr_info = f"NEU='{corr_name}'"
         TRACE["correspondent"] = {"vorschlag": corr_name, "ergebnis": corr_info, "pass2": pass2}
 
