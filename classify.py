@@ -3035,6 +3035,11 @@ def allerweltsname_grund(name, cfg):
     liste = ALLERWELTSNAMEN | {x for x in eigene if " " not in x}
     if all(w in liste for w in tok):
         return "nur eine Rolle oder Funktion, kein Name"
+    # A role with a number or a short code is still a role: "Hausverwaltung VE 38", "Finanzamt 23". Words with a
+    # letter beyond two characters carry the name ("O2 Telefonica", "Stadt Hamburg").
+    kern = [w for w in tok if not (w.isdigit() or len(w) <= 2)]
+    if kern and len(kern) < len(tok) and all(w in liste for w in kern):
+        return "nur eine Rolle oder Funktion mit Nummer, kein Name"
     # A role with an addition in brackets is still a role: "Vermieter (VE 38 Hebbelstraße 22)".
     aussen = [w for w in ctoks(re.sub(r"[(\[][^()\[\]]*[)\]]", " ", roh)) if w not in _FUELLWOERTER]
     if aussen and len(aussen) < len(tok) and all(w in liste for w in aussen):

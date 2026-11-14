@@ -2516,7 +2516,9 @@ r.check("T-15 common names: role, function, placeholder and two letters are refu
         and _aw("PA", {}).startswith("zu kurz") and _aw("Arbeitgeber", {}).startswith("nur eine Rolle"))
 r.check("T-15 common names: the cases the model created and a person deleted afterwards (PA, Arbeitgeber, "
         "Arbeitgeber (unbekannt), Vermieter (VE 38 …))",
-        all(_aw(n, {}) for n in ("PA", "Arbeitgeber", "Arbeitgeber (unbekannt)", "Vermieter (VE 38 Hebbelstraße 22)"))
+        all(_aw(n, {}) for n in ("PA", "Arbeitgeber", "Arbeitgeber (unbekannt)", "Vermieter (VE 38 Hebbelstraße 22)",
+                                 "Hausverwaltung VE 38", "Finanzamt 23", "Arbeitgeber (AVG/HIM)"))
+        and not _aw("O2 Telefonica", {}) and not _aw("DB Regio", {})
         and not _aw("Concordia (Rechtsschutz)", {}) and not _aw("Kraftfahrt-Bundesamt (KBA)", {}))
 r.check("T-15 common names: real names pass (place, brand, short real name of three letters)",
         not any(_aw(n, {}) for n in ("Finanzamt Stormarn", "Deutsche Bank", "AVG", "Kamps Brot und Backwaren GmbH",
