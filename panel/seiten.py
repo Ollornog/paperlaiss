@@ -710,7 +710,8 @@ EINSTELLUNGEN = {
                 "Der KI-Knopf in Paperless und das Panel funktionieren weiter."),
     "marker_tag": ("Allgemein", "Marker-Tag",
                    "Setzt paperlaiss nach jeder Klassifizierung. Ein Dokument mit diesem Tag wird beim "
-                   "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz)."),
+                   "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz). Leer: kein Tag, die "
+                   "Marke steht unsichtbar im Trace des Dokuments (traces/<id>.json, „klassifiziert“)."),
     "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 1 und 2)."),
     "temperature": ("KI-Modell & Prompt", "Temperatur",
                     "Wie frei das Modell antwortet: 0 = immer gleich, höher = kreativer. Für Klassifizierung niedrig halten (0–0,2)."),
@@ -781,6 +782,14 @@ EINSTELLUNGEN = {
                             "Dokumenttypen ohne Ausstellungsdatum, deren Datum der letzte Tag des Abrechnungsmonats ist "
                             "(Lohnabrechnung). paperlaiss liest den Monat aus „Abrechnungsmonat …“ bzw. „Monat/Jahr …“, "
                             "nicht aus einer Rückrechnung; ein Ausstellungsdatum im Text bleibt. Leer = aus. Einer je Zeile."),
+    "allerweltsnamen": ("Korrespondenten", "Keine Korrespondenten aus Allerweltsnamen",
+                        "Wörter oder ganze Namen, aus denen paperlaiss nie einen NEUEN Korrespondenten anlegt — zusätzlich "
+                        "zur eingebauten Liste (Arbeitgeber, Personalabteilung, Krankenkasse, Vermieter …). Ein Vorschlag, "
+                        "der nur aus solchen Wörtern besteht, bleibt ohne Korrespondent und bekommt einen Prüfhinweis. "
+                        "Einer je Zeile."),
+    "korrespondent_min_zeichen": ("Korrespondenten", "Mindestlänge neuer Korrespondenten",
+                                  "So viele Buchstaben und Ziffern (ohne Rechtsform) braucht ein neuer Korrespondent "
+                                  "mindestens; „PA“ wird bei 3 nicht angelegt. Bestehende Korrespondenten gelten immer."),
     "einzugsstellen_muster": ("Korrespondenten", "Muster Krankenkasse/Einzugsstelle",
                               "Regulärer Ausdruck (ohne Groß-/Kleinschreibung) für Namen, die bei den Typen vom "
                               "Arbeitgeber nie Korrespondent sind."),

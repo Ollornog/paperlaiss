@@ -10,7 +10,10 @@ Sollliste (JSON): [{"id": 905, "korrespondent": "Häuser", "typ": "Erklaerung", 
 Ein fehlender Schlüssel wird nicht geprüft; "korrespondent": null heißt „keiner erwartet“.
 
 Aufruf (wo classify.py und PAPERLESS_TOKEN/MISTRAL_KEY verfügbar sind, etwa im Panel-Container):
-  python3 eval.py soll.json [--aus lauf.json] [--vergleich alter-lauf.json] [--parallel 2] [--mit-ocr]
+  python3 eval.py soll.json [--aus lauf.json] [--vergleich alter-lauf.json] [--parallel 2] [--mit-ocr] [--wie-import]
+
+--wie-import blendet Titel, Korrespondent, Typ, Datum und Felder der Dokumente aus (CLASSIFY_WIE_IMPORT): Ohne
+das steht der schon korrigierte Wert als „bisheriger Korrespondent“ im Prompt, und ein Treffer belegt nichts.
 """
 import argparse, concurrent.futures, json, os, re, subprocess, sys, unicodedata
 
@@ -86,8 +89,8 @@ def bericht(ergebnisse, alt=None):
             "rueckschritte": rueck, "verbesserungen": besser, "fehler": fehler}
 
 
-def ein_lauf(eintrag, mit_ocr, wiederholen=1):
-    laeufe = [_ein_lauf(eintrag, mit_ocr) for _ in range(max(1, wiederholen))]
+def ein_lauf(eintrag, mit_ocr, wiederholen=1, wie_import=False):
+    laeufe = [_ein_lauf(eintrag, mit_ocr, wie_import) for _ in range(max(1, wiederholen))]
     gut = [l for l in laeufe if not l.get("fehler")]
     if not gut:
         return laeufe[0]
@@ -96,11 +99,20 @@ def ein_lauf(eintrag, mit_ocr, wiederholen=1):
             "roh_alle": [l.get("roh") for l in gut] if len(gut) > 1 else None}
 
 
-def _ein_lauf(eintrag, mit_ocr):
-    env = {**os.environ, "CLASSIFY_DRY": "1", "CLASSIFY_FORCE": "1", "CLASSIFY_SOURCE": "manual",
-           "CLASSIFY_DOC": str(eintrag["id"]), "CLASSIFY_LOG": os.environ.get("EVAL_LOG", "/tmp/paperlaiss-eval.log")}
+def lauf_umgebung(eintrag, mit_ocr, wie_import=False, basis=None):
+    """Environment of one dry run: never writes, OCR only on request, optionally as on import (T-15)."""
+    env = {**(os.environ if basis is None else basis), "CLASSIFY_DRY": "1", "CLASSIFY_FORCE": "1",
+           "CLASSIFY_SOURCE": "manual", "CLASSIFY_DOC": str(eintrag["id"]),
+           "CLASSIFY_LOG": os.environ.get("EVAL_LOG", "/tmp/paperlaiss-eval.log")}
     if not mit_ocr:
         env["CLASSIFY_NO_OCR"] = "1"
+    if wie_import:
+        env["CLASSIFY_WIE_IMPORT"] = "1"
+    return env
+
+
+def _ein_lauf(eintrag, mit_ocr, wie_import=False):
+    env = lauf_umgebung(eintrag, mit_ocr, wie_import)
     out = subprocess.run([sys.executable, os.path.join(HIER, "classify.py")], env=env,
                          capture_output=True, text=True, timeout=900).stdout
     try:
@@ -116,10 +128,11 @@ def main(argv=None):
     ap.add_argument("soll"); ap.add_argument("--aus"); ap.add_argument("--vergleich")
     ap.add_argument("--parallel", type=int, default=2); ap.add_argument("--mit-ocr", action="store_true")
     ap.add_argument("--wiederholen", type=int, default=1, help="Läufe je Dokument; Abweichungen zählen als „schwankend“")
+    ap.add_argument("--wie-import", action="store_true", help="Metadaten ausblenden, als käme das Dokument gerade an")
     a = ap.parse_args(argv)
     soll = json.load(open(a.soll, encoding="utf-8"))
     with concurrent.futures.ThreadPoolExecutor(max(1, a.parallel)) as ex:
-        ergebnisse = list(ex.map(lambda e: ein_lauf(e, a.mit_ocr, a.wiederholen), soll))
+        ergebnisse = list(ex.map(lambda e: ein_lauf(e, a.mit_ocr, a.wiederholen, a.wie_import), soll))
     if a.aus:
         json.dump(ergebnisse, open(a.aus, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     alt = json.load(open(a.vergleich, encoding="utf-8")) if a.vergleich else None

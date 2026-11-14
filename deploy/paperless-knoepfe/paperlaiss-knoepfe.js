@@ -7,6 +7,7 @@
  *                  ein PDF (optional Seitenzahlen, Inhaltsverzeichnis) oder einzeln (Dateiname aus
  *                  Vorlage, Nummer, Sortierung, optional ZIP und Verzeichnis-PDF).
  * Korrespondent:   Abschnitt „paperlaiss" im Bearbeiten-Dialog — Kontext, Aliase, Domains usw.,
+ *                  mit KI-Knopf, der sie aus den Dokumenten vorschlägt (übernommen erst nach Haken),
  *                  die der Klassifizierer beim Zuordnen nutzt; gespeichert mit „Save".
  *
  * Kein Fork: Paperless lädt diese Datei, weil ein Init-Skript sie beim Start einhängt
@@ -809,6 +810,56 @@
         ev.preventDefault(); ev.stopPropagation();
         uebernehmen(edit.closest("[data-pl-wert]"), true);
       }
+    });
+    // KI-Knopf (T-15): Stammdaten aus allen Dokumenten des Korrespondenten vorschlagen. Nichts wird still
+    // geschrieben: die Vorschläge stehen mit Haken da, „Übernehmen“ trägt die angehakten in die Felder oben
+    // ein, gespeichert wird erst mit Paperless' „Save“. Ein Ersatz für einen schon gefüllten Wert (Adresse,
+    // Kontext) ist nie vorab angehakt.
+    const ki = document.createElement("div");
+    ki.className = "mb-3";
+    ki.innerHTML = '<button type="button" class="btn btn-sm btn-outline-primary" data-pl-ki>' + ICON.ki +
+      ' <span>KI: Stammdaten aus den Dokumenten vorschlagen</span></button><div class="mt-2" data-pl-ki-erg></div>';
+    box.insertBefore(ki, box.children[2] || null);
+    const erg = ki.querySelector("[data-pl-ki-erg]");
+    const titelVon = Object.fromEntries(d.felder.map(([name, titel]) => [name, titel]));
+    ki.querySelector("[data-pl-ki]").addEventListener("click", async (ev) => {
+      const knopf = ev.currentTarget;
+      knopf.disabled = true;
+      erg.innerHTML = '<div class="small text-muted" role="status">paperlaiss liest die Dokumente des Korrespondenten …</div>';
+      let v;
+      try { v = await panel("/knopf/korrespondent/" + cid + "/vorschlag", {}); }
+      catch (e) { erg.innerHTML = '<div class="small text-danger">paperlaiss: ' + esc(e.message) + "</div>"; return; }
+      finally { knopf.disabled = false; }
+      const zeilen = [];
+      Object.entries(v.vorschlag || {}).forEach(([feld, werte]) => werte.forEach((x) => zeilen.push(
+        '<label class="d-flex align-items-start gap-2 small border-bottom py-1 mb-0">' +
+        '<input type="checkbox" class="form-check-input mt-1" data-pl-v-feld="' + esc(feld) + '" data-pl-v-wert="' +
+        esc(x.wert) + '"' + (x.ersetzt ? "" : " checked") + '><span class="text-break"><strong>' + esc(titelVon[feld] || feld) +
+        ":</strong> " + esc(x.wert) + (x.ersetzt ? ' <span class="text-muted">(ersetzt „' + esc(x.ersetzt) + "“)</span>" : "") +
+        (x.dokument ? ' <span class="text-muted">· Dokument ' + esc(x.dokument) + "</span>" : "") + "</span></label>")));
+      if (!zeilen.length) {
+        erg.innerHTML = '<div class="small text-muted">Keine neuen Stammdaten in ' + esc(v.dokumente || 0) + " Dokument(en).</div>";
+        return;
+      }
+      erg.innerHTML = '<div class="small text-muted mb-1">Vorschläge aus ' + esc(v.dokumente) + " Dokument(en), nur Werte, " +
+        "die wörtlich im Text stehen. Angehakte mit „Übernehmen“ eintragen, dann mit „Save“ speichern.</div>" + zeilen.join("") +
+        '<div class="mt-2 d-flex gap-2"><button type="button" class="btn btn-sm btn-primary" data-pl-v-ok>Übernehmen</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary" data-pl-v-weg>Verwerfen</button></div>';
+    });
+    erg.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-pl-v-weg]")) { erg.innerHTML = ""; return; }
+      if (!ev.target.closest("[data-pl-v-ok]")) return;
+      let n = 0;
+      erg.querySelectorAll("[data-pl-v-feld]:checked").forEach((c) => {
+        const feld = c.dataset.plVFeld, wert = c.dataset.plVWert;
+        if (liste(feld)) {
+          if (!vorhanden(feld, wert)) { liste(feld).insertAdjacentHTML("beforeend", wertZeile(wert)); n++; }
+        } else {
+          const el = box.querySelector('[data-pl="' + feld + '"]');
+          if (el) { el.value = wert; n++; }
+        }
+      });
+      erg.innerHTML = '<div class="small text-success">' + n + " Wert(e) eingetragen — mit „Save“ speichern.</div>";
     });
     const form = dlg.querySelector("form");
     // Fangphase: vor Paperless' eigenem Speichern, das den Dialog danach schliesst.

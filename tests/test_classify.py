@@ -146,7 +146,7 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
     return aufrufe
 
 
-_ok = {"document_type": "Rechnung", "correspondent": "X", "fields": {}, "needs_ocr": False}
+_ok = {"document_type": "Rechnung", "correspondent": "Xantor Handel", "fields": {}, "needs_ocr": False}
 _a = _lauf([{**_ok, "needs_ocr": True}, _ok])
 r.check("Verdrahtung: KI meldet Müll → genau ein OCR-Nachlauf", _a["ocr"] == 1, str(_a["ocr"]))
 r.check("Verdrahtung: danach Pass 1 erneut mit dem OCR-Text",
@@ -1835,8 +1835,8 @@ r.check("Beleg: Beträge und Wörter werden nicht geprüft, Ganzzahlen schon",
 
 def _beleg_lauf(nummer):
     return _lauf([{**_ok, "fields": {"Rechnungsnummer": "BEHALTEN", "Fahrzeug": "BEHALTEN", "Betrag": "BEHALTEN"}}],
-                 dry=False, source="knopf", force=True, titel=f"X – Rechnung {nummer}", korr=7,
-                 korrespondenten=[{"id": 7, "name": "X"}], felder=_uf[:3],
+                 dry=False, source="knopf", force=True, titel=f"Xantor Handel – Rechnung {nummer}", korr=7,
+                 korrespondenten=[{"id": 7, "name": "Xantor Handel"}], felder=_uf[:3],
                  feldwerte=[{"field": 1, "value": nummer}, {"field": 2, "value": "VW Polo"}, {"field": 3, "value": "EUR11.50"}])
 
 
@@ -2507,5 +2507,148 @@ r.check("T-14 VAT ID: not learned (and no finding) when the text does not print 
         "ustid" not in _su and _sv.get("ustid") == "steht so nicht im Text" and _su2.get("ustid") == ["DE113822785"]
         and classify.kennung_im_text("DE113822785", "UID DE 113.822.785") and not classify.kennung_im_text("", "x"),
         f"{_su} {_sv} {_su2}")
+
+# ---- T-15: no role or two letters as a new correspondent, invented brackets, trace marker, mail wait, account tags.
+_aw = classify.allerweltsname_grund
+r.check("T-15 common names: role, function, placeholder and two letters are refused",
+        all(_aw(n, {}) for n in ("Arbeitgeber", "PA", "Arbeitgeber (unbekannt)", "Die Krankenkasse", "Mein Arbeitgeber GmbH",
+                                 "Unbekannt", "?", "Personalabteilung", "Sparkasse"))
+        and _aw("PA", {}).startswith("zu kurz") and _aw("Arbeitgeber", {}).startswith("nur eine Rolle"))
+r.check("T-15 common names: the cases the model created and a person deleted afterwards (PA, Arbeitgeber, "
+        "Arbeitgeber (unbekannt), Vermieter (VE 38 …))",
+        all(_aw(n, {}) for n in ("PA", "Arbeitgeber", "Arbeitgeber (unbekannt)", "Vermieter (VE 38 Hebbelstraße 22)"))
+        and not _aw("Concordia (Rechtsschutz)", {}) and not _aw("Kraftfahrt-Bundesamt (KBA)", {}))
+r.check("T-15 common names: real names pass (place, brand, short real name of three letters)",
+        not any(_aw(n, {}) for n in ("Finanzamt Stormarn", "Deutsche Bank", "AVG", "Kamps Brot und Backwaren GmbH",
+                                     "Sparkasse Holstein", "BARMER", "Stadt Hamburg", "bc GmbH", "O2")))
+r.check("T-15 common names: the config extends the list (words and whole names) and sets the minimum length",
+        _aw("Lohnstelle", {"allerweltsnamen": ["Lohnstelle"]}) and _aw("Firma Muster", {"allerweltsnamen": ["Firma Muster"]})
+        and not _aw("Firma Muster", {}) and _aw("AVG", {"korrespondent_min_zeichen": 4})
+        and not _aw("AB Kfz", {"korrespondent_min_zeichen": 3}))
+r.check("T-15 bracket: invented long form goes, a bracket printed in the text stays, no bracket → nothing",
+        classify.klammer_erfunden("AVG (Albatros Versicherungsdienst GmbH)", "AVG Hamburg Lohnabrechnung")
+        == ("Albatros Versicherungsdienst GmbH", "AVG")
+        and classify.klammer_erfunden("Concordia (Rechtsschutz)", "Concordia\n(Rechtsschutz) Leistungsabteilung") is None
+        and classify.klammer_erfunden("Deutsche Bank", "x") is None)
+
+classify.TRACE.clear()
+_t1 = _lauf([{**_ok, "correspondent": "Arbeitgeber"}], dry=False, korrespondenten=[{"id": 7, "name": "Muster GmbH"}],
+            cfg={"pruef_notiz": True})
+r.check("T-15 wiring: a role is not created — no POST, no correspondent written, a finding and a note",
+        not any(p_ == "/correspondents/" for p_, _ in _t1.get("send", []))
+        and "correspondent" not in _t1["patch"][0]
+        and "allerweltsname" in (classify.TRACE.get("pruefen") or {})
+        and any("/notes/" in p_ and "Arbeitgeber" in str(d_) for p_, d_ in _t1.get("send", [])), str(_t1.get("send")))
+classify.TRACE.clear()
+_t2 = _lauf([{**_ok, "correspondent": "AVG (Albatros Versicherungsdienst GmbH)"}], dry=False,
+            korrespondenten=[{"id": 16, "name": "AVG"}, {"id": 17, "name": "Andere AG"}])
+r.check("T-15 wiring: invented bracket dropped, the short name matches the existing correspondent",
+        _t2["patch"][0].get("correspondent") == 16 and not any(p_ == "/correspondents/" for p_, _ in _t2.get("send", []))
+        and classify.TRACE.get("klammer_verworfen", {}).get("weiter_mit") == "AVG", str(_t2.get("send")))
+classify.TRACE.clear()
+_t3 = _lauf([{**_ok, "correspondent": "Concordia (Rechtsschutz)"}], dry=False,
+            text=_gut + " Concordia (Rechtsschutz) Leistungsabteilung")
+r.check("T-15 wiring: a bracket printed in the text is part of the new name",
+        ("/correspondents/", {"name": "Concordia (Rechtsschutz)"}) in _t3.get("send", []), str(_t3.get("send")))
+
+_martin = {"username": "martin", "first_name": "Martin", "last_name": "Muster", "email": ""}
+_kt = {"kennungen_je_konto": True, "konten": {"martin": {"tags": ["Martin", "Gibt es nicht"]}}}
+classify.TRACE.clear()
+_t4 = _lauf([_ok], dry=False, besitzer=_martin, cfg=_kt, alle_tags=[{"id": 140, "name": "Martin"}, {"id": 9, "name": "Anders"}])
+r.check("T-15 account tags: every document of the account gets its tags (missing ones are not created)",
+        140 in _t4["patch"][0]["tags"] and 9 not in _t4["patch"][0]["tags"]
+        and classify.konto_tag_ids({"_konto_tags": ["martin"]}, {"martin": 140}) == [140]
+        and classify.konto_tag_ids({}, {"martin": 140}) == [], str(_t4["patch"][0]))
+classify.TRACE.clear()
+_t5 = _lauf([_ok], dry=False, besitzer={**_martin, "username": "erika"}, cfg=_kt, alle_tags=[{"id": 140, "name": "Martin"}])
+r.check("T-15 account tags: another account's document does not get them", 140 not in _t5["patch"][0]["tags"])
+
+_spur = Path(classify.TRACE_DIR) / "5.json"
+_spur.unlink(missing_ok=True)
+classify.TRACE.clear()
+_m1 = _lauf([_ok], dry=False, cfg={"marker_tag": ""}, alle_tags=[{"id": 141, "name": "ai-processed"}])
+r.check("T-15 trace marker: an empty marker_tag sets no tag, the trace carries the mark",
+        141 not in _m1["patch"][0]["tags"] and classify.klassifiziert_seit(5) is not None)
+_m2 = _lauf([_ok], dry=False, cfg={"marker_tag": ""})
+r.check("T-15 trace marker: the next automatic run skips (no model call, nothing written)",
+        _m2["chat"] == [] and not _m2.get("patch"))
+_m3 = _lauf([_ok], dry=False, cfg={"marker_tag": ""}, force=True, source="knopf")
+r.check("T-15 trace marker: a forced run (button) still runs", len(_m3["chat"]) == 1 and _m3.get("patch"))
+_m4 = _lauf([_ok], dry=False, alle_tags=[{"id": 141, "name": "ai-processed"}])
+r.check("T-15 trace marker: with a marker tag configured the tag decides, not the trace",
+        len(_m4["chat"]) == 1 and 141 in _m4["patch"][0]["tags"])
+_m5 = _lauf([], dry=False, tags=[141], alle_tags=[{"id": 141, "name": "ai-processed"}])
+r.check("T-15 trace marker: tag mode unchanged — the tag skips", _m5["chat"] == [])
+classify.TRACE.clear()
+classify.TRACE["_stage"] = "Mistral"           # a later run that broke off: its trace has no mark of its own
+classify.save_trace("5")
+r.check("T-15 trace marker: a run that breaks off keeps the earlier mark", classify.klassifiziert_seit(5) is not None)
+r.check("T-15 trace marker: schon_klassifiziert reads only the mark, not the bare trace",
+        not classify.schon_klassifiziert({"marker_tag": ""}, None, [], 999999)
+        and classify.schon_klassifiziert({"marker_tag": "x"}, 3, [3], 999999)
+        and not classify.schon_klassifiziert({"marker_tag": "x"}, None, [3], 5))
+_spur.unlink(missing_ok=True)
+
+_mk = [{"id": 40, "name": "Mail-Kontext", "data_type": "longtext"}]
+_w1 = _lauf([_ok], dry=False, felder=_mk, feldwerte=[{"field": 40, "value": None}], cfg={"mail_context_field": "Mail-Kontext"})
+_w2 = _lauf([_ok], dry=False, felder=_mk, feldwerte=[{"field": 40, "value": None}], cfg={"mail_context_field": "Mail-Kontext"},
+            source="mail", force=True)
+_w3 = _lauf([_ok], dry=False, felder=_mk, feldwerte=[{"field": 40, "value": "Von: a@b"}], cfg={"mail_context_field": "Mail-Kontext"})
+r.check("T-15 mail wait: empty mail-context field → the automatic run waits; the mail follow-up and a filled field run",
+        _w1["chat"] == [] and not _w1.get("patch") and len(_w2["chat"]) == 1 and len(_w3["chat"]) == 1)
+
+# ---- T-15: master data from all documents (button in the correspondent dialog)
+_se = classify.alle_eigenen_kennungen({"eigene_kennungen": {"namen": ["Martin Muster"], "iban": ["DE89 3704 0044 0532 0130 00"]},
+                                       "konten": {"martin": {"nummern": ["730 1807023"]}, "*": {"domains": ["eigen.example"]}}})
+_sd = [{"id": 11, "content": "Muster Versicherung AG\nHauptstr. 5\n20095 Hamburg\nTel. 040 123456\nUSt-IdNr. DE113822785\n"
+                             "Ihre Kundennummer: 4711-99\nKonto 730 1807023\nIBAN DE89 3704 0044 0532 0130 00\n"
+                             "Muster Vers. AG service@muster-vers.example info@eigen.example\nPersonalnummer 00888\nHerrn Martin Muster"},
+       {"id": 12, "content": "Muster Vers. AG, IBAN DE02 1203 0000 0000 2020 51"}]
+_sa = {"adresse": "Hauptstr. 5, 20095 Hamburg", "kontext": "Versicherer in Hamburg",
+       "aliase": ["Muster Vers. AG", "Martin Muster", "Muster Versicherung AG"], "ustid": ["DE113822785", "DE999999999"],
+       "iban": ["DE89 3704 0044 0532 0130 00", "DE02 1203 0000 0000 2020 51"], "email": ["service@muster-vers.example", "info@eigen.example"],
+       "domains": ["muster-vers.example", "gmail.com"], "telefon": ["040 123456", "+49 40 999"],
+       "kundennummer": ["4711-99", "730 1807023", "00888"]}
+_sv = classify.stammdaten_vorschlagen({"id": 5, "name": "Muster Versicherung AG"}, {}, _sa, _sd, _se)
+_w = lambda f: [x["wert"] for x in _sv["vorschlag"].get(f, [])]
+r.check("T-15 master data: values printed in a document are proposed, with the document as source",
+        _w("adresse") == ["Hauptstr. 5, 20095 Hamburg"] and _w("ustid") == ["DE113822785"] and _w("telefon") == ["040123456"]
+        and _w("iban") == ["DE02 1203 0000 0000 2020 51"] and _sv["vorschlag"]["iban"][0]["dokument"] == 12
+        and _w("email") == ["service@muster-vers.example"] and _w("domains") == ["muster-vers.example"] and _w("kundennummer") == ["4711-99"]
+        and _w("aliase") == ["Muster Vers. AG"] and _w("kontext") == ["Versicherer in Hamburg"], str(_sv["vorschlag"]))
+r.check("T-15 master data: own numbers of ANY account, own IBAN/domain, personnel numbers and invented values never",
+        not set(_w("kundennummer")) & {"730 1807023", "7301807023", "00888"} and "DE89 3704 0044 0532 0130 00" not in _w("iban")
+        and "info@eigen.example" not in _w("email") and "DE999999999" not in _w("ustid") and "+49 40 999" not in _w("telefon")
+        and "Martin Muster" not in _w("aliase") and "gmail.com" not in _w("domains"), str(_sv["verworfen"]))
+_sv2 = classify.stammdaten_vorschlagen({"id": 5, "name": "Muster Versicherung AG"},
+                                       {"adresse": "Alte Str. 1", "kontext": "Versicherer in Hamburg", "iban": ["DE02 1203 0000 0000 2020 51"]},
+                                       _sa, _sd, _se)
+r.check("T-15 master data: stored values are not proposed again, a filled address comes as replacement",
+        "iban" not in _sv2["vorschlag"] and "kontext" not in _sv2["vorschlag"]
+        and _sv2["vorschlag"]["adresse"] == [{"wert": "Hauptstr. 5, 20095 Hamburg", "dokument": 11, "ersetzt": "Alte Str. 1"}],
+        str(_sv2["vorschlag"]))
+_sv3 = classify.stammdaten_vorschlagen({"id": 5, "name": "X"}, {}, _sa, _sd, _se,
+                                       fremd=lambda f, w: "Andere AG" if f == "iban" else None)
+r.check("T-15 master data: a value another correspondent holds is dropped with the reason",
+        "iban" not in _sv3["vorschlag"] and any("gehört schon zu Andere AG" in x for x in _sv3["verworfen"].get("iban", [])))
+
+_sr = {"/correspondents/": {"results": [{"id": 5, "name": "Muster Versicherung AG"}]},
+       "/documents/11/": _sd[0], "/documents/12/": _sd[1]}
+_sc = []
+_alt = (classify.get, classify.mistral_chat, classify.CFG)
+classify.get = lambda p, raw=False: next(v for k, v in _sr.items() if p.startswith(k))
+classify.mistral_chat = lambda m, mt=900, schema=None, name="": (_sc.append((m, schema)) or (dict(_sa), "{}"))
+classify.CFG = {**classify.CFG, "eigene_kennungen": {"namen": ["Martin Muster"]}, "konten": {"martin": {"nummern": ["730 1807023"]}}}
+try:
+    _se2 = classify.stammdaten_ermitteln("5", [11, 12])
+finally:
+    classify.get, classify.mistral_chat, classify.CFG = _alt
+r.check("T-15 master data wiring: one model call over both documents, strict schema, proposals out, nothing written",
+        len(_sc) == 1 and "=== Dokument 11 ===" in _sc[0][0][1]["content"] and "=== Dokument 12 ===" in _sc[0][0][1]["content"]
+        and _sc[0][1]["required"] == list(classify.STAMM_FELDER) and _se2["dokumente"] == 2
+        and _se2["vorschlag"].get("kundennummer") == [{"wert": "4711-99", "dokument": 11}], str(_se2)[:300])
+r.check("T-15 master data: excerpts keep head and tail of long documents and stop at the total budget",
+        classify.stamm_auszuege([{"id": 1, "content": "K" * 5000 + "FUSS"}])[0][1].endswith("FUSS")
+        and len(classify.stamm_auszuege([{"id": i, "content": "x" * 3000} for i in range(40)])) * 3100 <= classify.STAMM_GESAMT + 3100)
 
 sys.exit(r.done())

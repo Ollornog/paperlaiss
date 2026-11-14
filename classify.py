@@ -23,7 +23,10 @@ Secrets NUR aus ENV/Config: PAPERLESS_TOKEN, MISTRAL_KEY (bzw. config api_key_te
 Env-Schalter:
   DOCUMENT_ID / CLASSIFY_DOC   Doc-ID (Post-Consume setzt DOCUMENT_ID)
   CLASSIFY_DRY=1               nur ausgeben, nichts schreiben
-  CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag) neu machen
+  CLASSIFY_FORCE=1             auch schon-klassifizierte (Marker-Tag bzw. Trace-Marke) neu machen
+  CLASSIFY_WIE_IMPORT=1        für Messungen (eval.py --wie-import): Titel, Korrespondent, Typ, Datum und Felder
+                               des Dokuments ausblenden, als käme es gerade an — sonst stünde der korrigierte
+                               Wert als „bisheriger Korrespondent“ im Prompt und die Messung belegte nichts
   CLASSIFY_FORCE_OCR=1         Mistral-OCR erzwingen (+ content immer ersetzen)
   CLASSIFY_NO_OCR=1            OCR komplett aus (günstiger Bestandslauf)
   CLASSIFY_HINWEIS=<text>      Freitext des Nutzers, wenn der Anstoss ihn schon gelesen hat
@@ -35,6 +38,9 @@ Env-Schalter:
   CLASSIFY_DUMP_DEFAULTS=1     Default-Prompt/Config als JSON ausgeben (fürs Panel)
   CLASSIFY_PROMPT_VORSCHAU=1   fertig eingesetzten Pass-1-Prompt als JSON ausgeben (fürs Panel)
   CLASSIFY_DUMP_CONFIG=1       wirksame Config (Datei + Vorgaben, ohne Schlüssel) als JSON (fürs Panel)
+  CLASSIFY_STAMMDATEN=<id>     Stammdaten-Vorschläge für einen Korrespondenten aus seinen Dokumenten als JSON
+                               (KI-Knopf im Korrespondenten-Dialog; schreibt nichts). CLASSIFY_STAMMDATEN_DOKS=
+                               1,2,3 begrenzt auf die Dokumente, die der Nutzer sehen darf
 """
 import os, sys, json, re, unicodedata, urllib.request, urllib.error, urllib.parse, difflib, datetime, base64, traceback, tempfile, subprocess
 
@@ -65,7 +71,7 @@ CFG = {
     "content_end_len": 1000,           # davon am Ende des Dokuments (Summe, Fälligkeit)
     # Defaults:
     "tagging_enabled": False,          # KI vergibt KEINE inhaltlichen Tags (Firmen-DMS: Tags sind manuelle Status/Richtung)
-    "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal
+    "marker_tag": "ai-processed",      # gesetzt nach Klassifizierung + Skip-Signal; leer = Marke im Trace (T-15)
     "unsicher_tag": "",                # optional: Flag-Tag bei Unsicherheit / KI-Tag-Vorschlag
     # Optional tag for a broken scan: blank pages, pages missing ("page 2 of 3" on a one-page document),
     # invented OCR text. Empty = such findings get the unsicher_tag like any other (T-10).
@@ -97,6 +103,11 @@ CFG = {
     # left to the model: it proposed the first day in 43 of 67 payslips, and the month of a correction
     # ("Rückrechnung März 2022") instead of the billing month (T-14). Empty = off.
     "monatsletzter_typen": [],
+    # Never a NEW correspondent (T-15): a role or function ("Arbeitgeber", "Personalabteilung" — built-in list
+    # ALLERWELTSNAMEN, extended here by words or whole names), a placeholder, or fewer letters/digits than
+    # `korrespondent_min_zeichen` ("PA"). Then no correspondent and a note to check.
+    "allerweltsnamen": [],
+    "korrespondent_min_zeichen": 3,
     "einzugsstellen_muster": r"\b(?:AOK|BKK|IKK|DAK|BARMER|HEK|hkk|KKH|\w*Knappschaft|\w*krankenkasse|Ersatzkasse|"
                              r"Gesundheitskasse|\w*GKK|ÖGK|Einzugsstelle)\b",   # case-insensitive
     "summary_field": "",               # optional: longtext-Feld für adaptive Zusammenfassung
@@ -491,7 +502,16 @@ def konto_cfg(cfg, owner_id, benutzer=None):
         return cfg
     fremde = _roh_liste(eigen.get("fremde_namen")) + _roh_liste(alle.get("fremde_namen"))
     return {**cfg, "eigene_kennungen": e, "_konto": u["username"],
-            **({"fremde_namen": list(dict.fromkeys(fremde))} if fremde else {})}
+            **({"fremde_namen": list(dict.fromkeys(fremde))} if fremde else {}),
+            **({"_konto_tags": _roh_liste(eigen.get("tags"))} if _roh_liste(eigen.get("tags")) else {})}
+
+
+def konto_tag_ids(cfg_lauf, tagid_by_norm):
+    """Tag IDs every document of this account gets (`konten.<user>.tags`, T-15), whatever the model says.
+
+    Paperless workflows cannot filter by owner; a household that tags everything of one person (for sharing
+    or a view) had to tag uploads from the web by hand. Tags that do not exist are left out (no new tag)."""
+    return [tagid_by_norm[norm(n)] for n in cfg_lauf.get("_konto_tags") or () if norm(n) in tagid_by_norm]
 
 def _domain_passt(dom, domains):
     return any(dom == d or dom.endswith("." + d) for d in domains)
@@ -1010,6 +1030,11 @@ def save_trace(did, extra=None):
     try:
         os.makedirs(TRACE_DIR, exist_ok=True)
         t = dict(TRACE); t["id"] = did; t["ts"] = f"{datetime.datetime.now():%F %T}"
+        if not t.get("klassifiziert"):
+            # The mark of an earlier run stays when this one broke off (T-15: the trace is the marker).
+            alt = klassifiziert_seit(did)
+            if alt:
+                t["klassifiziert"] = alt
         # ts in Ortszeit (lesbar), ts_utc eindeutig — die Nacharbeit im Panel vergleicht ihn mit der
         # Paperless-Historie (UTC); die Ortszeit des Containers ist nicht überall dieselbe.
         t["ts_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
@@ -1021,6 +1046,39 @@ def save_trace(did, extra=None):
         # entstanden dadurch ueber zwei Monate keine Traces, ohne dass es jemandem auffiel.
         # Ein Trace ist Diagnose, kein Selbstzweck: faellt er aus, muss man es SEHEN.
         log(f"trace-fail {did}: {e!r}")
+
+
+def klassifiziert_seit(did, trace_dir=None):
+    """When paperlaiss last classified the document to the end (its trace mark), or None (T-15).
+
+    With an empty `marker_tag` this mark replaces the marker tag: the skip signal of the automatic run
+    lives in the trace, nobody sees a tag. Written only by a real run (never a dry run), kept by later
+    runs that break off."""
+    try:
+        with open(os.path.join(trace_dir or TRACE_DIR, f"{did}.json"), encoding="utf-8") as f:
+            v = json.load(f).get("klassifiziert")
+        return v if isinstance(v, str) and v else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def schon_klassifiziert(cfg, marker_id, tag_ids_on, did, trace_dir=None):
+    """The skip signal: the marker tag on the document, or — with an empty `marker_tag` — the trace mark."""
+    if (cfg.get("marker_tag") or "").strip():
+        return bool(marker_id) and marker_id in tag_ids_on
+    return klassifiziert_seit(did, trace_dir) is not None
+
+
+def wartet_auf_mail(doc, cfields, feldname):
+    """Is the document a mail import whose context is still to come? (T-15)
+
+    A mail poller uploads the attachment with the mail-context field attached EMPTY, sets the value
+    afterwards and then classifies with CLASSIFY_SOURCE=mail. The automatic post-consume run in between
+    would classify without the mail and learn from it — it waits. Until T-15 a mail poller blocked it with
+    the marker tag, which no longer exists when the trace is the marker."""
+    fid = resolve_field(cfields, feldname)
+    return bool(fid) and any(c.get("field") == fid and c.get("value") in (None, "")
+                             for c in (doc.get("custom_fields") or []))
 
 
 def nachbearbeiten(did, patch, erfolg, lesbar):
@@ -2354,6 +2412,8 @@ def nur_markieren(did, doc, tag_ids_on, befunde, marker_id, unsicher_id, kaputt_
     ok, err = patch_doc(did, {"tags": tags})
     if not ok:
         log(f"markieren-fail {did}: {str(err)[:200]}")
+    else:
+        TRACE["klassifiziert"] = f"{datetime.datetime.now():%F %T}"
     if CFG.get("pruef_notiz"):
         try:
             notiz_setzen(did, befund_text(befunde))
@@ -2919,6 +2979,81 @@ def pass2_plausibel(vorschlag, name, alias="", haeufigkeit=None):
     return False, f"nur kurzes oder häufiges gemeinsames Wort ({', '.join(gemeinsam)})"
 
 
+# Words that say what someone is TO US, not who they are (T-15). On a page without a letterhead the model
+# filled the gap with "Arbeitgeber", "PA" (Personalabteilung) or "AVG (Albatros Versicherungsdienst GmbH)"
+# and a new correspondent was created each time. A new correspondent whose words are all of this list (legal
+# forms and articles ignored) is not created; `allerweltsnamen` in the config extends the list.
+ALLERWELTSNAMEN = frozenset("""
+    absender abteilung adressat amt anwalt anwaeltin arbeitgeber arbeitgeberin arbeitnehmer arbeitsamt arzt aerztin
+    auftraggeber auftragnehmer aussteller ausstellerin bank behoerde beratung betrieb buero dienstleister
+    eigentuemer empfaenger empfaengerin familie finanzamt firma frau gemeinde gericht gesellschaft
+    hausverwaltung haendler herr inkasso kanzlei kasse klinik krankenhaus krankenkasse krankenversicherung kunde
+    kundin kundendienst kundenservice landkreis lieferant lieferantin lohnbuero mieter mieterin notar notariat
+    partner personal personalabteilung personalbuero person post praxis privat privatperson rechtsanwalt
+    rechtsanwaeltin rentenversicherung schule sparkasse stadt steuerberater steuerberaterin support team
+    unbekannt unknown unternehmen vermieter vermieterin versicherer versicherung vertragspartner verwaltung
+    verkaeufer zahlstelle
+""".split())
+# Articles and possessives around a role ("Mein Arbeitgeber", "Die Krankenkasse") carry no name either.
+_FUELLWOERTER = frozenset("der die das den dem des ein eine einer eines mein meine meiner ihr ihre unser unsere "
+                          "sein seine dein deine euer eure a an of my our your".split())
+_RECHTSFORMEN = frozenset("gmbh ag kg ohg mbh ug kgaa se ev eg ltd llc inc sa srl sarl bv og gesmbh plc gbr".split())
+_PLATZHALTER = re.compile(r"unbekannt|unknown|\bn\s*/\s*a\b|\?|^-+$|nicht\s+(?:erkennbar|lesbar|angegeben)", re.I)
+
+
+def _flach(s):
+    """`norm` with single spaces — for "does this phrase appear in the text"."""
+    return " ".join(norm(s).split())
+
+
+def klammer_erfunden(name, text):
+    """A proposed name with a bracket the document does not print: (bracket, name without it), else None.
+
+    "AVG (Albatros Versicherungsdienst GmbH)" — the model expanded a short name it found and invented the long
+    form (T-15). The bracket goes; the short name is matched against the correspondents as usual. A bracket
+    that IS in the text stays (a real name like "Concordia (Rechtsschutz)" printed so)."""
+    m = re.search(r"\s*[(\[]([^()\[\]]*)[)\]]\s*", str(name or ""))
+    if not m:
+        return None
+    innen = m.group(1).strip()
+    if _flach(innen) and _flach(innen) in _flach(text):
+        return None
+    rest = re.sub(r"\s+", " ", (name[:m.start()] + " " + name[m.end():])).strip(" -–,")
+    return innen, rest
+
+
+def allerweltsname_grund(name, cfg):
+    """Why `name` must not become a NEW correspondent (T-15), or None.
+
+    Too short (fewer than `korrespondent_min_zeichen` letters/digits, default 3: "PA" — unless written with a legal
+    form or a digit, "bc GmbH", "O2"), a
+    placeholder ("unbekannt", "?"), or only a role or function ("Arbeitgeber", "Die Krankenkasse"; list
+    ALLERWELTSNAMEN plus the config's `allerweltsnamen`, which may also hold whole names). Better no
+    correspondent and a note than an invented one."""
+    roh = str(name or "").strip()
+    eigene = {_flach(x) for x in (cfg.get("allerweltsnamen") or []) if _flach(x)}
+    if _PLATZHALTER.search(roh):
+        return "Platzhalter statt Name"
+    tok = [w for w in ctoks(roh) if w not in _FUELLWOERTER]
+    try:
+        mindest = int(cfg.get("korrespondent_min_zeichen", 3) or 0)
+    except (TypeError, ValueError):
+        mindest = 3
+    # A short name with a legal form or a digit is a real one ("bc GmbH", "O2"); "PA" is not.
+    if sum(len(w) for w in tok) < mindest and not (set(norm(roh).split()) & _RECHTSFORMEN or re.search(r"\d", roh)):
+        return f"zu kurz (unter {mindest} Zeichen ohne Rechtsform)"
+    if _flach(roh) in eigene or " ".join(tok) in eigene:
+        return "steht auf der Liste allerweltsnamen"
+    liste = ALLERWELTSNAMEN | {x for x in eigene if " " not in x}
+    if all(w in liste for w in tok):
+        return "nur eine Rolle oder Funktion, kein Name"
+    # A role with an addition in brackets is still a role: "Vermieter (VE 38 Hebbelstraße 22)".
+    aussen = [w for w in ctoks(re.sub(r"[(\[][^()\[\]]*[)\]]", " ", roh)) if w not in _FUELLWOERTER]
+    if aussen and len(aussen) < len(tok) and all(w in liste for w in aussen):
+        return "nur eine Rolle oder Funktion, der Klammerzusatz ist kein Name"
+    return None
+
+
 def namens_haeufigkeit(corrs, alias):
     """Wort → in wie vielen Korrespondenten (Name oder Alias) es vorkommt — für Regel 3 oben."""
     z = {}
@@ -3233,6 +3368,7 @@ def main():
         log(f"skip {did}: Klassifizierer im Panel deaktiviert"); return
 
     OCR_VERDACHT.clear()
+    TRACE.pop("klassifiziert", None)      # set by THIS run only (save_trace keeps an earlier run's mark)
     doc = get(f"/documents/{did}/")
     global CFG_LAUF
     CFG_LAUF = konto_cfg(CFG, doc.get("owner"))
@@ -3252,7 +3388,8 @@ def main():
 
     # Ein Teil aus dem Aufteilen trägt Marker, Titel und Feldwerte seines Ausgangsdokuments (erbe_verwerfen).
     erbe = erbe_offen(doc, TRACE_DIR)
-    if erbe:
+    wie_import = os.environ.get("CLASSIFY_WIE_IMPORT") == "1"
+    if erbe or wie_import:
         TRACE["erbe"] = {"ausgangsdokument": teildokument_von(doc.get("original_file_name")),
                          "verworfen": {"titel": title or None, "korrespondent": doc.get("correspondent"),
                                        "typ": doc.get("document_type"), "datum": (doc.get("created") or "")[:10] or None,
@@ -3260,8 +3397,14 @@ def main():
         doc = erbe_verwerfen(doc)
         title = ""
 
-    if marker_id in tag_ids_on and not DRY and not FORCE and not FORCE_OCR and not erbe:
-        log(f"skip {did}: schon klassifiziert (Marker '{CFG['marker_tag']}')"); return
+    automatisch = not DRY and not FORCE and not FORCE_OCR
+    if automatisch and not erbe and schon_klassifiziert(CFG, marker_id, tag_ids_on, did):
+        log(f"skip {did}: schon klassifiziert ("
+            + (f"Marker '{CFG['marker_tag']}')" if (CFG.get("marker_tag") or "").strip() else "Trace-Marke)")); return
+    if automatisch and not SOURCE and CFG.get("mail_context_field") and any(
+            c.get("value") in (None, "") for c in (doc.get("custom_fields") or [])) and wartet_auf_mail(
+            doc, get("/custom_fields/?page_size=1000")["results"], CFG["mail_context_field"]):
+        log(f"skip {did}: wartet auf den Nachlauf des Mail-Imports (Feld '{CFG['mail_context_field']}' leer)"); return
     mark_running(did, "Start")
 
     reserved = reservierte_tags(CFG)
@@ -3525,7 +3668,7 @@ def main():
     # --- Korrespondent-Feedback-Loop ---
     set_stage(did, "Korrespondent")
     corr_name = ohne_tabellenrest(prop.get("correspondent"))
-    corr_id = None; corr_info = "kein"
+    corr_id = None; corr_info = "kein"; _gesperrt = None
     regel_k = korrespondent_aus_regel(corrs, content, eigene["namen"])
     if regel_k:
         # Feste Zuweisung gewinnt, VOR dem Abgleich — sonst legte der Lauf den Händler erst als neuen
@@ -3534,6 +3677,14 @@ def main():
         TRACE["correspondent"] = {"vorschlag": corr_name, "ergebnis": corr_info, "zuweisung": regel_k.get("match")}
         corr_name = regel_k["name"]
     elif corr_name:
+        # An invented bracket ("AVG (Albatros Versicherungsdienst GmbH)", T-15) goes before matching — unless the
+        # whole proposal is a known name or alias as it stands.
+        _kl = klammer_erfunden(corr_name, content)
+        if _kl and not any(_flach(c["name"]) == _flach(corr_name) for c in corrs) \
+                and not alias_treffer(corr_name, corrs, calias):
+            TRACE["klammer_verworfen"] = {"vorschlag": corr_name, "klammer": _kl[0], "weiter_mit": _kl[1]}
+            corr_name = _kl[1] or None
+    if not regel_k and corr_name:
         at = ctoks(corr_name); ak = " ".join(at)
         scored = sorted(((namens_aehnlichkeit(at, c, calias), c) for c in corrs), key=lambda x: -x[0])
         exact = next((c for s, c in scored if ak and " ".join(ctoks(c["name"])) == ak), None)
@@ -3586,6 +3737,12 @@ def main():
                 # wurde nicht angelegt — auch nicht mit ausdrücklichem Hinweis.
                 if korrespondent_behalten(doc.get("correspondent"), prop.get("needs_ocr"), hinweis):
                     corr_id = doc["correspondent"]; corr_info = "bestehenden behalten (Text unsicher)"
+                elif allerweltsname_grund(corr_name, CFG):
+                    # Never create a role, a placeholder or two letters as a correspondent (T-15): none, and a note.
+                    _grund = allerweltsname_grund(corr_name, CFG)
+                    corr_info = f"gesperrt: {corr_name} ({_grund})"
+                    _gesperrt = ("allerweltsname", f"Korrespondent „{corr_name}“ nicht angelegt — {_grund}; "
+                                                   "bitte von Hand zuordnen")
                 elif DRY:
                     corr_info = f"NEU='{corr_name}' (dry)"
                 else:
@@ -3681,8 +3838,9 @@ def main():
                               CFG_LAUF.get("fremde_namen"))
     if fp:
         pruefen["fremde_person"] = fp
-    if _verworfen and _verworfen[0] not in pruefen:
-        pruefen[_verworfen[0]] = _verworfen[1]
+    for _b in (_verworfen, _gesperrt):
+        if _b and _b[0] not in pruefen:
+            pruefen[_b[0]] = _b[1]
     db = datum_befund(dokument_datum(prop), wirksames_datum(prop, content, doc), doc)
     if db:
         pruefen["datum"] = db
@@ -3722,8 +3880,8 @@ def main():
         return
 
     # --- Zurückschreiben (KEIN owner/Rechte — macht post-consume.sh) ---
-    extra = (([marker_id] if marker_id else []) + befund_tags(pruefen, unsicher_id, kaputt_id)
-             + ([unsicher_id] if (new_tags and unsicher_id) else []))
+    extra = (([marker_id] if marker_id else []) + konto_tag_ids(CFG_LAUF, tagid_by_norm)
+             + befund_tags(pruefen, unsicher_id, kaputt_id) + ([unsicher_id] if (new_tags and unsicher_id) else []))
     keep_tags = tag_ids_on + tag_ids + extra
     patch = {"tags": list(dict.fromkeys(keep_tags))}
     if corr_id:
@@ -3781,6 +3939,7 @@ def main():
     if not ok and str(err).startswith(ZEIT):
         TRACE["writeback"]["fehler"] = err
         raise RuntimeError(f"Speichern nach Paperless nicht möglich: {err[:200]}")
+    TRACE["klassifiziert"] = f"{datetime.datetime.now():%F %T}"
 
     log(f"OK {did} | {corr_info} id={corr_id} | typ={dt_id} | tags={[tagname_by_id.get(i) for i in tag_ids]} | new={new_tags} | {ocr_note}{stamm_info}"
         + (f" | datum {date_note}" if date_note else "")
@@ -3798,6 +3957,168 @@ def main():
     TRACE["_stage"] = "fertig"
     save_trace(did)
     unmark_running(did)
+
+
+# --- Master data from all documents of a correspondent (T-15, button in the correspondent dialog) ---
+# paperlaiss learns master data only on the side, when a new document of the correspondent arrives; most
+# correspondents of an existing collection stay empty. The button reads the documents, the model proposes, the
+# rules of stammdaten_nachtragen decide, and the person confirms in the dialog — this mode writes nothing.
+
+STAMM_DOKS = 30                 # documents read (newest first)
+STAMM_KOPF, STAMM_FUSS = 2500, 600   # characters per document: letterhead and footer carry the master data
+STAMM_GESAMT = 60000            # all excerpts together
+STAMM_FELDER = ("adresse", "kontext", "aliase", "ustid", "iban", "email", "domains", "telefon", "kundennummer")
+STAMM_FRAGE = (
+    "Alle folgenden Dokumente stammen vom selben Absender: „{NAME}“. Ermittle seine Stammdaten.\n"
+    "- Nur Werte, die WÖRTLICH in den Dokumenten stehen, und nur die des Absenders — nie die des Empfängers "
+    "(wir: {WIR}), nie die einer Krankenkasse, Bank oder Behörde, die das Dokument nur nennt.\n"
+    "- adresse: seine Postanschrift in einer Zeile. kontext: ein kurzer Satz, was das für eine Stelle ist "
+    "(Branche, Ort, Rolle für uns). aliase: andere Schreibweisen SEINES Namens im Text (nicht der Name selbst).\n"
+    "- kundennummer: Nummern, unter denen ER uns führt (Kunden-, Vertrags-, Mitgliedsnummer) — keine "
+    "Personalnummer, keine Rechnungsnummer, keine Kostenstelle.\n"
+    "- Was nicht im Text steht: null bzw. leere Liste. Antworte nur mit JSON.")
+
+
+def stammdaten_schema():
+    liste = {"type": "array", "items": {"type": "string"}}
+    props = {"adresse": _NULLBAR("string"), "kontext": _NULLBAR("string"),
+             **{f: liste for f in STAMM_FELDER if f not in ("adresse", "kontext")}}
+    return {"type": "object", "properties": props, "required": list(STAMM_FELDER), "additionalProperties": False}
+
+
+def stamm_auszuege(docs):
+    """[(id, excerpt)] newest first: head and tail of each document, within STAMM_GESAMT."""
+    aus, summe = [], 0
+    for d in docs[:STAMM_DOKS]:
+        t = str(d.get("content") or "").strip()
+        if not t:
+            continue
+        a = t if len(t) <= STAMM_KOPF + STAMM_FUSS else t[:STAMM_KOPF] + "\n[…]\n" + t[-STAMM_FUSS:]
+        if summe + len(a) > STAMM_GESAMT:
+            break
+        aus.append((d["id"], a)); summe += len(a)
+    return aus
+
+
+def _kompakt(s):
+    return re.sub(r"[^0-9a-z@.]", "", unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower())
+
+
+def stamm_fundstelle(wert, docs):
+    """The first document whose text carries the value verbatim (spaces, line breaks and punctuation aside)."""
+    k = _kompakt(wert)
+    if len(k) < 3:
+        return None
+    return next((d for d in docs if k in _kompakt(d.get("content"))), None)
+
+
+def alle_eigenen_kennungen(cfg):
+    """Own identifiers of the whole household: the shared list plus every account (`konten`) — the button
+    proposes for anyone's correspondent, and no account's own number may land at a counterpart."""
+    e = {k: list(_roh_liste(v)) for k, v in (cfg.get("eigene_kennungen") or {}).items()}
+    for konto in (cfg.get("konten") or {}).values():
+        for k, v in (konto or {}).items():
+            if k in ("namen", "email", "iban", "ustid", "domains", "telefon", "nummern"):
+                e[k] = list(dict.fromkeys(e.get(k, []) + list(_roh_liste(v))))
+    return eigene_kennungen({"eigene_kennungen": e})
+
+
+def stammdaten_vorschlagen(korr, alt, antwort, docs, eigene, fremd=None, belegt=None, eigene_person=False):
+    """The model's answer → proposals, by the rules of stammdaten_nachtragen. Pure.
+
+    Each value must stand verbatim in one of the documents (that one is its source and its text decides —
+    personnel number, VAT ID, IBAN check digit); own values of any account, values of another
+    correspondent and values already stored are dropped. Single fields (address, context) already filled
+    come as a replacement for the person to tick, never ticked in advance. Returns
+    {"vorschlag": {feld: [{"wert", "dokument", "ersetzt"?}]}, "verworfen": {feld: [reason, …]}}."""
+    acc, vorschlag, verworfen = dict(alt or {}), {}, {}
+    ab = antwort if isinstance(antwort, dict) else {}
+
+    def weg(feld, wert, grund):
+        verworfen.setdefault(feld, []).append(f"{wert}: {grund}")
+
+    def neu(feld, wert, d, ersetzt=None):
+        if any(v["wert"] == wert for v in vorschlag.get(feld, [])):
+            return
+        vorschlag.setdefault(feld, []).append({"wert": wert, "dokument": d["id"], **({"ersetzt": ersetzt} if ersetzt else {})})
+
+    for feld in STAMM_FELDER:
+        roh = ab.get(feld)
+        liste = [roh] if isinstance(roh, str) else (roh if isinstance(roh, list) else [])
+        for w in (str(x).strip() for x in liste if not is_null(x)):
+            if not w:
+                continue
+            if feld == "kontext":
+                d0 = docs[0] if docs else {"id": None}
+                if not str(acc.get("kontext") or "").strip():
+                    neu("kontext", w[:300], d0)
+                elif str(acc.get("kontext")).strip() != w:
+                    neu("kontext", w[:300], d0, ersetzt=str(acc["kontext"]).strip())
+                continue
+            d = stamm_fundstelle(w if feld != "domains" else w.lower(), docs)
+            if not d:
+                weg(feld, w, "steht in keinem der Dokumente wörtlich")
+                continue
+            if feld == "aliase":
+                if _flach(w) == _flach(korr.get("name")) or any(_flach(w) == _flach(a) for a in werte(acc, "aliase")):
+                    continue
+                if ist_eigene_person(w, eigene) or allerweltsname_grund(w, {}):
+                    weg(feld, w, "eigener Name oder kein Name"); continue
+                neu(feld, w, d); continue
+            if feld == "domains":
+                dom = w.lower().lstrip("@")
+                if dom in FREEMAIL or _domain_passt(dom, eigene["domains"]):
+                    weg(feld, w, "Freemail oder eigene Domain"); continue
+                if any(dom == x.lower() for x in werte(acc, "domains")):
+                    continue
+                neu(feld, dom, d); continue
+            if feld == "adresse" and str(acc.get("adresse") or "").strip():
+                if _kompakt(acc["adresse"]) != _kompakt(w):
+                    b = belegt("adresse", w) if belegt else None
+                    if b:
+                        weg(feld, w, b)
+                    else:
+                        neu(feld, w[:300], d, ersetzt=str(acc["adresse"]).strip())
+                continue
+            # The rules of the automatic run, with the source document's text.
+            acc2, g, v = stammdaten_nachtragen(acc, {feld: w}, "", eigene, f"KI-Knopf · Dokument {d['id']}",
+                                               anhaengen=True, fremd=fremd, text=d.get("content") or "",
+                                               belegt=belegt, eigene_person=eigene_person)
+            if g:
+                acc = acc2
+                for f2, w2 in g.items():                     # an e-mail brings its domain along
+                    neu(f2, w2, d)
+            elif v:
+                for f2, grund in v.items():
+                    weg(f2, w, grund)
+    return {"vorschlag": vorschlag, "verworfen": verworfen}
+
+
+def stammdaten_ermitteln(cid, doc_ids=None):
+    """CLASSIFY_STAMMDATEN=<correspondent id> [CLASSIFY_STAMMDATEN_DOKS=<ids the person may see>]: read the
+    documents, ask the model once, print the proposals as JSON. Writes nothing."""
+    cid = int(cid)
+    corrs = get("/correspondents/?page_size=2000")["results"]
+    korr = next((c for c in corrs if c["id"] == cid), None)
+    if not korr:
+        return {"fehler": f"Korrespondent {cid} nicht gefunden"}
+    if doc_ids is None:
+        doc_ids = [d["id"] for d in get(f"/documents/?correspondent__id={cid}&ordering=-created&page_size={STAMM_DOKS}"
+                                        "&fields=id")["results"]]
+    docs = [get(f"/documents/{i}/") for i in list(doc_ids)[:STAMM_DOKS]]
+    auszuege = stamm_auszuege(docs)
+    if not auszuege:
+        return {"korrespondent": korr["name"], "dokumente": 0, "vorschlag": {}, "verworfen": {}}
+    eigene = alle_eigenen_kennungen(CFG)
+    wir = ", ".join(n for n in (CFG.get("eigene_kennungen") or {}).get("namen") or []) or "—"
+    frage = STAMM_FRAGE.format(NAME=korr["name"], WIR=wir)
+    texte = "\n\n".join(f"=== Dokument {i} ===\n{a}" for i, a in auszuege)
+    antwort, _ = mistral_chat([{"role": "system", "content": frage}, {"role": "user", "content": texte}],
+                              1500, stammdaten_schema(), "stammdaten")
+    erg = stammdaten_vorschlagen(korr, cmeta(cid), antwort, [d for d in docs if d["id"] in {i for i, _ in auszuege}],
+                                 eigene, stammdaten_fremd(corrs, cmeta, cid),
+                                 stammdaten_belegt(corrs, cmeta, cid, eigene), ist_eigene_person(korr["name"], eigene))
+    return {"korrespondent": korr["name"], "dokumente": len(auszuege), **erg}
 
 
 # --- Control run (T-10): the checks without the model, over documents already in Paperless ---
@@ -3930,6 +4251,13 @@ if __name__ == "__main__":
                           "ocr_always": CFG["ocr_always"], "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
         sys.exit(0)
 
+    if os.environ.get("CLASSIFY_STAMMDATEN"):
+        # CLASSIFY_STAMMDATEN=<correspondent> [CLASSIFY_STAMMDATEN_DOKS=1,2,3]: proposals only, nothing written (T-15).
+        _doks = os.environ.get("CLASSIFY_STAMMDATEN_DOKS")
+        print(json.dumps(stammdaten_ermitteln(os.environ["CLASSIFY_STAMMDATEN"],
+                                              [int(x) for x in _doks.split(",") if x.strip().isdigit()] if _doks else None),
+                         ensure_ascii=False))
+        sys.exit(0)
     if os.environ.get("CLASSIFY_KONTROLLE"):
         # CLASSIFY_KONTROLLE="1439-1859,1900" [CLASSIFY_DRY=1]: checks only, no model (T-10).
         print(json.dumps(kontrolle(ids_lesen(os.environ["CLASSIFY_KONTROLLE"])), ensure_ascii=False, indent=1))

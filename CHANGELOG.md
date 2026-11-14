@@ -6,6 +6,57 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
+Allerweltsnamen, die Marke im Trace statt als Tag, ein KI-Knopf für Stammdaten und der Eingang mit Archiv
+(Backlog T-15).
+
+### Hinzugefügt
+
+- **KI-Knopf im Korrespondenten-Dialog** („KI: Stammdaten aus den Dokumenten vorschlagen“): paperlaiss liest die
+  Dokumente des Korrespondenten, die der Nutzer sehen darf (die neuesten 30, Briefkopf und Fuß), fragt die KI einmal
+  und prüft jeden Wert mit den Regeln der automatischen Erfassung gegen den Text seines Dokuments — nur, was wörtlich
+  dasteht, keine eigene Kennung irgendeines Kontos (`eigene_kennungen`, `konten`), keine Personalnummer, kein Wert
+  eines anderen Korrespondenten, IBAN mit Prüfziffer. Die Vorschläge stehen mit Haken und Quelle („Dokument 1234“) im
+  Dialog; ein Ersatz für eine schon gefüllte Adresse oder einen Kontext ist nie vorab angehakt. „Übernehmen“ trägt
+  ein, gespeichert wird erst mit „Save“. Panel: `POST /knopf/korrespondent/<id>/vorschlag`; Klassifizierer:
+  `CLASSIFY_STAMMDATEN=<id>` (schreibt nichts). Erster Browser-Test des Repos (`tests/test_browser.py`, headless
+  Chrome mit dem echten Knopf-Skript).
+- **`allerweltsnamen`** und **`korrespondent_min_zeichen`** (Vorgabe `[]` und `3`): Ein neuer Korrespondent entsteht
+  nie aus einer Rolle oder Funktion („Arbeitgeber“, „Personalabteilung“, „Die Krankenkasse“, „Vermieter (…)“;
+  eingebaute Liste plus diese Wörter oder ganzen Namen), einem Platzhalter („unbekannt“) oder zu wenigen Zeichen
+  („PA“; mit Rechtsform oder Ziffer gilt ein kurzer Name, „bc GmbH“, „O2“). Dann bleibt das Dokument ohne
+  Korrespondent und bekommt den Prüfhinweis `allerweltsname`.
+- **`konten.<user>.tags`**: Tags, die jedes Dokument dieses Kontos bekommt (mit `kennungen_je_konto`) — etwa der
+  Personen-Tag für Uploads über die Weboberfläche; Paperless-Workflows können nicht nach Besitzer filtern.
+- **Eingang mit Archiv** (`deploy/eingang/eingang.py`, `eingang`/`archiv`): Nur der Eingangsordner wird importiert;
+  nach dem Konsum (Erfolg oder Dublette) wandert die Datei nach `Archiv/<JJJJ.MM.TT> <Originalname>` (Tag des Imports
+  in `zeitzone`, Vorgabe Europe/Berlin; belegt → „ (2)“), ein Fehlschlag bleibt mit `<name>.fehler.txt` liegen und
+  wird erst nach einer Änderung oder dem Löschen der Notiz neu versucht. `tags` je Konto gehen mit dem Upload.
+  Ohne `archiv` bleibt das alte Verhalten (löschen, `_Fehler/`).
+- **`CLASSIFY_WIE_IMPORT`** und **`eval.py --wie-import`**: Titel, Korrespondent, Typ, Datum und Felder ausblenden,
+  als käme das Dokument gerade an. Ohne das stand der schon korrigierte Wert als „bisheriger Korrespondent“ im Prompt,
+  und ein Treffer belegte nichts.
+
+### Geändert
+
+- **Marke im Trace** statt Tag: Mit leerem `marker_tag` setzt paperlaiss keinen Tag mehr; „schon klassifiziert“
+  steht als `klassifiziert` im Trace des Dokuments, ein späterer abgebrochener Lauf behält die Marke. Mit gesetztem
+  `marker_tag` bleibt alles wie bisher.
+- **Mail-Import wartet ohne Tag:** Ein Dokument, an dem das Feld `mail_context_field` leer hängt, wird beim
+  automatischen Lauf übersprungen — ein Mail-Abruf lädt so hoch, setzt den Kontext und klassifiziert danach mit
+  `CLASSIFY_SOURCE=mail`. Bisher blockte er den ersten Lauf mit dem Marker-Tag.
+
+### Behoben
+
+- **Erfundener Klammerzusatz:** „AVG (Albatros Versicherungsdienst GmbH)“ wurde neu angelegt, obwohl „AVG“ existierte
+  und der Text die Langform nicht druckt. Ein Klammerzusatz, der nicht im Text steht, fällt jetzt vor dem Abgleich weg
+  (außer der ganze Vorschlag ist schon ein bekannter Name oder Alias).
+
+- **Messung:** Namensregel über die 268 Korrespondenten einer Installation: kein vorhandener Name gesperrt, die vier
+  später von Hand gelöschten Kunstnamen schon. Lohnabrechnungen mit Krankenkasse im Text (ein alter Befund: Krankenkasse
+  statt Arbeitgeber) mit 0.9.0 wie beim Import: 11 von 11 Läufen beim Arbeitgeber, kein Code nötig. 25 Mutanten rot.
+
 ## [0.9.0] - 2026-11-13
 
 Lohnabrechnungs-Datum im Code statt durch die KI und USt-ID nur aus dem Text (Backlog T-14).
