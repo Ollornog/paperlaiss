@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-14
+
+### Behoben
+
+- **Rolle mit Nummer:** „Hausverwaltung VE 38“ (Messung an einem alten Fall der Installation, Soll: die
+  Wohnungsgenossenschaft) bestand die Namensregel von 0.10.0, weil „VE“ und „38“ keine Rollenwörter sind. Zahlen und
+  Kürzel bis zwei Zeichen tragen jetzt keinen Namen: bleibt sonst nur eine Rolle, wird nicht angelegt. „O2 Telefonica“
+  und „DB Regio“ bleiben Namen; über die 268 Korrespondenten der Installation weiter keiner gesperrt.
+
 ## [0.10.0] - 2026-11-14
 
 Allerweltsnamen, die Marke im Trace statt als Tag, ein KI-Knopf für Stammdaten und der Eingang mit Archiv
