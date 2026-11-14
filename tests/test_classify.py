@@ -1110,6 +1110,19 @@ _tb = [(("Beispiel GmbH", "Rechnung", "12/2026"), "Beispiel GmbH – Rechnung 12
 _tbf = [(e, classify.titel_bilden(*e), soll) for e, soll in _tb if classify.titel_bilden(*e) != soll]
 r.check("Titel: Muster, doppelte Dokumentart/Absender in der Kennung fallen weg, ohne Typ und Kennung kein Titel",
         not _tbf, str(_tbf))
+# T-17: a compound joined to another word stays whole; the identifier then replaces the type (no "General- und").
+_tf = [(("Erika Muster", "Vollmacht", "General- und Vorsorgevollmacht"), "Erika Muster – General- und Vorsorgevollmacht"),
+       (("Beispiel eG", "Rechnung", "Heiz-, Warmwasser- und Nebenkostenabrechnung 2025"),
+        "Beispiel eG – Heiz-, Warmwasser- und Nebenkostenabrechnung 2025"),
+       (("Beispiel AG", "Rechnung", "Strom- und Gasrechnung 2026"), "Beispiel AG – Strom- und Gasrechnung 2026"),
+       (("Beispiel AG", "Vertrag", "Mietvertrag und Kaufvertrag"), "Beispiel AG – Mietvertrag und Kaufvertrag"),
+       (("Beispiel AG", "Vertrag", "Mietvertrag und Übergabeprotokoll"), "Beispiel AG – Mietvertrag und Übergabeprotokoll"),
+       (("Beispiel AG", "Versicherung", "Haftpflicht-/Hausratversicherung"), "Beispiel AG – Haftpflicht-/Hausratversicherung"),
+       (("Beispiel AG", "Lohnabrechnung", "Lohnabrechnung 10/2026"), "Beispiel AG – Lohnabrechnung 10/2026"),
+       (("Beispiel AG", "Rechnung", "Ersatzteilrechnung 60565557 / Werkstatt"), "Beispiel AG – Rechnung 60565557 / Werkstatt")]
+_tff = [(e, classify.titel_bilden(*e), soll) for e, soll in _tf if classify.titel_bilden(*e) != soll]
+r.check("T-17 title: a compound joined by a suspended hyphen or joining word is kept, the identifier replaces the type",
+        not _tff, str(_tff))
 r.check("Titel: höchstens 128 Zeichen (Paperless-Grenze)", len(classify.titel_bilden("A" * 100, "Rechnung", "x" * 100)) == 128)
 _st = classify.pass1_schema({"Rechnung": 1}, ["Betrag"], False, True, True, True)
 r.check("Titel: Schema verlangt titel_kennung, vor dem Dokumenttyp, ohne doppelte Pflichtangabe",
@@ -2359,6 +2372,29 @@ r.check("T-12 billing month: part of the numbers, not the tail of a full date; t
 r.check("T-12 copy: the candidate needs at least five numbers as well",
         classify.dublette("Vollmacht 01.04.1990 15.06.1960 54321 02.03.2026 07.07.2001", 2,
                           [{"id": 9, "content": "Vollmacht 01.04.1990 15.06.1960 54321", "page_count": 2}]) is None)
+# T-17: mirrored documents of one form (two powers of attorney in opposite directions) share all numbers, but not
+# their order; a copy keeps it.
+_vm = ("Generalvollmacht Ich, {a}, geb. {ga}, wohnhaft Ahornweg 7, {pa} Nordstadt, bevollmächtige {b}, geb. {gb}, "
+       "wohnhaft Birkenstraße 3, {pb} Südstadt. Ort, 02.03.2026")
+_vm1 = _vm.format(a="Erika Muster", ga="01.04.1990", pa="54321", b="Max Beispiel", gb="15.06.1960", pb="12345")
+_vm2 = _vm.format(a="Max Beispiel", ga="15.06.1960", pa="12345", b="Erika Muster", gb="01.04.1990", pb="54321")
+r.check("T-17 copy: mirrored documents with the same numbers in another order are no copy",
+        classify.kennzahlen(_vm1) == classify.kennzahlen(_vm2)
+        and classify.dublette(_vm2, 2, [{"id": 9, "title": "A", "content": _vm1, "page_count": 2}]) is None)
+r.check("T-17 copy: a copy with the same order is still found (also with a number the other reading dropped)",
+        classify.dublette(_vm1, 2, [{"id": 9, "title": "A", "content": _vm1 + " Seite", "page_count": 2}]) == "wie Dokument 9 (A)"
+        and classify.dublette(_vm1 + " Az. 778899", 2, [{"id": 9, "title": "A", "content": _vm1, "page_count": 2}])
+        == "wie Dokument 9 (A)")
+r.check("T-17 copy: the order counts shared dates once, a repeated or an unshared date does not break it",
+        classify.dublette(_vm1 + " geb. 01.04.1990", 2, [{"id": 9, "title": "A", "content": _vm1, "page_count": 2}])
+        == "wie Dokument 9 (A)"
+        and classify.dublette("Eingang 01.03.2026 " + _vm1, 2, [{"id": 9, "title": "A", "content": _vm1, "page_count": 2}])
+        == "wie Dokument 9 (A)")
+# Only the dates count: two OCR readings may take the columns of a table (amounts, numbers) in another order.
+r.check("T-17 copy: shared amounts or numbers in another order do not break a copy, only dates do",
+        classify.dublette(_vm1 + " 1.234,56 Az. 778899", 2,
+                          [{"id": 9, "title": "A", "content": "Az. 778899 " + _vm1 + " 1.234,56", "page_count": 2}])
+        == "wie Dokument 9 (A)")
 # 4. A payslip names only the month: first or last day of it is backed by the text.
 r.check("T-12 date: month and year alone back the first or last day of that month",
         classify.monat_belegt("1999-08-31", "Monat/Jahr----\n   8 / 99") and classify.monat_belegt("1998-12-01", "Abrechnung 12/1998")
