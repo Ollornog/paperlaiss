@@ -248,10 +248,42 @@ def _release_jobs(text: str) -> dict[str, str]:
     return jobs
 
 
+# Release automation (kit 0.45.2): these two jobs hold an app token with contents: write AND check out — `main` in the
+# dispatch from the auto-merge, the tag in the tag run, never PR code. They install nothing and run exactly one command,
+# the stdlib-only kit script scripts/_release.py; no dependency can reach them. Checked below, word for word.
+AUTOMATIK_JOBS = {"automatik", "fc-pin"}
+
+
+def automatik_verstoesse(text: str) -> list[str]:
+    """Was die Ausnahme AUTOMATIK_JOBS verletzt: anderes als genau `scripts/_release.py` in `run:`, Installation, Anmeldedaten
+    im Checkout, PR-Code als Auslöser."""
+    jobs = _release_jobs(text)
+    aus = []
+    for name in sorted(AUTOMATIK_JOBS):
+        rumpf = jobs.get(name)
+        if rumpf is None:
+            aus.append(f"{name}: fehlt")
+            continue
+        laeufe = re.findall(r"^\s+run:\s*(.+)$", rumpf, re.M)
+        if not laeufe or any(not z.startswith("scripts/_release.py ") for z in laeufe):
+            aus.append(f"{name}: run ist nicht genau scripts/_release.py ({laeufe})")
+        if re.search(r"\bpip\b|\bnpm\b|\buv\b|check\.sh|run:\s*\|", rumpf):
+            aus.append(f"{name}: installiert oder startet anderes")
+        if "actions/checkout" in rumpf and "persist-credentials: false" not in rumpf:
+            aus.append(f"{name}: Checkout behält Anmeldedaten")
+    if not re.search(r"if: github\.event_name == 'workflow_dispatch' && inputs\.automatik != ''", jobs.get("automatik", "")):
+        aus.append("automatik: läuft nicht nur im Anstoß der Automatik")
+    if "if: github.ref_type == 'tag'" not in jobs.get("fc-pin", ""):
+        aus.append("fc-pin: läuft nicht nur am Tag")
+    return aus
+
+
 def identitaet_mit_fremdcode(text: str) -> list[str]:
     """Jobs, die eine Identität halten (id-token/contents: write) UND auschecken oder Code starten."""
     befunde = []
     for name, rumpf in _release_jobs(text).items():
+        if name in AUTOMATIK_JOBS:
+            continue    # eigene, engere Prüfung: automatik_verstoesse
         if re.search(r"id-token:\s*write|contents:\s*write", rumpf) and \
                 re.search(r"actions/checkout|\bpip\b|\bpython3?\b|check\.sh", rumpf):
             befunde.append(name)
@@ -263,6 +295,11 @@ def identitaet_mit_fremdcode(text: str) -> list[str]:
 # Beglaubigung für ein beliebiges Artefakt fälschen.
 _idf = identitaet_mit_fremdcode(release)
 r.check("kein Job mit Identität checkt aus oder startet Code", not _idf, str(_idf))
+_auv = automatik_verstoesse(release)
+r.check("Release-Automatik: Jobs mit App-Token führen nur scripts/_release.py aus", not _auv, str(_auv))
+r.check("Selbsttest — ein Automatik-Job mit pip fiele auf",
+        any("installiert" in v for v in automatik_verstoesse(release.replace(
+            'run: scripts/_release.py fc-pin', 'run: scripts/_release.py fc-pin; pip install x'))))
 r.check("Selbsttest — ein Job mit id-token und Checkout fiele auf",
         identitaet_mit_fremdcode("jobs:\n  x:\n    permissions:\n      id-token: write\n"
                                  "    steps:\n      - uses: actions/checkout@abc\n") == ["x"])
