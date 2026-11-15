@@ -6,6 +6,27 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-15
+
+OCR nur für Scans und Fotos, Freigabe an den Hub ohne Tag (Backlog T-19).
+
+### Hinzugefügt
+
+- **OCR-Modus `ocr_modus`:** `rescue` (OCR nur bei schwachem Text, das bisherige Verhalten ohne `ocr_always`),
+  `scans` (dazu jeder Scan und jedes Foto) oder `immer` (jedes Dokument). `ocr_always: true` bleibt als Kurzform für
+  `immer`; ist `ocr_modus` gesetzt, gilt er. Ohne Eintrag ändert sich nichts.
+- **Scan oder digital, am Original gemessen:** Im Modus `scans` liest paperlaiss das Originaldokument (im Post-Consume
+  direkt von der Platte, sonst über die API) und misst jede Seite: Bedecken Rasterbilder mindestens 60 % der Seite und
+  zeigt sie weniger als 400 Byte sichtbaren Text, ist sie ein Scan. Unsichtbarer Text (Render-Modus 3 oder 7, die
+  OCR-Ebene eines Scanners oder von OCRmyPDF) zählt nicht. Ein Dokument mit einer Scan-Seite bekommt OCR, Fotos immer,
+  Office-Dateien und Mails nie. Ein digitales PDF behält den Text von Paperless, außer die Rescue-Regeln greifen. Ist
+  das Original nicht prüfbar (keine PDF-Bibliothek, Lesefehler), läuft OCR. Die Seitenprüfung nutzt pikepdf (im
+  Paperless-Abbild) oder pypdf (im Panel-Abbild); der Klassifizierer bleibt ohne Pflicht-Abhängigkeit. Der Trace trägt
+  `ocr.modus` und `ocr.erkennung`. Gemessen an zwei Beständen (2.740 Dokumente): 35 % bzw. 59 % der Seiten sind digital.
+- **Routing `PANEL_ROUTE_SHARE_WITH_HUB`:** Dokumente der genannten Konten geben dem Hub immer Sehen und Ändern, auch ohne
+  Personen-Tag (eine Person lädt über die Weboberfläche hoch, ohne ihr eigenes Tag zu setzen). Der Workflow braucht dafür
+  einen Auslöser *Dokument hinzugefügt* ohne Filter.
+
 ## [0.11.2] - 2026-11-15
 
 Neue Stammdaten ohne Besitzer (Backlog T-18).

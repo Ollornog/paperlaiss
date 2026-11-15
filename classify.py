@@ -64,7 +64,8 @@ CFG = {
     "model": "mistral-small-latest",
     "ocr_model": "mistral-ocr-latest",
     "ocr_enabled": True,
-    "ocr_always": False,
+    "ocr_always": False,               # alias of ocr_modus "immer" (until 0.11 the only switch)
+    "ocr_modus": "",                   # rescue | scans | immer; empty = "immer" with ocr_always, else "rescue" (T-19)
     "ocr_min_len": 300,
     "temperature": 0.1,
     "content_max_len": 10000,          # Zeichen Dokumenttext an die KI, gesamt (Anfang + Ende)
@@ -1451,6 +1452,228 @@ def mistral_ocr(did):
     # text Paperless had read. They stay visible as a finding (ocr_erfunden).
     erfunden = {n for n, _ in OCR_VERDACHT}
     return "\n\n".join(t for i, t in enumerate(seiten, 1) if i not in erfunden).strip()
+
+
+# --- OCR mode (T-19): Mistral-OCR for scans and photos only ---
+# "rescue" = only when the text Paperless read is weak (ocr_gruende), "scans" = additionally whenever the original
+# is a scan or a photo, "immer" = every document. Until 0.11 there was only the switch `ocr_always` (= "immer"); it
+# stays as an alias. An unknown value falls back to that switch, so a typo never stops the rescue.
+OCR_MODI = ("rescue", "scans", "immer")
+
+
+def ocr_modus(cfg):
+    m = str(cfg.get("ocr_modus") or "").strip().lower()
+    if m in OCR_MODI:
+        return m
+    return "immer" if cfg.get("ocr_always") else "rescue"
+
+
+# A page is a scan when raster images cover at least SCAN_BILD_ANTEIL of it and it shows less than
+# SCAN_TEXT_HOECHSTENS bytes of visible text. Invisible text (render mode 3 or 7 — the OCR layer a scanner or
+# OCRmyPDF lays over the image, "GlyphLessFont") does not count: the page is still a picture of paper.
+# Measured on both systems (2026-11-15, 2,740 documents): scanner pages cover 100 % and carry 0 bytes of visible
+# text; scanned certificates placed in a Word file cover 64–78 % with a header of 250–310 bytes; digital pages
+# with a full-page background (letterhead, form overlay, Acrobat Sign) carry 680–3,700 bytes. A short certificate
+# on a background (155–330 bytes) counts as a scan — one OCR page too many is cheaper than a scan read badly.
+SCAN_BILD_ANTEIL = 0.6
+SCAN_TEXT_HOECHSTENS = 400
+_RASTER = 40          # page coverage is counted on a 40 × 40 grid (union of all images, not their sum)
+
+
+def _mat(m, n):
+    a, b, c, d, e, f = m
+    A, B, C, D, E, F = n
+    return (a * A + b * C, a * B + b * D, c * A + d * C, c * B + d * D, e * A + f * C + E, e * B + f * D + F)
+
+
+def seite_messen(ops, box, xobjekt, laenge, res=None):
+    """One page of a PDF: (share of the page covered by raster images, visible text bytes, invisible text bytes).
+
+    Library-neutral: `ops(obj)` yields (operands, operator name) of a content stream (`obj` None = the page),
+    `xobjekt(res, name)` gives (subtype, matrix, stream, resources) of a named XObject or None, `laenge(operand)`
+    the byte length of a string operand (0 for anything else), `box` the page box (x0, y0, x1, y1)."""
+    x0, y0 = min(box[0], box[2]), min(box[1], box[3])
+    w, h = abs(box[2] - box[0]), abs(box[3] - box[1])
+    zellen, text = set(), [0, 0]
+
+    def bild(ctm):
+        a, b, c, d, e, f = ctm
+        xs, ys = (e, a + e, c + e, a + c + e), (f, b + f, d + f, b + d + f)
+        if w <= 0 or h <= 0:
+            return
+        i0, i1 = max(0, int((min(xs) - x0) / w * _RASTER)), min(_RASTER, -int(-(max(xs) - x0) / w * _RASTER // 1))
+        j0, j1 = max(0, int((min(ys) - y0) / h * _RASTER)), min(_RASTER, -int(-(max(ys) - y0) / h * _RASTER // 1))
+        zellen.update((i, j) for i in range(i0, i1) for j in range(j0, j1))
+
+    def lauf(obj, res, ctm, tiefe):
+        stapel, tr = [], 0
+        for operanden, op in ops(obj):
+            if op == "q":
+                stapel.append((ctm, tr))
+            elif op == "Q":
+                if stapel:
+                    ctm, tr = stapel.pop()
+            elif op == "cm" and len(operanden) == 6:
+                ctm = _mat(tuple(float(x) for x in operanden), ctm)
+            elif op == "Tr" and operanden:
+                tr = int(operanden[0])
+            elif op in ("Tj", "'", '"', "TJ") and operanden:
+                n = (sum(laenge(x) for x in operanden[0]) if op == "TJ" else laenge(operanden[-1]))
+                text[1 if tr in (3, 7) else 0] += n
+            elif op == "INLINE IMAGE":
+                bild(ctm)
+            elif op == "Do" and operanden:
+                x = xobjekt(res, operanden[0])
+                if not x:
+                    continue
+                art, matrix, kind, kind_res = x
+                if art == "/Image":
+                    bild(ctm)
+                elif art == "/Form" and tiefe < 6:
+                    lauf(kind, kind_res if kind_res is not None else res,
+                         _mat(tuple(float(v) for v in matrix), ctm), tiefe + 1)
+
+    lauf(None, res, (1, 0, 0, 1, 0, 0), 0)
+    return round(len(zellen) / _RASTER ** 2, 3), text[0], text[1]
+
+
+def ist_scanseite(werte):
+    bild, sichtbar, _ = werte
+    return bild >= SCAN_BILD_ANTEIL and sichtbar < SCAN_TEXT_HOECHSTENS
+
+
+def _geerbt(obj, key):
+    for _ in range(32):
+        if obj is None:
+            return None
+        v = obj.get(key)
+        if v is not None:
+            return v
+        obj = obj.get("/Parent")
+    return None
+
+
+def _seiten_pikepdf(pikepdf, daten):
+    """Per page values with pikepdf (in the Paperless container, it comes with OCRmyPDF)."""
+    import io
+    with pikepdf.open(io.BytesIO(daten)) as pdf:
+        def xobjekt(res, name):
+            xo = res.get("/XObject") if res is not None else None
+            x = xo.get(str(name)) if xo is not None else None
+            if x is None:
+                return None
+            return str(x.get("/Subtype", "")), list(x.get("/Matrix", [1, 0, 0, 1, 0, 0])), x, x.get("/Resources")
+
+        def laenge(x):
+            return len(bytes(x)) if isinstance(x, pikepdf.String) else 0
+        aus = []
+        for page in pdf.pages:
+            obj = page.obj
+            box = [float(v) for v in (_geerbt(obj, "/CropBox") or _geerbt(obj, "/MediaBox") or [0, 0, 612, 792])]
+            ops = (lambda o, _p=obj: ((list(a), str(b)) for a, b in pikepdf.parse_content_stream(_p if o is None else o)))
+            aus.append(seite_messen(ops, box, xobjekt, laenge, _geerbt(obj, "/Resources")))
+        return aus
+
+
+def _seiten_pypdf(pypdf, daten):
+    """Per page values with pypdf (in the panel image, it comes with the export button)."""
+    import io
+    from pypdf.generic import ContentStream, ByteStringObject, TextStringObject
+    reader = pypdf.PdfReader(io.BytesIO(daten))
+
+    def obj(x):
+        return x.get_object() if hasattr(x, "get_object") else x
+
+    def xobjekt(res, name):
+        res = obj(res)
+        xo = obj(res.get("/XObject")) if res is not None else None
+        x = obj(xo.get(name)) if xo is not None else None
+        if x is None:
+            return None
+        return (str(x.get("/Subtype", "")), [float(v) for v in x.get("/Matrix", [1, 0, 0, 1, 0, 0])], x,
+                obj(x.get("/Resources")))
+
+    def laenge(x):
+        if isinstance(x, TextStringObject):
+            roh = x.get_original_bytes()
+            # pypdf puts a byte order mark in front of UTF-16 text it detected without one in the file.
+            bom = getattr(x, "utf16_bom", b"") if getattr(x, "autodetect_utf16", False) else b""
+            return len(roh) - (len(bom) if bom and roh.startswith(bom) else 0)
+        return len(bytes(x)) if isinstance(x, ByteStringObject) else 0
+    aus = []
+    for page in reader.pages:
+        box = [float(v) for v in page.cropbox]
+
+        def ops(o, _p=page):
+            inhalt = _p.get_contents() if o is None else o
+            if inhalt is None:
+                return []
+            return ((a, b.decode("latin-1")) for a, b in ContentStream(inhalt, reader).operations)
+        aus.append(seite_messen(ops, box, xobjekt, laenge, obj(page.get("/Resources"))))
+    return aus
+
+
+def pdf_seiten(daten):
+    """Per page (image share, visible bytes, invisible bytes) — with pikepdf, else pypdf; neither → RuntimeError.
+    The classifier itself stays stdlib-only: both are optional and only this check needs one."""
+    try:
+        import pikepdf
+    except ImportError:
+        pikepdf = None
+    if pikepdf is not None:
+        return _seiten_pikepdf(pikepdf, daten)
+    try:
+        import pypdf
+    except ImportError:
+        raise RuntimeError("weder pikepdf noch pypdf vorhanden") from None
+    return _seiten_pypdf(pypdf, daten)
+
+
+def ocr_art(mime, daten=None):
+    """What the original is: {"art": "foto"|"scan"|"gemischt"|"digital", "seiten": n, "scan_seiten": [1-based]}.
+    Images are always photos; other non-PDF originals (office files, mails, text) are digital — Paperless
+    converted them itself. A PDF is a scan as soon as one page is (a mixed document gets OCR)."""
+    mime = str(mime or "").lower()
+    if mime.startswith("image/"):
+        return {"art": "foto"}
+    if mime != "application/pdf":
+        return {"art": "digital", "mime": mime}
+    seiten = pdf_seiten(daten)
+    scan = [n for n, w in enumerate(seiten, 1) if ist_scanseite(w)]
+    art = "scan" if scan and len(scan) == len(seiten) else "gemischt" if scan else "digital"
+    return {"art": art, "seiten": len(seiten), "scan_seiten": scan[:50]}
+
+
+def original_lesen(did):
+    """The original file: in the post-consume run straight from disk (DOCUMENT_SOURCE_PATH), else via the API."""
+    pfad = os.environ.get("DOCUMENT_SOURCE_PATH")
+    if pfad and str(os.environ.get("DOCUMENT_ID")) == str(did) and os.path.isfile(pfad):
+        with open(pfad, "rb") as f:
+            return f.read()
+    return get(f"/documents/{did}/download/?original=true", raw=True)
+
+
+def scan_erkennen(did):
+    """ocr_art() of a Paperless document, or {"art": "unklar", "fehler": …} — an unclear original gets OCR."""
+    try:
+        mime = get(f"/documents/{did}/metadata/").get("original_mime_type")
+        return ocr_art(mime, original_lesen(did) if str(mime or "").lower() == "application/pdf" else None)
+    except Exception as e:
+        return {"art": "unklar", "fehler": repr(e)[:200]}
+
+
+def scan_grund(erkennung):
+    """Why the OCR runs in mode "scans", or None for a digital original."""
+    art = erkennung.get("art")
+    if art == "foto":
+        return "Foto"
+    if art == "scan":
+        return f"Scan ({erkennung.get('seiten')} Seite(n))"
+    if art == "gemischt":
+        return f"Scan-Seiten {', '.join(map(str, erkennung.get('scan_seiten') or []))} von {erkennung.get('seiten')}"
+    if art == "unklar":
+        return f"Original nicht prüfbar ({erkennung.get('fehler')})"
+    return None
 
 
 def norm(s):
@@ -3501,7 +3724,7 @@ def prompt_vorschau():
                       and norm(f["name"]) not in {norm(CFG.get(k) or "") for k in
                                                    ("mail_context_field", "mail_from_field")}],
         "einstellungen": {k: CFG.get(k) for k in (
-            "model", "ocr_model", "temperature", "content_max_len", "ocr_enabled", "ocr_always",
+            "model", "ocr_model", "temperature", "content_max_len", "ocr_enabled", "ocr_always", "ocr_modus",
             "tagging_enabled", "marker_tag", "unsicher_tag", "summary_field",
             "manual_fields", "nachbearbeitung")},
         "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
@@ -3575,13 +3798,19 @@ def main():
     # Blank pages BEFORE the OCR model sees them (T-10): on a blank page it invents text. Only when Paperless
     # read no text at all, and only where Ghostscript is at hand (in the Paperless container).
     leer = alle_seiten_leer(did, doc.get("page_count")) if len(content.strip()) < 20 else None
+    modus = ocr_modus(CFG)
+    # Mode "scans" (T-19): look at the original — a scan or a photo gets Mistral-OCR, a digital PDF keeps the text
+    # Paperless read (unless that text is weak: the rescue rules still apply).
+    erkennung = (scan_erkennen(did) if modus == "scans" and not leer and CFG["ocr_enabled"] and not NO_OCR
+                 and not FORCE_OCR else None)
+    scan = scan_grund(erkennung) if erkennung else None
     if leer:
         TRACE["ocr"] = {"triggered": False, "grund": f"nicht nötig: {leer}"}
-    elif CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or CFG["ocr_always"] or vorher):
+    elif CFG["ocr_enabled"] and not NO_OCR and (FORCE_OCR or modus == "immer" or scan or vorher):
         ocr_versucht = True
         grund = ("KI-Knopf in Paperless" if FORCE_OCR and SOURCE == "knopf"
-                 else "manuell erzwungen" if FORCE_OCR else "immer-OCR" if CFG["ocr_always"]
-                 else "; ".join(vorher))
+                 else "manuell erzwungen" if FORCE_OCR else "immer-OCR" if modus == "immer"
+                 else "; ".join(([scan] if scan else []) + vorher))
         try:
             new, erfunden = ocr_text_pruefen(mistral_ocr(did))
             if erfunden:
@@ -3589,7 +3818,7 @@ def main():
             if not new:
                 TRACE["ocr"] = {"triggered": True, "grund": grund, "verworfen": "OCR lieferte keinen echten Text"
                                 + (f" ({erfunden[0]})" if erfunden else "")}
-            elif FORCE_OCR or CFG["ocr_always"] or len(new) > max(len(content), 40) * 1.1 or (len(content) < 40 and len(new) > 40):
+            elif FORCE_OCR or modus == "immer" or scan or len(new) > max(len(content), 40) * 1.1 or (len(content) < 40 and len(new) > 40):
                 if not DRY:
                     send(f"/documents/{did}/", {"content": new}, "PATCH")
                 content = new; ocr_note = f"OCR-rescue({len(new)})"
@@ -3600,6 +3829,12 @@ def main():
         except Exception as e:
             TRACE["ocr"] = {"triggered": True, "grund": grund, "error": repr(e)}
             log(f"OCR-rescue-fail {did}: {e!r}")
+    TRACE["ocr"]["modus"] = modus
+    if erkennung:
+        # What the original is, for every run in mode "scans" — the trace shows why a document got OCR or not.
+        TRACE["ocr"]["erkennung"] = erkennung
+        if not ocr_versucht and not leer:
+            TRACE["ocr"]["grund"] = "digitales Original, Text ausreichend"
 
     if len(content.strip()) < 20:
         # No text, not even after OCR: a blank page or a broken scan. Until 0.4 the run ended here without a
@@ -4426,7 +4661,8 @@ if __name__ == "__main__":
         print(json.dumps({"system_prompt": DEFAULT_PROMPT, "tag_descriptions": TAG_DESC,
                           "model": CFG["model"], "ocr_model": CFG["ocr_model"], "ocr_min_len": CFG["ocr_min_len"],
                           "temperature": CFG["temperature"], "content_max_len": CFG["content_max_len"],
-                          "ocr_always": CFG["ocr_always"], "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
+                          "ocr_always": CFG["ocr_always"], "ocr_modus": ocr_modus(CFG),
+                          "tagging_enabled": CFG["tagging_enabled"]}, ensure_ascii=False))
         sys.exit(0)
 
     if os.environ.get("CLASSIFY_STAMMDATEN"):

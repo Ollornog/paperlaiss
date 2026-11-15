@@ -2811,4 +2811,190 @@ r.check("T-16 next link: absolute API link becomes a path relative to the API ba
         classify._api_pfad("http://localhost:8000/api/documents/?page=2") == "/documents/?page=2"
         and classify._api_pfad("https://paper.example/api/documents/") == "/documents/")
 
+
+# ---- T-19: OCR mode "scans" — Mistral-OCR only for scans and photos, not for digital PDFs.
+def _c19(name, ok, info=""):
+    return r.check(name, bool(ok), str(info))
+
+
+_c19("T-19 mode: empty = old behaviour (rescue, or immer with ocr_always), explicit value wins",
+        classify.ocr_modus({}) == "rescue" and classify.ocr_modus({"ocr_always": True}) == "immer"
+        and classify.ocr_modus({"ocr_modus": "scans", "ocr_always": True}) == "scans"
+        and classify.ocr_modus({"ocr_modus": " Immer "}) == "immer" and classify.ocr_modus({"ocr_modus": "rescue"}) == "rescue")
+_c19("T-19 mode: an unknown value falls back to the switch (a typo never stops the rescue)",
+        classify.ocr_modus({"ocr_modus": "scan"}) == "rescue" and classify.ocr_modus({"ocr_modus": "x", "ocr_always": True}) == "immer")
+_c19("T-19 mode: the default config keeps the old behaviour", classify.CFG.get("ocr_modus") == "")
+
+_A4 = (0, 0, 595, 842)
+
+
+def _messe(ops_seite, xobjekte=None, box=_A4):
+    """seite_messen() over a synthetic content stream: ops as (operands, operator); strings are bytes."""
+    def ops(o):
+        return iter(ops_seite if o is None else o)
+
+    def xobjekt(res, name):
+        return (xobjekte or {}).get(name)
+    return classify.seite_messen(ops, box, xobjekt, lambda x: len(x) if isinstance(x, bytes) else 0)
+
+
+_bild_voll = [([], "q"), ([595, 0, 0, 842, 0, 0], "cm"), (["/Im0"], "Do"), ([], "Q")]
+_img = {"/Im0": ("/Image", [1, 0, 0, 1, 0, 0], None, None)}
+_text = lambda tr, n: [([], "BT"), ([tr], "Tr"), ([b"x" * n], "Tj"), ([], "ET")]
+_scan = _messe(_bild_voll, _img)
+_scan_ocr = _messe(_bild_voll + _text(3, 2000), _img)
+_digital = _messe(_text(0, 1500))
+_brief = _messe(_bild_voll + _text(0, 1500), _img)
+_c19("T-19 page: full-page image without text is a scan", _scan == (1.0, 0, 0) and classify.ist_scanseite(_scan), _scan)
+_c19("T-19 page: invisible text (render mode 3, OCR layer) does not count, still a scan",
+        _scan_ocr == (1.0, 0, 2000) and classify.ist_scanseite(_scan_ocr), _scan_ocr)
+_c19("T-19 page: render mode 7 (clip only) is invisible too",
+        _messe(_bild_voll + _text(7, 900), _img)[1:] == (0, 900))
+_c19("T-19 page: visible text without page image is digital", _digital == (0.0, 1500, 0) and not classify.ist_scanseite(_digital))
+_c19("T-19 page: letterhead (full-page image under 1,500 bytes of visible text) is digital",
+        _brief == (1.0, 1500, 0) and not classify.ist_scanseite(_brief))
+_c19("T-19 page: a stamp of a few visible characters on a scan keeps it a scan",
+        classify.ist_scanseite(_messe(_bild_voll + _text(0, 60), _img)))
+_q = _messe([([], "BT"), ([3], "Tr"), ([], "q"), ([0], "Tr"), ([], "Q"), ([b"abc"], "Tj"), ([], "ET")])
+_c19("T-19 page: q/Q restore the render mode", _q == (0.0, 0, 3), _q)
+_tj = _messe([([], "BT"), ([[b"ab", -120, b"cde"]], "TJ"), ([0, 0, b"fg"], '"'), ([b"h"], "'"), ([], "ET")])
+_c19("T-19 page: TJ arrays, ' and \" count their strings, not the numbers", _tj == (0.0, 8, 0), _tj)
+_logo = _messe([([], "q"), ([100, 0, 0, 50, 40, 760], "cm"), (["/Im0"], "Do"), ([], "Q")], _img)
+_c19("T-19 page: a logo is no page image", _logo[0] < 0.05, _logo)
+_halb = [([], "q"), ([595, 0, 0, 421, 0, 0], "cm"), (["/Im0"], "Do"), ([], "Q"),
+         ([], "q"), ([595, 0, 0, 421, 0, 421], "cm"), (["/Im0"], "Do"), ([], "Q")]
+_doppelt = _bild_voll + _bild_voll
+_c19("T-19 page: two strips covering the page add up, two layers on the same area do not",
+        _messe(_halb, _img)[0] == 1.0 and _messe(_doppelt, _img)[0] == 1.0)
+_form = {"/Fm0": ("/Form", [595, 0, 0, 842, 0, 0], [(["/Im0"], "Do")] + _text(3, 50), None), **_img}
+_f = _messe([(["/Fm0"], "Do")], _form)
+_c19("T-19 page: images and text inside a form XObject count, with the form matrix", _f == (1.0, 0, 50), _f)
+_inline = _messe([([], "q"), ([595, 0, 0, 842, 0, 0], "cm"), ([{"settings": {}}], "INLINE IMAGE"), ([], "Q")])
+_c19("T-19 page: an inline image counts", _inline[0] == 1.0, _inline)
+_quer = _messe(_bild_voll, _img, box=(0, 0, 842, 595))
+_c19("T-19 page: a portrait image on a landscape page covers only part of it", 0.5 < _quer[0] < 0.8, _quer)
+_unbekannt = _messe([(["/Fehlt"], "Do")], _img)
+_c19("T-19 page: an unknown XObject name is skipped", _unbekannt == (0.0, 0, 0))
+
+
+def _art(seiten, mime="application/pdf"):
+    alt = classify.pdf_seiten
+    classify.pdf_seiten = lambda daten: list(seiten)
+    try:
+        return classify.ocr_art(mime, b"%PDF-")
+    finally:
+        classify.pdf_seiten = alt
+
+
+_c19("T-19 document: photos are always OCR, office files and mails are digital",
+        _art([], "image/jpeg")["art"] == "foto" and _art([], "image/heic")["art"] == "foto"
+        and _art([], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")["art"] == "digital"
+        and _art([], "message/rfc822")["art"] == "digital")
+_c19("T-19 document: all pages scans → scan, none → digital",
+        _art([_scan, _scan_ocr]) == {"art": "scan", "seiten": 2, "scan_seiten": [1, 2]}
+        and _art([_digital, _brief]) == {"art": "digital", "seiten": 2, "scan_seiten": []})
+_c19("T-19 document: mixed → OCR as soon as one page is a scan",
+        _art([_digital, _scan, _digital]) == {"art": "gemischt", "seiten": 3, "scan_seiten": [2]})
+_c19("T-19 reasons: scan, photo, mixed and unclear give a reason, digital none",
+        classify.scan_grund({"art": "foto"}) == "Foto" and classify.scan_grund({"art": "scan", "seiten": 2}) == "Scan (2 Seite(n))"
+        and classify.scan_grund({"art": "gemischt", "seiten": 3, "scan_seiten": [2]}) == "Scan-Seiten 2 von 3"
+        and classify.scan_grund({"art": "unklar", "fehler": "x"}).startswith("Original nicht prüfbar")
+        and classify.scan_grund({"art": "digital"}) is None)
+
+
+# scan_erkennen: metadata gives the mime type; a PDF is read; anything that breaks is "unklar" (→ OCR).
+def _erkenne(mime, original=b"%PDF-", fehler=None, seiten=(_scan,)):
+    gelesen = []
+
+    def get(pfad, raw=False):
+        gelesen.append(pfad)
+        if fehler:
+            raise fehler
+        return original if raw else {"original_mime_type": mime}
+    alt = (classify.get, classify.pdf_seiten)
+    classify.get, classify.pdf_seiten = get, (seiten if callable(seiten) else lambda daten: list(seiten))
+    try:
+        return classify.scan_erkennen(5), gelesen
+    finally:
+        classify.get, classify.pdf_seiten = alt
+
+
+_e1, _g1 = _erkenne("application/pdf")
+_e2, _g2 = _erkenne("image/png")
+_e3, _ = _erkenne("application/pdf", fehler=OSError("weg"))
+_c19("T-19 detection: a PDF original is fetched (original=true) and measured",
+        _e1["art"] == "scan" and _g1 == ["/documents/5/metadata/", "/documents/5/download/?original=true"], (_e1, _g1))
+_c19("T-19 detection: an image needs no download", _e2 == {"art": "foto"} and _g2 == ["/documents/5/metadata/"], _g2)
+_c19("T-19 detection: an error makes it unclear (→ OCR), not digital", _e3["art"] == "unklar" and "weg" in _e3["fehler"], _e3)
+
+
+def _ohne_bibliothek(daten):
+    raise RuntimeError("weder pikepdf noch pypdf vorhanden")
+
+
+_e4, _ = _erkenne("application/pdf", seiten=_ohne_bibliothek)
+_c19("T-19 detection: without a PDF library the original is unclear (→ OCR)",
+     _e4.get("art") == "unklar" and "weder pikepdf noch pypdf" in _e4.get("fehler", ""), _e4)
+
+# original_lesen: the post-consume run reads the file from disk — only for its own document.
+_orig = Path(_TMP) / "original.pdf"
+_orig.write_bytes(b"%PDF-vom-datentraeger")
+_alt_get = classify.get
+classify.get = lambda pfad, raw=False: b"%PDF-von-der-api"
+os.environ.update({"DOCUMENT_SOURCE_PATH": str(_orig), "DOCUMENT_ID": "5"})
+try:
+    _o_eigen, _o_fremd = classify.original_lesen(5), classify.original_lesen(6)
+finally:
+    classify.get = _alt_get
+    for _k in ("DOCUMENT_SOURCE_PATH", "DOCUMENT_ID"):
+        os.environ.pop(_k, None)
+_c19("T-19 original: from disk in the post-consume run, else via the API",
+        _o_eigen == b"%PDF-vom-datentraeger" and _o_fremd == b"%PDF-von-der-api", (_o_eigen, _o_fremd))
+
+
+# Wiring in main(): which run gets OCR in which mode.
+def _ocr_lauf(cfg, erkennung, text=_gut, force_ocr=False, ocr_text="Mistral las den Scan neu " * 3):
+    gerufen = []
+    alt = classify.scan_erkennen
+    classify.scan_erkennen = lambda did: (gerufen.append(did), dict(erkennung))[1]
+    try:
+        a = _lauf([_ok], text=text, cfg={"ocr_always": False, "ocr_modus": "", **cfg}, force_ocr=force_ocr,
+                  ocr_text=ocr_text)
+    finally:
+        classify.scan_erkennen = alt
+    return a, gerufen, dict(classify.TRACE.get("ocr") or {})
+
+
+_d, _dg, _dt = _ocr_lauf({"ocr_modus": "scans"}, {"art": "digital", "seiten": 2, "scan_seiten": []})
+_c19("T-19 run: digital PDF in mode scans → no OCR, trace names mode and detection",
+        _d["ocr"] == 0 and _dg == ["5"] and _dt.get("triggered") is False and _dt.get("modus") == "scans"
+        and _dt.get("erkennung", {}).get("art") == "digital" and _dt.get("grund") == "digitales Original, Text ausreichend", _dt)
+_s, _, _st = _ocr_lauf({"ocr_modus": "scans"}, {"art": "scan", "seiten": 1, "scan_seiten": [1]})
+_c19("T-19 run: scan in mode scans → OCR, and its text replaces Paperless' even when shorter",
+        _s["ocr"] == 1 and _st.get("triggered") is True and _st.get("grund") == "Scan (1 Seite(n))"
+        and _st.get("chars") == len(("Mistral las den Scan neu " * 3).strip()) and "verworfen" not in _st
+        and _st.get("excerpt", "").startswith("Mistral las") and "Mistral las" in _s["chat"][0]
+        and _st.get("erkennung", {}).get("art") == "scan", _st)
+_g, _, _gt = _ocr_lauf({"ocr_modus": "scans"}, {"art": "gemischt", "seiten": 3, "scan_seiten": [3]})
+_c19("T-19 run: mixed document → OCR", _g["ocr"] == 1 and _gt.get("grund") == "Scan-Seiten 3 von 3", _gt)
+_f, _, _ft = _ocr_lauf({"ocr_modus": "scans"}, {"art": "foto"})
+_c19("T-19 run: photo → OCR", _f["ocr"] == 1 and _ft.get("grund") == "Foto", _ft)
+_u, _, _ut = _ocr_lauf({"ocr_modus": "scans"}, {"art": "unklar", "fehler": "kaputt"})
+_c19("T-19 run: unclear original → OCR (better one page too many)", _u["ocr"] == 1 and "nicht prüfbar" in _ut.get("grund", ""), _ut)
+_r, _, _rt = _ocr_lauf({"ocr_modus": "scans"}, {"art": "digital", "seiten": 1, "scan_seiten": []}, text="kurz")
+_c19("T-19 run: digital PDF with weak text still gets the rescue in mode scans",
+        _r["ocr"] == 1 and _rt.get("grund", "").startswith("zu kurz"), _rt)
+_i, _ig, _it = _ocr_lauf({"ocr_always": True}, {"art": "digital"})
+_c19("T-19 run: ocr_always is mode immer — OCR without looking at the original",
+        _i["ocr"] == 1 and _ig == [] and _it.get("grund") == "immer-OCR" and _it.get("modus") == "immer", _it)
+_i2, _i2g, _i2t = _ocr_lauf({"ocr_modus": "immer"}, {"art": "digital"})
+_c19("T-19 run: mode immer → OCR for a digital PDF too", _i2["ocr"] == 1 and _i2g == [], _i2t)
+_re, _reg, _ret = _ocr_lauf({"ocr_modus": "rescue", "ocr_always": True}, {"art": "scan"})
+_c19("T-19 run: mode rescue wins over ocr_always and looks at no original",
+        _re["ocr"] == 0 and _reg == [] and _ret.get("modus") == "rescue" and "erkennung" not in _ret, _ret)
+_k, _kg, _ = _ocr_lauf({"ocr_modus": "scans"}, {"art": "digital"}, force_ocr=True)
+_c19("T-19 run: the AI button (FORCE_OCR) reads anyway and needs no detection", _k["ocr"] == 1 and _kg == [])
+_n, _ng, _ = _ocr_lauf({"ocr_modus": "scans", "ocr_enabled": False}, {"art": "scan"})
+_c19("T-19 run: OCR switched off → no detection, no OCR", _n["ocr"] == 0 and _ng == [])
+
 sys.exit(r.done())

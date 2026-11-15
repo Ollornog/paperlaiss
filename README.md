@@ -170,6 +170,10 @@ else's" is not expressible with workflows alone. `POST /route` fills that gap: a
 * Document still owned by an **upload account** (`PANEL_ROUTE_UPLOADERS`, a scanner that uploads as itself
   and sets the owner afterwards): handed over like a hub document, so a scan whose uploader lost the
   network after the upload does not stay with the upload account.
+* Document owned by an account on `PANEL_ROUTE_SHARE_WITH_HUB`: the hub gets view and change rights even
+  without any person tag (a person who uploads through the web interface without setting the own tag).
+  For this the workflow also needs a trigger *Document added* without filter, so that every new
+  document reaches `/route`; documents of other owners without a person tag stay untouched.
 * Rights are only ever added, never removed; groups stay. A second call changes nothing.
 
 | Variable | Meaning |
@@ -177,6 +181,7 @@ else's" is not expressible with workflows alone. `POST /route` fills that gap: a
 | `PANEL_ROUTE_PERSONS` | `<tag>=<username>,…`, e.g. `Alice=alice,Bob=bob` (tag case-insensitive) |
 | `PANEL_ROUTE_HUB` | username whose documents are handed over (empty: only share) |
 | `PANEL_ROUTE_UPLOADERS` | upload accounts, comma-separated, whose documents are handed over too (empty: none) |
+| `PANEL_ROUTE_SHARE_WITH_HUB` | accounts, comma-separated, whose own documents always give the hub view and change rights, tag or not (empty: none) |
 | `PANEL_ROUTE_TOKEN` | secret the webhook sends as `X-Route-Token`; without it `/route` answers 503 |
 
 Workflow in Paperless: triggers *Document added* and *Document updated*, filter *has any of these
@@ -424,7 +429,8 @@ an earlier rule consumed it in the same run.
 | `titel_setzen` | `true` | title "Correspondent – document type identifier"; overwritten like the document type (import, AI button, panel — never in a bulk run) |
 | `leerseiten_entfernen` | `true` | remove completely white pages at import (pre-consume step `leerseiten.py`) |
 | `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral models |
-| `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour |
+| `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour; `ocr_always` is the old switch for `ocr_modus` `immer` |
+| `ocr_modus` | empty | `rescue` (OCR only for weak text), `scans` (also every scan and photo, digital PDFs keep their text) or `immer` (every document); empty = `immer` with `ocr_always`, else `rescue` — see below |
 | `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |
 | `tagging_enabled` | `false` | AI assigns content tags (off: type/correspondent/fields only) |
 | `marker_tag` | `ai-processed` | tag written, and used as the "already done" signal; empty = no tag, the mark sits invisibly in the document's trace (`traces/<id>.json`, key `klassifiziert`) |
@@ -461,6 +467,15 @@ Two gates decide whether a document is re-read by Mistral OCR:
 
 **Re-classifying from Paperless** (redo tag or hint field) always runs OCR. The reasons end up in
 the trace.
+
+**OCR mode (`ocr_modus`).** `rescue` uses only the two gates above. `immer` reads every document.
+`scans` looks at the original first: a photo (JPG, PNG, HEIC …) or a PDF with at least one scanned
+page gets OCR, a digital PDF keeps the text Paperless read (the two gates still apply to it). A page
+counts as a scan when raster images cover at least 60 % of it and it shows fewer than 400 bytes of
+visible text; the invisible text layer a scanner or OCRmyPDF lays over the image (render mode 3)
+does not count. Office files and mails are digital. The check needs a PDF library: pikepdf (in the
+Paperless image, with OCRmyPDF) or pypdf (in the panel image); without one, or when the original
+cannot be read, the document gets OCR. The trace keeps the result under `ocr.erkennung`.
 
 ```json
 "ocr_regeln": {"min_schluesselwoerter": 2, "max_muell_anteil": 0.25,

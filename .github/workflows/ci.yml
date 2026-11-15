@@ -84,6 +84,12 @@ jobs:
       - name: Export-Knopf — PDF-Bau im Abbild prüfen
         run: docker run --rm -v "$PWD/tests:/tests:ro" paperlaiss-panel:ci python /tests/abbild_export.py
 
+      # OCR-Modus „scans“ (T-19): manuelle Läufe und der KI-Knopf laufen im Panel und messen die Seiten mit pypdf.
+      - name: OCR-Modus — Scan oder digital mit pypdf im Abbild prüfen
+        run: >-
+          docker run --rm -e CLASSIFY_PY=/src/classify.py -v "$PWD/tests:/tests:ro"
+          -v "$PWD/classify.py:/src/classify.py:ro" paperlaiss-panel:ci python /tests/abbild_ocr_art.py
+
   vorab:
     # Die Vorab-Schritte (Pre-Consume) laufen im Paperless-Abbild und brauchen dessen gs und qpdf —
     # die stdlib-Suite hat beides nicht. Geprüft wird deshalb im Abbild, in derselben Version wie in
@@ -98,3 +104,9 @@ jobs:
           docker run --rm --entrypoint python3
           -v "$PWD/tests:/tests:ro" -v "$PWD/deploy:/deploy:ro"
           ghcr.io/paperless-ngx/paperless-ngx:3.2.1 /tests/abbild_leerseiten.py
+      # OCR-Modus „scans“ (T-19): der Post-Consume-Lauf misst die Seiten mit pikepdf aus dem Paperless-Abbild.
+      - name: OCR-Modus — Scan oder digital mit pikepdf im Paperless-Abbild prüfen
+        run: >-
+          docker run --rm --entrypoint python3 -e CLASSIFY_PY=/src/classify.py
+          -v "$PWD/tests:/tests:ro" -v "$PWD/classify.py:/src/classify.py:ro"
+          ghcr.io/paperless-ngx/paperless-ngx:3.2.1 /tests/abbild_ocr_art.py
