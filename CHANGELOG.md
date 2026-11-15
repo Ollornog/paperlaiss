@@ -12,6 +12,9 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
   patch release by itself: the auto-merge dispatches `release.yml` (`automatik=vorbereiten`), `scripts/_release_automatik.py`
   opens the PR `release/v<version>` (`pyproject.toml` and this changelog), the tag follows its merge, and the tag run
   opens the pin PR in the fleet repo after publishing (`fc-pin`, target from the variable `PIN_REPO`).
+- Kit 0.48.0: the pin PR can carry the release assets (scripts, buttons, `SHA256SUMS`) the fleet repo keeps next to the
+  compose file — configured by the variable `PIN_ANHAENGE`, each asset checked against the `SHA256SUMS` of the release;
+  `fc-pin` now waits for the `release` job. Without the variable nothing changes.
 
 ## [0.12.0] - 2026-11-15
 

@@ -26,6 +26,8 @@ Konfiguration je Repo: `.github/release-automatik.json`
                                                # "alle": true = jeder Treffer (mind. einer, alle gleich) wird gehoben
       "changelog": {"datei": "CHANGELOG.md", "form": "keepachangelog" | "datum", "sprache": "de" | "en",
                     "kopf": "## [{version}] - {datum}"} | null,   # kopf optional, Vorgaben siehe KOPF
+      "versionsbefehl": ["scripts/_release.py", "{version}"],   # optional: eigenes Werkzeug des Repos setzt die Version
+      "pruefbefehl": ["scripts/_release.py", "--check"],        # optional: vor dem Tag, rc != 0 → kein Tag
       "abbilder": ["<registry>/<owner>/<name>"]   # was der Tag-Lauf veröffentlicht; fc-pin hebt genau diese Pins
     }
 
@@ -36,6 +38,14 @@ Aufrufe (GH_TOKEN = App-Token; GITHUB_REPOSITORY wie in Actions):
     _release_automatik.py fc-pin --tag vX --ziel OWNER/REPO # Digests auflösen, Pin-PR im Ziel-Repo
     _release_automatik.py naechste                          # nur ausgeben, was `vorbereiten` schneiden würde
 
+Release-Anhänge im Pin-PR (seit 0.48.0, PO 2026-11-15): Liefert ein Release neben dem Abbild Dateien, die das Ziel-Repo
+neben der Compose hält (paperlaiss: Skripte und Knöpfe samt SHA256SUMS), nimmt `fc-pin` sie mit, wenn die Repo-Variable
+`PIN_ANHAENGE` (Umgebung des Tag-Laufs) sie nennt — Leerzeichen-getrennt `<ordner>:<datei>` oder `<ordner>:*` (alle
+Dateien der SHA256SUMS und sie selbst). Der Ordner muss im Ziel schon bestehen. `fc-pin` lädt SHA256SUMS und Anhänge vom
+Release des Tags, prüft jeden Hash und schreibt nur, was sich unterscheidet (Dateimodus bleibt). Der Auto-Merge des
+Ziels (`PIN_ANHAENGE` im Block je Repo) prüft dasselbe gegen das Release. Ohne die Variable bleibt alles wie vorher.
+Gelesen wird das Release mit `QUELLE_TOKEN` (Workflow-Token des App-Repos), sonst mit GH_TOKEN.
+
 stdlib-only. Nach außen nur `git`, `gh api` und `docker buildx imagetools inspect`.
 """
 from __future__ import annotations
@@ -43,6 +53,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -167,6 +178,10 @@ def changelog_eintragen(text: str, form: str, sprache: str, version: str, datum:
     if not zeile.startswith("## ") or "\n" in zeile:
         raise Fehler(f"changelog.kopf {kopf!r}: eine Zeile, beginnt mit `## `")
     if form == "keepachangelog":
+        # Hat das Werkzeug des Repos den Abschnitt schon geschlossen ([Unreleased] → [version]), kommt der Eintrag dort hinein.
+        da = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n", text, re.M)
+        if da:
+            return text[:da.end()] + f"\n### {t['kategorie']}\n\n{rumpf}" + text[da.end():]
         m = UNVEROEFFENTLICHT.search(text)
         neu_kopf = f"{zeile}\n\n"
         if m:
@@ -209,12 +224,87 @@ def zweigname(art: str, *teile: str) -> str:
     return f"{art}/{name}"
 
 
+NAME = re.compile(r"[A-Za-z0-9._-]+")
+# Jeder Teil beginnt mit Buchstabe, Ziffer, _ oder - — „.“, „..“ und „.git“ gehen so nicht.
+ORDNER = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*")
+SUMMEN = "SHA256SUMS"
+
+
+def anhang_regeln(text: str) -> list[tuple[str, str]]:
+    """`PIN_ANHAENGE` lesen: Leerzeichen-getrennt `<ordner>:<datei>` oder `<ordner>:*`. Leer heißt keine Anhänge."""
+    regeln = []
+    for teil in (text or "").split():
+        ordner, _, datei = teil.rpartition(":")
+        if not ORDNER.fullmatch(ordner) or not (datei == "*" or NAME.fullmatch(datei)):
+            raise Fehler(f"PIN_ANHAENGE: {teil!r} nicht in der Form <ordner>:<datei> oder <ordner>:*")
+        regeln.append((ordner, datei))
+    return regeln
+
+
+def summen_lesen(text: str) -> dict[str, str]:
+    """SHA256SUMS (`<64 hex>  <name>`, Binärmarke `*` erlaubt) → {name: hash}. Nur flache Namen, keiner doppelt."""
+    aus: dict[str, str] = {}
+    for z in text.splitlines():
+        if not z.strip():
+            continue
+        m = re.fullmatch(r"([0-9a-f]{64}) [ *]([A-Za-z0-9._-]+)", z)
+        if not m or m.group(2) in aus or m.group(2) == SUMMEN:
+            raise Fehler(f"{SUMMEN}: Zeile {z!r} unzulässig")
+        aus[m.group(2)] = m.group(1)
+    if not aus:
+        raise Fehler(f"{SUMMEN} ist leer")
+    return aus
+
+
+def anhang_soll(regeln: list[tuple[str, str]], summen: dict[str, str], summen_hash: str) -> dict[str, tuple[str, str]]:
+    """Ziel-Pfad → (Name im Release, Soll-Hash). `*` heißt alle Dateien der SHA256SUMS und sie selbst."""
+    soll: dict[str, tuple[str, str]] = {}
+    for ordner, datei in regeln:
+        if datei == "*":
+            namen = sorted(summen) + [SUMMEN]
+        elif datei == SUMMEN or datei in summen:
+            namen = [datei]
+        else:
+            raise Fehler(f"PIN_ANHAENGE: {datei} steht nicht in der {SUMMEN} des Release")
+        for n in namen:
+            soll[f"{ordner}/{n}"] = (n, summen_hash if n == SUMMEN else summen[n])
+    return soll
+
+
+def git_blob_sha(inhalt: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(inhalt) + inhalt).hexdigest()
+
+
 # ── nach außen: git, gh, docker ─────────────────────────────────────────────────────────────────────────────────────
 
-def _lauf(argv: list[str], eingabe: str | None = None) -> str:
-    r = subprocess.run(argv, input=eingabe, capture_output=True, text=True, check=False)
+def _lauf(argv: list[str], eingabe: str | None = None, cwd: str | None = None) -> str:
+    r = subprocess.run(argv, input=eingabe, capture_output=True, text=True, check=False, cwd=cwd)
     if r.returncode != 0:
         raise Fehler(f"{' '.join(argv[:4])} … rc={r.returncode}: {r.stderr.strip()[:500]}")
+    return r.stdout
+
+
+def _quelle_env() -> dict[str, str]:
+    env = dict(os.environ)
+    if env.get("QUELLE_TOKEN"):
+        env["GH_TOKEN"] = env["QUELLE_TOKEN"]
+    return env
+
+
+def gh_quelle(pfad: str) -> object:
+    """Lesen im eigenen Repo (Release) mit QUELLE_TOKEN — das App-Token des Tag-Laufs gilt nur fürs Ziel."""
+    r = subprocess.run(["gh", "api", "-X", "GET", pfad], capture_output=True, text=True, check=False, env=_quelle_env())
+    if r.returncode != 0:
+        raise Fehler(f"gh api GET {pfad} … rc={r.returncode}: {r.stderr.strip()[:500]}")
+    return json.loads(r.stdout)
+
+
+def gh_roh(pfad: str) -> bytes:
+    """Ein Release-Anhang als Bytes (Accept: application/octet-stream)."""
+    r = subprocess.run(["gh", "api", "-X", "GET", pfad, "-H", "Accept: application/octet-stream"], capture_output=True,
+                       check=False, env=_quelle_env())
+    if r.returncode != 0:
+        raise Fehler(f"gh api GET {pfad} … rc={r.returncode}: {r.stderr.decode(errors='replace').strip()[:500]}")
     return r.stdout
 
 
@@ -226,8 +316,11 @@ def gh(pfad: str, methode: str = "GET", daten: dict | None = None) -> object:
     return json.loads(aus) if aus.strip() else None
 
 
-def pr_oeffnen(repo: str, basis: str, zweig: str, dateien: dict[str, str], titel: str, text: str) -> str:
+def pr_oeffnen(repo: str, basis: str, zweig: str, dateien: dict[str, str | bytes], titel: str, text: str,
+               modi: dict[str, str] | None = None) -> str:
     """Ein Commit mit `dateien` (Pfad → Inhalt) auf `basis`, als Zweig `zweig`, und ein PR. Gibt die PR-URL.
+
+    Text geht als utf-8-Blob, Bytes (Release-Anhänge) als base64; `modi` hält den Dateimodus (Vorgabe 100644).
 
     Über die Git-Data-API: Autor und Committer ist das Token (die App), der Commit ist von GitHub signiert. Der Auto-Merge
     prüft genau das (alle Commits vom App-Bot). Gibt es den Zweig schon mit offenem PR, bleibt es dabei (Wiederholung).
@@ -239,8 +332,12 @@ def pr_oeffnen(repo: str, basis: str, zweig: str, dateien: dict[str, str], titel
     baum = gh(f"repos/{repo}/git/commits/{kopf}")["tree"]["sha"]
     eintraege = []
     for pfad, inhalt in sorted(dateien.items()):
-        blob = gh(f"repos/{repo}/git/blobs", "POST", {"content": inhalt, "encoding": "utf-8"})["sha"]
-        eintraege.append({"path": pfad, "mode": "100644", "type": "blob", "sha": blob})
+        if isinstance(inhalt, bytes):
+            daten = {"content": base64.b64encode(inhalt).decode("ascii"), "encoding": "base64"}
+        else:
+            daten = {"content": inhalt, "encoding": "utf-8"}
+        blob = gh(f"repos/{repo}/git/blobs", "POST", daten)["sha"]
+        eintraege.append({"path": pfad, "mode": (modi or {}).get(pfad, "100644"), "type": "blob", "sha": blob})
     neu_baum = gh(f"repos/{repo}/git/trees", "POST", {"base_tree": baum, "tree": eintraege})["sha"]
     commit = gh(f"repos/{repo}/git/commits", "POST", {"message": titel, "tree": neu_baum, "parents": [kopf]})["sha"]
     try:
@@ -283,6 +380,18 @@ def vorbereiten(root: str, repo: str, basis: str, trocken: bool = False) -> str:
     version = naechste_version(k["schema"], quelltext, _tags(root), _heute())
     if trocken:
         return version
+    if k.get("versionsbefehl"):
+        # Das Repo hat ein eigenes Werkzeug, das die Version überall setzt (TinySesam: scripts/_release.py) — es wird
+        # benutzt, statt seine Stellen hier nachzubauen. Was es ändert, kommt in den PR (die Diff-Prüfung des Auto-Merge
+        # hält das auf RELEASE_DATEIEN).
+        argv = [a.replace("{version}", version) for a in k["versionsbefehl"]]
+        if argv and argv[0].endswith(".py"):
+            argv = [sys.executable] + argv
+        _lauf(argv, cwd=root)
+        for zeile in _lauf(["git", "-C", root, "status", "--porcelain", "--untracked-files=no"]).splitlines():
+            pfad = zeile[3:].strip()
+            with open(os.path.join(root, pfad), encoding="utf-8") as fh:
+                dateien[pfad] = fh.read()
     if k["schema"] == "semver":
         for vd in k["versionsdateien"]:
             # Mehrere Muster für dieselbe Datei bauen aufeinander auf (README: Git-Tag und Abbild-Tag).
@@ -292,8 +401,10 @@ def vorbereiten(root: str, repo: str, basis: str, trocken: bool = False) -> str:
             dateien[vd["datei"]] = setze_version(dateien[vd["datei"]], vd["muster"], version, vd.get("alle", False))
     cl = k.get("changelog")
     if cl:
-        with open(os.path.join(root, cl["datei"]), encoding="utf-8") as fh:
-            alt = fh.read()
+        alt = dateien.get(cl["datei"])
+        if alt is None:
+            with open(os.path.join(root, cl["datei"]), encoding="utf-8") as fh:
+                alt = fh.read()
         dateien[cl["datei"]] = changelog_eintragen(alt, cl["form"], cl.get("sprache", "en"), version,
                                                    _heute().isoformat(), _dependabot_seit(root, _letzter_tag(root)),
                                                    cl.get("kopf"))
@@ -326,6 +437,11 @@ def taggen(root: str, repo: str, version: str) -> None:
         with open(os.path.join(root, vd["datei"]), encoding="utf-8") as fh:
             if version_in(fh.read(), vd["muster"], vd.get("alle", False)) != version:
                 raise Fehler(f"{vd['datei']} trägt nicht {version} — kein Tag")
+    if k.get("pruefbefehl"):
+        argv = list(k["pruefbefehl"])
+        if argv and argv[0].endswith(".py"):
+            argv = [sys.executable] + argv
+        _lauf(argv, cwd=root)   # rc != 0 → Fehler, kein Tag
     gh(f"repos/{repo}/git/refs", "POST", {"ref": f"refs/tags/{tag}", "sha": kopf})
     print(f"Tag {tag} auf {kopf[:12]} gesetzt")
 
@@ -338,9 +454,59 @@ def digest_von(abbild: str, tag: str) -> str:
     return d
 
 
-def fc_pin(root: str, repo: str, tag: str, ziel: str, digests: dict[str, str] | None = None) -> str | None:
-    """Pin-PR im Ziel-Repo: jede Compose unter stacks/*/compose.yaml, die ein Abbild dieses Release pinnt."""
+def anhaenge(repo: str, tag: str, ziel: str, basis: str, regeln: list[tuple[str, str]]) -> tuple[dict[str, bytes], dict[str, str]]:
+    """Release-Anhänge für den Pin-PR: (Pfad → Bytes nur für abweichende Dateien, Pfad → Modus der bestehenden Datei).
+
+    Jeder Anhang muss den Hash aus der SHA256SUMS des Release tragen, sonst Fehler (kein PR). Jeder Ordner muss im Ziel
+    bestehen — ein Tippfehler in PIN_ANHAENGE soll laut scheitern, nicht still einen neuen Ordner anlegen.
+    """
+    if not tag.startswith("v"):
+        raise Fehler(f"PIN_ANHAENGE: Anhänge gibt es nur zu einem Release-Tag v…, nicht zu {tag}")
+    release = gh_quelle(f"repos/{repo}/releases/tags/{tag}")
+    if release.get("draft") or release.get("tag_name") != tag:
+        raise Fehler(f"Release {tag} von {repo} fehlt oder ist ein Entwurf")
+    ids = {a["name"]: a["id"] for a in release.get("assets") or []}
+    if SUMMEN not in ids:
+        raise Fehler(f"Release {tag} von {repo} hat keine {SUMMEN}")
+    summen_roh = gh_roh(f"repos/{repo}/releases/assets/{ids[SUMMEN]}")
+    summen = summen_lesen(summen_roh.decode("utf-8"))
+    soll = anhang_soll(regeln, summen, hashlib.sha256(summen_roh).hexdigest())
+    baum = gh(f"repos/{ziel}/git/trees/{basis}?recursive=1")
+    if baum.get("truncated"):
+        raise Fehler(f"Baum von {ziel} abgeschnitten — Anhänge nicht sicher abgleichbar")
+    im_ziel = {e["path"]: e for e in baum.get("tree") or [] if e.get("type") == "blob"}
+    ordner_da = {e["path"] for e in baum.get("tree") or [] if e.get("type") == "tree"}
+    for ordner, _ in regeln:
+        if ordner not in ordner_da:
+            raise Fehler(f"PIN_ANHAENGE: Ordner {ordner} fehlt in {ziel}")
+    inhalte: dict[str, bytes] = {}
+    for name in sorted({n for n, _ in soll.values()}):
+        if name == SUMMEN:
+            inhalte[name] = summen_roh
+            continue
+        if name not in ids:
+            raise Fehler(f"Release {tag}: {name} steht in der {SUMMEN}, ist aber kein Anhang")
+        inhalte[name] = gh_roh(f"repos/{repo}/releases/assets/{ids[name]}")
+        if hashlib.sha256(inhalte[name]).hexdigest() != summen[name]:
+            raise Fehler(f"Release {tag}: {name} passt nicht zur {SUMMEN} — kein Pin-PR")
+    neu: dict[str, bytes] = {}
+    modi: dict[str, str] = {}
+    for pfad, (name, _) in sorted(soll.items()):
+        alt = im_ziel.get(pfad)
+        if alt and alt.get("sha") == git_blob_sha(inhalte[name]):
+            continue
+        neu[pfad] = inhalte[name]
+        if alt:
+            modi[pfad] = alt.get("mode", "100644")
+    return neu, modi
+
+
+def fc_pin(root: str, repo: str, tag: str, ziel: str, digests: dict[str, str] | None = None,
+           anhang_text: str | None = None) -> str | None:
+    """Pin-PR im Ziel-Repo: jede Compose unter stacks/*/compose.yaml, die ein Abbild dieses Release pinnt — und, mit
+    PIN_ANHAENGE, die Release-Anhänge, die sich im Ziel unterscheiden."""
     k = lade_konfig(root)
+    regeln = anhang_regeln(os.environ.get("PIN_ANHAENGE", "") if anhang_text is None else anhang_text)
     abbilder = k.get("abbilder") or []
     if not abbilder:
         raise Fehler(f"{KONFIG}: keine abbilder — fc-pin weiß nicht, was es heben soll")
@@ -365,11 +531,19 @@ def fc_pin(root: str, repo: str, tag: str, ziel: str, digests: dict[str, str] | 
     if not geaendert:
         print(f"Kein Stack in {ziel} pinnt {', '.join(abbilder)} anders als {tag} — kein Pin-PR")
         return None
+    modi: dict[str, str] = {}
+    anhang_dateien: dict[str, bytes] = {}
+    if regeln:
+        anhang_dateien, modi = anhaenge(repo, tag, ziel, basis, regeln)
     name = repo.split("/")[-1].lower()
     zeilen = "\n".join(f"- `{a}:{tag}@{digests[a]}`" for a in abbilder)
-    url = pr_oeffnen(ziel, basis, zweigname("pin", name, tag), geaendert, f"{name}: pin {tag}",
+    hinweis = "Only pin lines change; the auto-merge checks that."
+    if regeln:
+        hinweis = (f"Release assets: {', '.join(sorted(anhang_dateien)) or 'unchanged'} — each checked against the "
+                   f"{SUMMEN} of release {tag}; the auto-merge checks pin lines and assets against that release.")
+    url = pr_oeffnen(ziel, basis, zweigname("pin", name, tag), {**geaendert, **anhang_dateien}, f"{name}: pin {tag}",
                      f"Pin from the release run of {repo} {tag} (release automation):\n\n{zeilen}\n\n"
-                     f"Files: {', '.join(sorted(geaendert))}. Only pin lines change; the auto-merge checks that.")
+                     f"Files: {', '.join(sorted(geaendert))}. {hinweis}", modi)
     print(f"Pin-PR: {url}")
     return url
 
@@ -379,7 +553,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("schritt", choices=["vorbereiten", "taggen", "fc-pin", "naechste"])
     p.add_argument("--version", default="")
     p.add_argument("--tag", default="")
-    p.add_argument("--ziel", default="")
+    # --target: dieselbe Option englisch — Repos mit Englisch-Wächter über ihre Workflows (TinySesam) rufen sie so.
+    p.add_argument("--ziel", "--target", dest="ziel", default="")
     p.add_argument("--root", default=os.getcwd())
     p.add_argument("--basis", default="main")
     a = p.parse_args(argv)
@@ -397,8 +572,9 @@ def main(argv: list[str]) -> int:
         else:
             if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", a.ziel):
                 raise Fehler("--ziel OWNER/REPO fehlt oder ist unzulässig")
-            if not re.fullmatch(r"v[A-Za-z0-9._-]+", a.tag):
-                raise Fehler("--tag v… fehlt oder ist unzulässig")
+            # Ein Release-Tag (v…) oder der Tag eines Abbilds je Stand auf main (UnderDoc: main-<sha>, seit 0.47.2).
+            if not re.fullmatch(r"(v|main-)[A-Za-z0-9._-]+", a.tag):
+                raise Fehler("--tag v… oder main-… fehlt oder ist unzulässig")
             fc_pin(a.root, repo, a.tag, a.ziel)
     except Fehler as e:
         print(f"::error::{e}", file=sys.stderr)

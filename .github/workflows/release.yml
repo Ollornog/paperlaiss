@@ -363,8 +363,10 @@ jobs:
 
   # Pin PR in the fleet repo (vars.PIN_REPO): the new tag with digest in every compose file that pins the image. There the
   # start probe accepts it, the auto-merge merges, the converge rolls it out.
+  # With vars.PIN_ANHAENGE (kit 0.48.0) the PR also carries the release assets the fleet repo keeps next to the compose
+  # file (scripts, buttons, SHA256SUMS), each checked against the SHA256SUMS of this release — so it waits for `release`.
   fc-pin:
-    needs: veroeffentlichen
+    needs: [veroeffentlichen, release]
     if: github.ref_type == 'tag' && vars.PIN_REPO != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -393,6 +395,9 @@ jobs:
       - name: Pin PR
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          # Reads this repo's release (the app token is scoped to the fleet repo only).
+          QUELLE_TOKEN: ${{ github.token }}
+          PIN_ANHAENGE: ${{ vars.PIN_ANHAENGE }}
           TAG: ${{ github.ref_name }}
           ZIEL: ${{ github.repository_owner }}/${{ vars.PIN_REPO }}
         run: scripts/_release_automatik.py fc-pin --tag "$TAG" --ziel "$ZIEL"

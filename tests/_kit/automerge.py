@@ -310,7 +310,8 @@ def release_automatik(root: str, je_repo: str, wfs: dict[str, str]) -> list[str]
     `APP_PR: "release"` und `ABBILD_PFADE` verlangen ein `release.yml`, das `automatik` und `version` als Eingaben von
     `workflow_dispatch` kennt (sonst schlägt der Anstoß nach dem Merge fehl), die Konfiguration
     `.github/release-automatik.json` und `scripts/_release_automatik.py`. `APP_PR: "pin"` verlangt `PIN_PRAEFIX`
-    (registry/owner/), sonst nähme die Diff-Prüfung jede Zeile an oder keine.
+    (registry/owner/), sonst nähme die Diff-Prüfung jede Zeile an oder keine. `PIN_ANHAENGE` (seit 0.48.0) nur mit
+    `APP_PR: "pin"` und in der Form `<owner/repo>=<ordner>:<datei|*>`.
     """
     probleme: list[str] = []
     art = _wert(je_repo, "APP_PR")
@@ -346,6 +347,18 @@ def release_automatik(root: str, je_repo: str, wfs: dict[str, str]) -> list[str]
         praefix = _wert(je_repo, "PIN_PRAEFIX") or ""
         if not re.fullmatch(r"[a-z0-9.-]+/[a-z0-9._-]+/", praefix):
             probleme.append(f'APP_PR: "pin" ohne gültiges PIN_PRAEFIX (registry/owner/, ist "{praefix}")')
+    anhaenge = _wert(je_repo, "PIN_ANHAENGE")
+    if anhaenge is not None:
+        # Release-Anhänge im Pin-PR (seit 0.48.0): nur mit APP_PR pin, jeder Eintrag <owner/repo>=<ordner>:<datei|*>.
+        if art != "pin":
+            probleme.append('PIN_ANHAENGE ohne APP_PR: "pin" — den Pin-PR nähme niemand an')
+        if not anhaenge.split():
+            probleme.append("PIN_ANHAENGE ist leer")
+        for e in anhaenge.split():
+            m = re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+=([A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*)"
+                             r":(\*|[A-Za-z0-9._-]+)", e)
+            if not m:
+                probleme.append(f"PIN_ANHAENGE: {e!r} nicht in der Form <owner/repo>=<ordner>:<datei|*>")
     return probleme
 
 
