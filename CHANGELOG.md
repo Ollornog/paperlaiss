@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- Release automation (kit 0.45.2): a merged Dependabot PR that changes `panel/Dockerfile` or the panel lock now cuts a
+  patch release by itself: the auto-merge dispatches `release.yml` (`automatik=vorbereiten`), `scripts/_release_automatik.py`
+  opens the PR `release/v<version>` (`pyproject.toml` and this changelog), the tag follows its merge, and the tag run
+  opens the pin PR in the fleet repo after publishing (`fc-pin`, target from the variable `PIN_REPO`).
+
 ## [0.12.0] - 2026-11-15
 
 OCR nur für Scans und Fotos, Freigabe an den Hub ohne Tag (Backlog T-19).

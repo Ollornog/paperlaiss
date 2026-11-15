@@ -1,0 +1,6 @@
+{
+  "schema": "semver",
+  "versionsdateien": [{"datei": "pyproject.toml", "muster": "^version = \"(?P<v>[^\"]+)\"$"}],
+  "changelog": {"datei": "CHANGELOG.md", "form": "keepachangelog", "sprache": "de", "kopf": "## [{version}] - {datum}"},
+  "abbilder": ["ghcr.io/ollornog/paperlaiss"]
+}
