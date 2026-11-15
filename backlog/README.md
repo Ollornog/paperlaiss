@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 13/18 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 14/19 erledigt
 
 ## Aufgaben
 
@@ -29,6 +29,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-16](T-16-garantie-in-jahren-ende-aus-dem-code.md)** Garantie in Jahren, Ende aus dem Code · M-1
 * ☑ **[T-17](T-17-titel-bruchstuck-und-spiegelbildliche-dubletten.md)** Titel-Bruchstück und spiegelbildliche Dokumente als Dublette · M-1
 * ☑ **[T-18](T-18-neue-stammdaten-ohne-besitzer.md)** Neue Stammdaten ohne Besitzer, auch unter einem Dienstkonto · M-1
+* ☑ **[T-19](T-19-ocr-nur-fuer-scans-und-freigabe-an-den-hub.md)** OCR nur für Scans und Fotos, Freigabe an den Hub ohne Tag · M-1
 
 ## Entscheidungen (ADR)
 

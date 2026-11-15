@@ -142,4 +142,48 @@ chk("uploader: env list parsed, looked up with persons and hub, unknown names sk
         and routing.wanted_users({"alice": "alice"}, "", []) == ["alice"]
         and routing.uploader_ids(["scanner", "ghost"], {"scanner": UPLOADER, "alice": ALICE}) == frozenset({UPLOADER}))
 
+# ---- share with the hub by owner (T-19, PANEL_ROUTE_SHARE_WITH_HUB): a person who uploads through the web
+# interface without the tag of their own still shares with the hub. Before T-19 such a document stayed with its
+# owner only (31 gaps found on the household system on 2026-11-15).
+patch, why = routing.plan(ALICE, [], EMPTY, HUB, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: own document without a tag gives the hub view and change, owner stays",
+        patch is not None and "owner" not in patch and why == "shared with the hub (owner on the share list)"
+        and patch["set_permissions"]["view"]["users"] == [HUB] and patch["set_permissions"]["change"]["users"] == [HUB],
+        (patch, why))
+patch, why = routing.plan(ALICE, [], perms([BOB, 9], [9], vg=[2], cg=[2]), HUB, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: existing users and groups are kept",
+        patch["set_permissions"] == {"view": {"users": [HUB, BOB, 9], "groups": [2]},
+                                     "change": {"users": [HUB, 9], "groups": [2]}}, patch)
+patch, why = routing.plan(ALICE, [], perms([HUB], [HUB]), HUB, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: second call is a no-op", patch is None and why == "already in place", (patch, why))
+patch, why = routing.plan(BOB, [], EMPTY, HUB, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: an owner not on the list without a tag stays untouched", patch is None and why == "no person tag",
+        (patch, why))
+patch, why = routing.plan(HUB, [], EMPTY, HUB, frozenset(), frozenset({HUB}))
+chk("share-with-hub: the hub's own document needs nothing", patch is None, (patch, why))
+patch, why = routing.plan(ALICE, [], EMPTY, None, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: without a hub nothing happens", patch is None, (patch, why))
+patch, why = routing.plan(None, [], EMPTY, HUB, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: a document without owner stays untouched", patch is None, (patch, why))
+patch, why = routing.plan(ALICE, [BOB], EMPTY, HUB, frozenset(), frozenset({ALICE}))
+chk("share-with-hub: with a person tag it is shared as before (hub included)",
+        patch is not None and why == "shared" and patch["set_permissions"]["view"]["users"] == [HUB, BOB], (patch, why))
+chk("share-with-hub: the accounts are looked up with the others",
+        routing.wanted_users({"alice": "alice"}, "hub", [], ["carol"]) == ["alice", "carol", "hub"])
+
+# Wiring in the panel (app.py needs FastAPI, so it is read, not run): the env variable is parsed, its accounts are
+# looked up, and plan() gets their ids.
+import ast as _ast  # noqa: E402
+_app = _ast.parse((ROOT / "panel" / "app.py").read_text(encoding="utf-8"))
+_quelle = (ROOT / "panel" / "app.py").read_text(encoding="utf-8")
+_rd = next(f for f in _ast.walk(_app) if isinstance(f, _ast.FunctionDef) and f.name == "route_document")
+_aufrufe = {(_ast.unparse(c.func)): c for c in _ast.walk(_rd) if isinstance(c, _ast.Call)}
+_plan = _aufrufe.get("routing.plan")
+_wanted = _aufrufe.get("routing.wanted_users")
+chk("share-with-hub: app.py reads PANEL_ROUTE_SHARE_WITH_HUB and passes the ids to plan()",
+        'os.environ.get("PANEL_ROUTE_SHARE_WITH_HUB"' in _quelle
+        and _plan is not None and len(_plan.args) == 6 and _ast.unparse(_plan.args[5]) == "share_hub"
+        and _wanted is not None and any(_ast.unparse(a) == "ROUTE_SHARE_HUB" for a in _wanted.args),
+        _ast.unparse(_plan) if _plan else "no plan() call")
+
 sys.exit(r.done())

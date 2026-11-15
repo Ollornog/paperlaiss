@@ -330,7 +330,8 @@ setzeFilter(F,true); verlauf(); laufend(); setInterval(laufend,5000); setInterva
 # Punkt liegen verschachtelt (ocr_regeln.max_muell_anteil).
 KNOTEN_FELDER = {
     "vorpruefung": ("Schon klassifiziert?", [("enabled", "Klassifizierer aktiv"), ("marker_tag", "Marker-Tag")]),
-    "ocr": ("OCR — Text neu erkennen", [("ocr_enabled", "OCR erlaubt"), ("ocr_always", "Immer OCR (kostet)"),
+    "ocr": ("OCR — Text neu erkennen", [("ocr_enabled", "OCR erlaubt"), ("ocr_modus", "OCR-Modus (rescue, scans, immer)"),
+                                ("ocr_always", "Immer OCR (kostet; alt, = Modus „immer“)"),
                                 ("ocr_model", "OCR-Modell"), ("ocr_min_len", "Mindestlänge (Zeichen)"),
                                 ("ocr_regeln.min_schluesselwoerter", "Mindestens bekannte Wörter"),
                                 ("ocr_regeln.max_zeichen_je_wort", "Höchstens Zeichen je echtem Wort"),
@@ -401,12 +402,13 @@ function zeichnen(){
     {phase:'Text beschaffen',art:'ocr',id:'ocr',titel:'OCR — Text neu erkennen',knopf:knopf('ocr'),
       was:'Texterkennung: <b>'+txt(CFG.ocr_model)+'</b> liest das PDF neu und ersetzt den Text, den Paperless beim Import erkannt hat. '+
           'Das lohnt sich nur, wenn dieser Text schlecht ist — sonst bleibt er.',
-      regeln:[['KI-Knopf in Paperless','neu erkennen'],['„Immer OCR“ ist eingeschaltet','neu erkennen'],
+      regeln:[['KI-Knopf in Paperless','neu erkennen'],['Modus „immer“ (oder „Immer OCR“ eingeschaltet)','neu erkennen'],
+              ['Modus „scans“ und das Original ist ein Scan oder Foto (eine Scan-Seite genügt)','neu erkennen'],
               ['der Text ist kürzer als '+mz+' Zeichen','neu erkennen'],
               ['weniger als '+o.min_schluesselwoerter+' bekannte Wörter im Text','neu erkennen'],
               ['mehr als '+Math.round((o.max_muell_anteil||0)*100)+' % Zeichensalat','neu erkennen'],
               ['sonst','Paperless-Text behalten']],
-      stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['Immer OCR',an(CFG.ocr_always)]],
+      stand:[['OCR erlaubt',an(CFG.ocr_enabled)],['OCR-Modus',CFG.ocr_modus||(CFG.ocr_always?'immer':'rescue')],['Immer OCR',an(CFG.ocr_always)]],
       klappen:[['Eingabe — das Dokument','<p>Die PDF-Datei aus Paperless.</p>'],['Ausgabe — der erkannte Text','<p>Text als Markdown, mit Überschriften und Tabellen.</p>']]},
     {phase:'Kandidaten suchen',art:'code',id:'vorsuche',titel:'Mail, Stammdaten und Namen im Text',knopf:knopf('vorsuche'),
       was:'Ohne KI: Kam das Dokument per Mail, zählt die Absender-Mail. Außerdem sucht paperlaiss immer im Text nach den Stammdaten aller Korrespondenten (USt-ID, IBAN, Mail, Domain, Kundennummer) und im Briefkopf nach ihren Namen und Aliasen. Was gefunden wird, geht mit Kontext und Fundstelle als Kandidat an Pass 1.',
@@ -725,7 +727,12 @@ EINSTELLUNGEN = {
                       "Die Anweisung an die KI. Leer = eingebauter Prompt. Platzhalter: {TYPES} (Dokumenttypen), "
                       "{TAGBLOCK} oder {TAGS} (Tag-Liste). Fertig eingesetzt zu sehen unter „Ablauf & Prompt“."),
     "ocr_enabled": ("OCR", "OCR erlaubt", "Aus: paperlaiss liest nie per Mistral-OCR, auch nicht beim KI-Knopf."),
-    "ocr_always": ("OCR", "Immer OCR", "Jedes Dokument per Mistral-OCR neu lesen, auch wenn der Text gut ist. Kostet je Seite."),
+    "ocr_modus": ("OCR", "OCR-Modus",
+                  "„rescue“: nur wenn der Text von Paperless schwach ist. „scans“: zusätzlich jeder Scan und jedes Foto "
+                  "(Seitenbild ohne sichtbare Schrift; eine Scan-Seite genügt), digitale PDFs behalten ihren Text. "
+                  "„immer“: jedes Dokument. Leer: „immer“, wenn „Immer OCR“ an ist, sonst „rescue“."),
+    "ocr_always": ("OCR", "Immer OCR", "Jedes Dokument per Mistral-OCR neu lesen, auch wenn der Text gut ist. Kostet je Seite. "
+                   "Alter Schalter, gleich OCR-Modus „immer“; ein gesetzter OCR-Modus geht vor."),
     "ocr_model": ("OCR", "OCR-Modell", "Mistral-Modell für die Texterkennung."),
     "ocr_min_len": ("OCR", "Mindestlänge (Zeichen)", "Kürzerer Text gilt als unbrauchbar und wird per OCR neu gelesen."),
     "ocr_regeln.min_schluesselwoerter": ("OCR", "Mindestens bekannte Wörter",

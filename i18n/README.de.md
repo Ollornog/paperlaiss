@@ -144,12 +144,20 @@ Dokument und entscheidet nach dem Besitzer.
 * Dokument eines anderen Kontos mit dem Tag einer anderen Person: Der Besitzer bleibt, die Person
   bekommt Sehen und Ändern. Der Hub kommt mit dazu.
 * Mehrere Personen-Tags an einem Hub-Dokument: an alle freigegeben, nicht übergeben.
+* Dokument, das noch einem **Upload-Konto** gehört (`PANEL_ROUTE_UPLOADERS`, ein Scanner, der als er selbst
+  hochlädt und den Besitzer danach setzt): wird übergeben wie ein Hub-Dokument.
+* Dokument eines Kontos aus `PANEL_ROUTE_SHARE_WITH_HUB`: Der Hub bekommt Sehen und Ändern auch ohne
+  Personen-Tag (eine Person lädt über die Weboberfläche hoch und setzt ihr eigenes Tag nicht). Dafür braucht
+  der Workflow zusätzlich einen Auslöser *Dokument hinzugefügt* ohne Filter, damit jedes neue Dokument
+  `/route` erreicht; Dokumente anderer Besitzer ohne Personen-Tag bleiben unberührt.
 * Rechte kommen nur dazu, nie weg; Gruppen bleiben. Ein zweiter Aufruf ändert nichts.
 
 | Variable | Bedeutung |
 |---|---|
 | `PANEL_ROUTE_PERSONS` | `<Tag>=<Benutzername>,…`, z. B. `Alice=alice,Bob=bob` (Tag ohne Groß/Klein) |
 | `PANEL_ROUTE_HUB` | Benutzername, dessen Dokumente übergeben werden (leer: nur freigeben) |
+| `PANEL_ROUTE_UPLOADERS` | Upload-Konten, kommagetrennt, deren Dokumente ebenfalls übergeben werden (leer: keine) |
+| `PANEL_ROUTE_SHARE_WITH_HUB` | Konten, kommagetrennt, deren eigene Dokumente dem Hub immer Sehen und Ändern geben, mit oder ohne Tag (leer: keine) |
 | `PANEL_ROUTE_TOKEN` | Geheimnis, das der Webhook als `X-Route-Token` schickt; ohne antwortet `/route` 503 |
 
 Workflow in Paperless: Auslöser *Dokument hinzugefügt* und *Dokument aktualisiert*, Filter *hat
@@ -351,7 +359,8 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `titel_setzen` | `true` | Titel „Korrespondent – Dokumentart Kennung“; überschrieben wie der Dokumenttyp (Import, KI-Knopf, Panel — nie im Bestands-Durchlauf) |
 | `leerseiten_entfernen` | `true` | komplett weiße Seiten beim Import entfernen (Vorab-Schritt `leerseiten.py`) |
 | `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral-Modelle |
-| `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR-Rescue-Verhalten |
+| `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR-Rescue-Verhalten; `ocr_always` ist der alte Schalter für `ocr_modus` `immer` |
+| `ocr_modus` | leer | `rescue` (OCR nur bei schwachem Text), `scans` (dazu jeder Scan und jedes Foto, digitale PDFs behalten ihren Text) oder `immer` (jedes Dokument); leer = `immer` mit `ocr_always`, sonst `rescue` — siehe unten |
 | `ocr_regeln` | siehe unten | wann ein Text als zu schwach gilt und per OCR neu gelesen wird |
 | `tagging_enabled` | `false` | KI vergibt inhaltliche Tags (aus: nur Typ/Korrespondent/Felder) |
 | `marker_tag` | `ai-processed` | Tag, das gesetzt wird + als „schon erledigt"-Signal dient |
@@ -385,6 +394,16 @@ Zwei Tore entscheiden, ob ein Dokument per Mistral-OCR neu gelesen wird:
 
 **Neu klassifizieren aus Paperless** (Auslöser-Tag oder Hinweisfeld) läuft immer mit OCR. Die
 Gründe stehen im Trace.
+
+**OCR-Modus (`ocr_modus`).** `rescue` nutzt nur die beiden Tore oben. `immer` liest jedes Dokument.
+`scans` sieht sich zuerst das Original an: Ein Foto (JPG, PNG, HEIC …) oder ein PDF mit mindestens
+einer gescannten Seite bekommt OCR, ein digitales PDF behält den Text, den Paperless gelesen hat (für
+es gelten die beiden Tore weiter). Eine Seite gilt als Scan, wenn Rasterbilder mindestens 60 % von ihr
+bedecken und sie weniger als 400 Byte sichtbaren Text zeigt; die unsichtbare Textebene, die ein Scanner
+oder OCRmyPDF über das Bild legt (Render-Modus 3), zählt nicht. Office-Dateien und Mails sind digital.
+Die Prüfung braucht eine PDF-Bibliothek: pikepdf (im Paperless-Abbild, mit OCRmyPDF) oder pypdf (im
+Panel-Abbild); ohne sie, oder wenn das Original nicht lesbar ist, bekommt das Dokument OCR. Das Ergebnis
+steht im Trace unter `ocr.erkennung`.
 
 ```json
 "ocr_regeln": {"min_schluesselwoerter": 2, "max_muell_anteil": 0.25,
