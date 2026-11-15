@@ -333,7 +333,7 @@ jobs:
         with:
           subject-path: generalprobe.txt
 
-  # Release automation (kit 0.45.0): scripts/_release.py bumps the version or sets the tag, with the app token (this repo
+  # Release automation (kit 0.45.0): scripts/_release_automatik.py bumps the version or sets the tag, with the app token (this repo
   # only), so that the PR and the tag start workflows (the workflow token starts none).
   automatik:
     if: github.event_name == 'workflow_dispatch' && inputs.automatik != ''
@@ -359,7 +359,7 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           SCHRITT: ${{ inputs.automatik }}
           VERSION: ${{ inputs.version }}
-        run: scripts/_release.py "$SCHRITT" --version "$VERSION"
+        run: scripts/_release_automatik.py "$SCHRITT" --version "$VERSION"
 
   # Pin PR in the fleet repo (vars.PIN_REPO): the new tag with digest in every compose file that pins the image. There the
   # start probe accepts it, the auto-merge merges, the converge rolls it out.
@@ -395,4 +395,4 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ github.ref_name }}
           ZIEL: ${{ github.repository_owner }}/${{ vars.PIN_REPO }}
-        run: scripts/_release.py fc-pin --tag "$TAG" --ziel "$ZIEL"
+        run: scripts/_release_automatik.py fc-pin --tag "$TAG" --ziel "$ZIEL"

@@ -309,7 +309,7 @@ def release_automatik(root: str, je_repo: str, wfs: dict[str, str]) -> list[str]
 
     `APP_PR: "release"` und `ABBILD_PFADE` verlangen ein `release.yml`, das `automatik` und `version` als Eingaben von
     `workflow_dispatch` kennt (sonst schlägt der Anstoß nach dem Merge fehl), die Konfiguration
-    `.github/release-automatik.json` und `scripts/_release.py`. `APP_PR: "pin"` verlangt `PIN_PRAEFIX`
+    `.github/release-automatik.json` und `scripts/_release_automatik.py`. `APP_PR: "pin"` verlangt `PIN_PRAEFIX`
     (registry/owner/), sonst nähme die Diff-Prüfung jede Zeile an oder keine.
     """
     probleme: list[str] = []
@@ -339,7 +339,7 @@ def release_automatik(root: str, je_repo: str, wfs: dict[str, str]) -> list[str]
             for m in re.finditer(r"uses:\s*(actions/create-github-app-token@[0-9a-f]{40}[^\n]*)", rel):
                 if soll and m.group(1).rstrip() != soll:
                     probleme.append(f"release.yml: `{m.group(1).strip()}` weicht vom Pin der Vorlage ab (`{soll}`)")
-        for pfad in (".github/release-automatik.json", "scripts/_release.py"):
+        for pfad in (".github/release-automatik.json", "scripts/_release_automatik.py"):
             if not os.path.exists(os.path.join(root, pfad)):
                 probleme.append(f'APP_PR: "release" ohne {pfad}')
     if art == "pin":

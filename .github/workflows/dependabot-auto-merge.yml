@@ -61,7 +61,7 @@
 #     jede geänderte Zeile ist eine Pin-Zeile `image: <PIN_PRAEFIX><name>:<tag>@sha256:<digest>` — dieselben Abbilder
 #     entfernt wie hinzugefügt. Die Startprobe der Pflicht-Checks nimmt den neuen Pin ab, danach der Converge.
 # Und: Berührt ein gemergter Dependabot-PR einen Pfad aus `ABBILD_PFADE` (Dockerfile, Sperrliste, go.mod …), stößt er
-# `release.yml` mit `automatik=vorbereiten` an — der schneidet das Patch-Release als PR (scripts/_release.py).
+# `release.yml` mit `automatik=vorbereiten` an — der schneidet das Patch-Release als PR (scripts/_release_automatik.py).
 # Für App-PRs gilt alles andere wie für Dependabot: jeder Pflicht-Workflow grün für genau diesen Kopf, alle Commits vom
 # Autor des PR, kein Fork. Ohne `APP_PR`/`ABBILD_PFADE` bleibt alles wie vorher.
 name: Dependabot Auto-Merge

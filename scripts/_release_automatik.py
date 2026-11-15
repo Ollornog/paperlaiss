@@ -31,10 +31,10 @@ Konfiguration je Repo: `.github/release-automatik.json`
 
 Aufrufe (GH_TOKEN = App-Token; GITHUB_REPOSITORY wie in Actions):
 
-    _release.py vorbereiten                       # Version + CHANGELOG, PR release/v<version>
-    _release.py taggen --version X                # Stand von main prüfen, Tag v<X> setzen
-    _release.py fc-pin --tag vX --ziel OWNER/REPO # Digests auflösen, Pin-PR im Ziel-Repo
-    _release.py naechste                          # nur ausgeben, was `vorbereiten` schneiden würde
+    _release_automatik.py vorbereiten                       # Version + CHANGELOG, PR release/v<version>
+    _release_automatik.py taggen --version X                # Stand von main prüfen, Tag v<X> setzen
+    _release_automatik.py fc-pin --tag vX --ziel OWNER/REPO # Digests auflösen, Pin-PR im Ziel-Repo
+    _release_automatik.py naechste                          # nur ausgeben, was `vorbereiten` schneiden würde
 
 stdlib-only. Nach außen nur `git`, `gh api` und `docker buildx imagetools inspect`.
 """
@@ -63,7 +63,7 @@ class Fehler(Exception):
     """Ein Zustand, in dem die Automatik nichts tun darf (Meldung für Menschen, Lauf rot)."""
 
 
-# ── reine Funktionen (getestet in repokit tests/test_release.py) ────────────────────────────────────────────────────
+# ── reine Funktionen (getestet in repokit tests/test_release_automatik.py) ────────────────────────────────────────────────────
 
 def lade_konfig(root: str) -> dict:
     try:
@@ -375,7 +375,7 @@ def fc_pin(root: str, repo: str, tag: str, ziel: str, digests: dict[str, str] | 
 
 
 def main(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(prog="_release.py")
+    p = argparse.ArgumentParser(prog="_release_automatik.py")
     p.add_argument("schritt", choices=["vorbereiten", "taggen", "fc-pin", "naechste"])
     p.add_argument("--version", default="")
     p.add_argument("--tag", default="")

@@ -250,12 +250,12 @@ def _release_jobs(text: str) -> dict[str, str]:
 
 # Release automation (kit 0.45.2): these two jobs hold an app token with contents: write AND check out — `main` in the
 # dispatch from the auto-merge, the tag in the tag run, never PR code. They install nothing and run exactly one command,
-# the stdlib-only kit script scripts/_release.py; no dependency can reach them. Checked below, word for word.
+# the stdlib-only kit script scripts/_release_automatik.py; no dependency can reach them. Checked below, word for word.
 AUTOMATIK_JOBS = {"automatik", "fc-pin"}
 
 
 def automatik_verstoesse(text: str) -> list[str]:
-    """Was die Ausnahme AUTOMATIK_JOBS verletzt: anderes als genau `scripts/_release.py` in `run:`, Installation, Anmeldedaten
+    """Was die Ausnahme AUTOMATIK_JOBS verletzt: anderes als genau `scripts/_release_automatik.py` in `run:`, Installation, Anmeldedaten
     im Checkout, PR-Code als Auslöser."""
     jobs = _release_jobs(text)
     aus = []
@@ -265,8 +265,8 @@ def automatik_verstoesse(text: str) -> list[str]:
             aus.append(f"{name}: fehlt")
             continue
         laeufe = re.findall(r"^\s+run:\s*(.+)$", rumpf, re.M)
-        if not laeufe or any(not z.startswith("scripts/_release.py ") for z in laeufe):
-            aus.append(f"{name}: run ist nicht genau scripts/_release.py ({laeufe})")
+        if not laeufe or any(not z.startswith("scripts/_release_automatik.py ") for z in laeufe):
+            aus.append(f"{name}: run ist nicht genau scripts/_release_automatik.py ({laeufe})")
         if re.search(r"\bpip\b|\bnpm\b|\buv\b|check\.sh|run:\s*\|", rumpf):
             aus.append(f"{name}: installiert oder startet anderes")
         if "actions/checkout" in rumpf and "persist-credentials: false" not in rumpf:
@@ -296,10 +296,10 @@ def identitaet_mit_fremdcode(text: str) -> list[str]:
 _idf = identitaet_mit_fremdcode(release)
 r.check("kein Job mit Identität checkt aus oder startet Code", not _idf, str(_idf))
 _auv = automatik_verstoesse(release)
-r.check("Release-Automatik: Jobs mit App-Token führen nur scripts/_release.py aus", not _auv, str(_auv))
+r.check("Release-Automatik: Jobs mit App-Token führen nur scripts/_release_automatik.py aus", not _auv, str(_auv))
 r.check("Selbsttest — ein Automatik-Job mit pip fiele auf",
         any("installiert" in v for v in automatik_verstoesse(release.replace(
-            'run: scripts/_release.py fc-pin', 'run: scripts/_release.py fc-pin; pip install x'))))
+            'run: scripts/_release_automatik.py fc-pin', 'run: scripts/_release_automatik.py fc-pin; pip install x'))))
 r.check("Selbsttest — ein Job mit id-token und Checkout fiele auf",
         identitaet_mit_fremdcode("jobs:\n  x:\n    permissions:\n      id-token: write\n"
                                  "    steps:\n      - uses: actions/checkout@abc\n") == ["x"])
