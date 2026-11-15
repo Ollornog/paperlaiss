@@ -50,6 +50,10 @@ tenant-specific.
    export PAPERLESS_TOKEN=<paperless-api-token>
    export MISTRAL_KEY=<mistral-api-key>
    ```
+   The token belongs to a **service account** with superuser rights (classification, the routing and the
+   warranty run read and change documents of every account, routing also sets owner and permissions), not to a
+   person: then a person can work without superuser and sees only their own documents. Correspondents and tags
+   paperlaiss creates have no owner (since 0.11.2), so every account sees them.
 2. Adjust **`classify-config.json`** (model, `tagging_enabled`, `marker_tag`, `reserved_tags`, …).
 3. Wire it in as a post-consume script in Paperless:
    ```

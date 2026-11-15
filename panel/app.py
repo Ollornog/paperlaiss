@@ -1052,7 +1052,8 @@ async def ingest(file: UploadFile = File(...), title: str = Form(None),
     tag_id = None
     try:
         res = api_get(f"/tags/?name__iexact={urllib.request.quote(source)}")["results"]
-        tag_id = res[0]["id"] if res else api_send("/tags/", {"name": source})["id"]
+        # No owner (T-18), otherwise the tag belongs to the panel's service account and nobody else sees it.
+        tag_id = res[0]["id"] if res else api_send("/tags/", {"name": source, "owner": None})["id"]
     except Exception:
         pass
     # Multipart an Paperless post_document
