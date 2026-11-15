@@ -26,6 +26,8 @@ Konfiguration je Repo: `.github/release-automatik.json`
                                                # "alle": true = jeder Treffer (mind. einer, alle gleich) wird gehoben
       "changelog": {"datei": "CHANGELOG.md", "form": "keepachangelog" | "datum", "sprache": "de" | "en",
                     "kopf": "## [{version}] - {datum}"} | null,   # kopf optional, Vorgaben siehe KOPF
+      "versionsbefehl": ["scripts/_release.py", "{version}"],   # optional: eigenes Werkzeug des Repos setzt die Version
+      "pruefbefehl": ["scripts/_release.py", "--check"],        # optional: vor dem Tag, rc != 0 → kein Tag
       "abbilder": ["<registry>/<owner>/<name>"]   # was der Tag-Lauf veröffentlicht; fc-pin hebt genau diese Pins
     }
 
@@ -167,6 +169,10 @@ def changelog_eintragen(text: str, form: str, sprache: str, version: str, datum:
     if not zeile.startswith("## ") or "\n" in zeile:
         raise Fehler(f"changelog.kopf {kopf!r}: eine Zeile, beginnt mit `## `")
     if form == "keepachangelog":
+        # Hat das Werkzeug des Repos den Abschnitt schon geschlossen ([Unreleased] → [version]), kommt der Eintrag dort hinein.
+        da = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n", text, re.M)
+        if da:
+            return text[:da.end()] + f"\n### {t['kategorie']}\n\n{rumpf}" + text[da.end():]
         m = UNVEROEFFENTLICHT.search(text)
         neu_kopf = f"{zeile}\n\n"
         if m:
@@ -211,8 +217,8 @@ def zweigname(art: str, *teile: str) -> str:
 
 # ── nach außen: git, gh, docker ─────────────────────────────────────────────────────────────────────────────────────
 
-def _lauf(argv: list[str], eingabe: str | None = None) -> str:
-    r = subprocess.run(argv, input=eingabe, capture_output=True, text=True, check=False)
+def _lauf(argv: list[str], eingabe: str | None = None, cwd: str | None = None) -> str:
+    r = subprocess.run(argv, input=eingabe, capture_output=True, text=True, check=False, cwd=cwd)
     if r.returncode != 0:
         raise Fehler(f"{' '.join(argv[:4])} … rc={r.returncode}: {r.stderr.strip()[:500]}")
     return r.stdout
@@ -283,6 +289,18 @@ def vorbereiten(root: str, repo: str, basis: str, trocken: bool = False) -> str:
     version = naechste_version(k["schema"], quelltext, _tags(root), _heute())
     if trocken:
         return version
+    if k.get("versionsbefehl"):
+        # Das Repo hat ein eigenes Werkzeug, das die Version überall setzt (TinySesam: scripts/_release.py) — es wird
+        # benutzt, statt seine Stellen hier nachzubauen. Was es ändert, kommt in den PR (die Diff-Prüfung des Auto-Merge
+        # hält das auf RELEASE_DATEIEN).
+        argv = [a.replace("{version}", version) for a in k["versionsbefehl"]]
+        if argv and argv[0].endswith(".py"):
+            argv = [sys.executable] + argv
+        _lauf(argv, cwd=root)
+        for zeile in _lauf(["git", "-C", root, "status", "--porcelain", "--untracked-files=no"]).splitlines():
+            pfad = zeile[3:].strip()
+            with open(os.path.join(root, pfad), encoding="utf-8") as fh:
+                dateien[pfad] = fh.read()
     if k["schema"] == "semver":
         for vd in k["versionsdateien"]:
             # Mehrere Muster für dieselbe Datei bauen aufeinander auf (README: Git-Tag und Abbild-Tag).
@@ -292,8 +310,10 @@ def vorbereiten(root: str, repo: str, basis: str, trocken: bool = False) -> str:
             dateien[vd["datei"]] = setze_version(dateien[vd["datei"]], vd["muster"], version, vd.get("alle", False))
     cl = k.get("changelog")
     if cl:
-        with open(os.path.join(root, cl["datei"]), encoding="utf-8") as fh:
-            alt = fh.read()
+        alt = dateien.get(cl["datei"])
+        if alt is None:
+            with open(os.path.join(root, cl["datei"]), encoding="utf-8") as fh:
+                alt = fh.read()
         dateien[cl["datei"]] = changelog_eintragen(alt, cl["form"], cl.get("sprache", "en"), version,
                                                    _heute().isoformat(), _dependabot_seit(root, _letzter_tag(root)),
                                                    cl.get("kopf"))
@@ -326,6 +346,11 @@ def taggen(root: str, repo: str, version: str) -> None:
         with open(os.path.join(root, vd["datei"]), encoding="utf-8") as fh:
             if version_in(fh.read(), vd["muster"], vd.get("alle", False)) != version:
                 raise Fehler(f"{vd['datei']} trägt nicht {version} — kein Tag")
+    if k.get("pruefbefehl"):
+        argv = list(k["pruefbefehl"])
+        if argv and argv[0].endswith(".py"):
+            argv = [sys.executable] + argv
+        _lauf(argv, cwd=root)   # rc != 0 → Fehler, kein Tag
     gh(f"repos/{repo}/git/refs", "POST", {"ref": f"refs/tags/{tag}", "sha": kopf})
     print(f"Tag {tag} auf {kopf[:12]} gesetzt")
 
@@ -379,7 +404,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("schritt", choices=["vorbereiten", "taggen", "fc-pin", "naechste"])
     p.add_argument("--version", default="")
     p.add_argument("--tag", default="")
-    p.add_argument("--ziel", default="")
+    # --target: dieselbe Option englisch — Repos mit Englisch-Wächter über ihre Workflows (TinySesam) rufen sie so.
+    p.add_argument("--ziel", "--target", dest="ziel", default="")
     p.add_argument("--root", default=os.getcwd())
     p.add_argument("--basis", default="main")
     a = p.parse_args(argv)
@@ -397,8 +423,9 @@ def main(argv: list[str]) -> int:
         else:
             if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", a.ziel):
                 raise Fehler("--ziel OWNER/REPO fehlt oder ist unzulässig")
-            if not re.fullmatch(r"v[A-Za-z0-9._-]+", a.tag):
-                raise Fehler("--tag v… fehlt oder ist unzulässig")
+            # Ein Release-Tag (v…) oder der Tag eines Abbilds je Stand auf main (UnderDoc: main-<sha>, seit 0.47.2).
+            if not re.fullmatch(r"(v|main-)[A-Za-z0-9._-]+", a.tag):
+                raise Fehler("--tag v… oder main-… fehlt oder ist unzulässig")
             fc_pin(a.root, repo, a.tag, a.ziel)
     except Fehler as e:
         print(f"::error::{e}", file=sys.stderr)
