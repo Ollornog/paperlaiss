@@ -2997,4 +2997,88 @@ _c19("T-19 run: the AI button (FORCE_OCR) reads anyway and needs no detection", 
 _n, _ng, _ = _ocr_lauf({"ocr_modus": "scans", "ocr_enabled": False}, {"art": "scan"})
 _c19("T-19 run: OCR switched off → no detection, no OCR", _n["ocr"] == 0 and _ng == [])
 
+# ---- T-20: reserved fields. A person files documents under a case (a select field); the classifier must never
+# set, change or clear it, and must not offer it to the model. Real runs of main() (dry=False): the patch is
+# what would reach Paperless.
+_VG_A, _VG_B = "optA0000000000aa", "optB0000000000bb"
+_VG = {"id": 45, "name": "Vorgang", "data_type": "select",
+       "extra_data": {"select_options": [{"id": _VG_A, "label": "Streit Alpha"}, {"id": _VG_B, "label": "Streit Beta"}]}}
+_RN = {"id": 19, "name": "Rechnungsnummer", "data_type": "string"}
+_RES = {"reserved_fields": ["vorgang"]}          # by name, case-insensitive like every field reference
+
+
+def _vg_lauf(ki_wert, feldwerte=(), cfg=_RES, **kw):
+    return _lauf([{**_ok, "fields": {"Vorgang": ki_wert, "Rechnungsnummer": "4711"}}], dry=False,
+                 felder=[_VG, _RN], feldwerte=list(feldwerte), cfg=cfg, **kw)
+
+
+def _vg_werte(a):
+    return [c for c in ((a.get("patch") or [{}])[0].get("custom_fields") or []) if c.get("field") == 45]
+
+
+def _c20(name, ok, info=""):
+    r.check("T-20 " + name, ok, str(info))
+
+
+_c20("reservierte_felder resolves by name, case-insensitive; empty config reserves nothing",
+     classify.reservierte_felder({"reserved_fields": ["VORGANG", ""]}, [_VG, _RN]) == {45}
+     and classify.reservierte_felder({}, [_VG, _RN]) == set()
+     and classify.reservierte_felder({"reserved_fields": [""]}, [{"id": 7, "name": "—"}]) == set())
+_m = _vg_lauf("Streit Beta")
+_c20("model never sees the field or its options",
+     _m["chat"] and "Vorgang" not in _m["chat"][0] and "Streit Alpha" not in _m["chat"][0]
+     and "Streit Alpha" not in _m["system"], _m["chat"][0][-600:] if _m["chat"] else "")
+_c20("model cannot SET it: no value written on a document without one", _vg_werte(_m) == [], _vg_werte(_m))
+_c20("the other fields are still written (the run itself works)",
+     {"field": 19, "value": "4711"} in (_m["patch"][0].get("custom_fields") or []), _m.get("patch"))
+_m = _vg_lauf("Streit Beta", feldwerte=[{"field": 45, "value": _VG_A}])
+_c20("model cannot CHANGE it: the person's option stays", _vg_werte(_m) == [{"field": 45, "value": _VG_A}], _vg_werte(_m))
+_m = _vg_lauf(None, feldwerte=[{"field": 45, "value": _VG_A}])
+_c20("model cannot CLEAR it: null keeps the value", _vg_werte(_m) == [{"field": 45, "value": _VG_A}], _vg_werte(_m))
+_m = _vg_lauf("Streit Beta", feldwerte=[{"field": 45, "value": None}])
+_c20("an empty assignment stays an empty assignment", _vg_werte(_m) == [{"field": 45, "value": None}], _vg_werte(_m))
+_m = _vg_lauf(None, feldwerte=[{"field": 45, "value": _VG_A}], source="knopf", force=True)
+_c20("AI button (knopf) keeps it too", _vg_werte(_m) == [{"field": 45, "value": _VG_A}], _vg_werte(_m))
+# Counter-check: without the reservation the same answers do reach the field — the tests above measure the
+# reservation, not a harness that never writes selects.
+_g = _vg_lauf("Streit Beta", cfg={})
+_c20("counter-check: unreserved, the model sets the select", _vg_werte(_g) == [{"field": 45, "value": _VG_B}], _vg_werte(_g))
+_g = _vg_lauf(None, feldwerte=[{"field": 45, "value": _VG_A}], cfg={})
+_c20("counter-check: unreserved, null clears it", _vg_werte(_g) == [], _vg_werte(_g))
+
+# A split part sheds every inherited value (erbe_verwerfen) — but not the case it was filed under.
+_alt_td = classify.TRACE_DIR
+classify.TRACE_DIR = tempfile.mkdtemp()
+try:
+    _t = _vg_lauf(None, datei="1205_edit_3.pdf",
+                  feldwerte=[{"field": 45, "value": _VG_A}, {"field": 19, "value": "ALT-1205"}])
+    _tg = _vg_lauf(None, datei="1205_edit_4.pdf", cfg={},
+                   feldwerte=[{"field": 45, "value": _VG_A}, {"field": 19, "value": "ALT-1205"}])
+finally:
+    classify.TRACE_DIR = _alt_td
+_tp = _t["patch"][0].get("custom_fields") or []
+_c20("split part keeps the reserved value, still sheds the other inherited one",
+     _vg_werte(_t) == [{"field": 45, "value": _VG_A}] and "ALT-1205" not in str(_tp), _tp)
+_c20("split part: the model still does not see the reserved field", _t["chat"] and "Vorgang" not in _t["chat"][0])
+_c20("counter-check: unreserved, a split part drops it", _vg_werte(_tg) == [], _tg.get("patch"))
+
+# Warranty code writes its end date itself; a reserved warranty field switches the feature off.
+_GCFG = {"garantie_jahre_feld": "Garantie_Jahre", "garantie_bis_feld": "Garantie_bis"}
+_gf = [{"id": 44, "name": "Garantie_Jahre", "data_type": "float"}, {"id": 27, "name": "Garantie_bis", "data_type": "date"}]
+_c20("warranty fields reserved → the warranty code stays out",
+     classify.garantie_felder(_gf, {**_GCFG, "reserved_fields": ["Garantie_bis"]}) == (None, None)
+     and classify.garantie_felder(_gf, {**_GCFG, "reserved_fields": ["garantie_jahre"]}) == (None, None)
+     and classify.garantie_felder(_gf, _GCFG) == (_gf[0], _gf[1]))
+
+# The panel's preview lists the fields the model fills — not a reserved one.
+_alt_get, _alt_cfg = classify.get, classify.CFG
+classify.get, classify.CFG = _m["get"], {**classify.CFG, **_RES}
+try:
+    _vs = classify.prompt_vorschau()
+finally:
+    classify.get, classify.CFG = _alt_get, _alt_cfg
+_c20("panel preview: reserved field not among the model's fields, setting shown",
+     "Vorgang" not in _vs["ki_felder"] and "Rechnungsnummer" in _vs["ki_felder"]
+     and _vs["einstellungen"].get("reserved_fields") == ["vorgang"], _vs["ki_felder"])
+
 sys.exit(r.done())

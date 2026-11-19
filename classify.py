@@ -127,6 +127,11 @@ CFG = {
     "mail_from_field": "",             # optional: Absender-Mail → Korrespondent-Domain-Match
     "manual_fields": [],               # Custom-Field-Namen, die die KI NIE anfasst (rein manuell gepflegt, z.B. Bezahlt-Am)
     "reserved_tags": [],               # Namen, die die KI NIE vergibt + die beim Writeback erhalten bleiben (Status/Quelle/Marker)
+    # Custom fields only a person sets (T-20), e.g. a select field that files documents under a case. Stricter than
+    # `manual_fields`: the model never sees them, and no path of the classifier sets, changes or clears them — not
+    # even on a split part, which otherwise drops every value inherited from its source document, and not the
+    # warranty code (a reserved warranty field turns the feature off). Matched by name, case-insensitive.
+    "reserved_fields": [],
     "system_prompt": "",               # leer = DEFAULT_PROMPT
     # Beispielpaare für den Korrespondent-Abgleich (Pass 2), z.B.
     #   [["Mustrmann GmbH", "Mustermann"], ["ACME Vers", "ACME"]]
@@ -2254,6 +2259,8 @@ def garantie_felder(cfields, cfg=None):
     if not cfg.get("garantie_aktiv", True):
         return None, None
     j_name, b_name = cfg.get("garantie_jahre_feld") or "", cfg.get("garantie_bis_feld") or ""
+    if reservierte_felder(cfg, [{"id": 1, "name": j_name}, {"id": 2, "name": b_name}]):
+        return None, None                       # a person keeps them (T-20): the code writes neither
     jahre = next((f for f in cfields if j_name and norm(f["name"]) == norm(j_name)
                   and f.get("data_type") in ("integer", "float")), None)
     bis = next((f for f in cfields if b_name and norm(f["name"]) == norm(b_name) and f.get("data_type") == "date"), None)
@@ -3501,6 +3508,23 @@ def reservierte_tags(cfg):
     return reserved
 
 
+def reservierte_felder(cfg, cfields):
+    """IDs of the custom fields in `reserved_fields` (T-20): the model never sees them, the classifier never
+    writes them. Matched by normalised name like every other field reference."""
+    namen = {norm(n) for n in (cfg.get("reserved_fields") or [])} - {""}
+    return {f["id"] for f in cfields if norm(f.get("name")) in namen}
+
+
+def reservierte_werte_behalten(cur_vals, felder_vorher, reserved_fids):
+    """Put the values of reserved fields back into `cur_vals` from the document's fields as they were BEFORE the
+    run dropped anything (T-20). A split part sheds every inherited value (erbe_verwerfen) — but a case a person
+    filed the source under is not the classifier's to clear; build_cfs then keeps it like any skipped field."""
+    for c in felder_vorher or []:
+        if c.get("field") in reserved_fids:
+            cur_vals[c["field"]] = c.get("value")
+    return cur_vals
+
+
 FELD_ANWEISUNG = (
     "\nFülle im fields-Objekt JEDES unter VERFÜGBARE FELDER gelistete Feld mit GENAU einer Wahl: "
     "(a) korrekter Wert passend zum Typ; (b) null = leeren (Feld trifft sicher nicht zu ODER bestehender Wert ist falsch); "
@@ -3720,13 +3744,14 @@ def prompt_vorschau():
         "typen": len(types), "tags": len(tags_all), "felder": len(cfields),
         "ki_felder": [f["name"] for f in cfields
                       if f["id"] != summary_fid and f["name"] not in (CFG.get("manual_fields") or [])
+                      and f["id"] not in reservierte_felder(CFG, cfields)
                       and f.get("data_type") != "documentlink"
                       and norm(f["name"]) not in {norm(CFG.get(k) or "") for k in
                                                    ("mail_context_field", "mail_from_field")}],
         "einstellungen": {k: CFG.get(k) for k in (
             "model", "ocr_model", "temperature", "content_max_len", "ocr_enabled", "ocr_always", "ocr_modus",
             "tagging_enabled", "marker_tag", "unsicher_tag", "summary_field",
-            "manual_fields", "nachbearbeitung")},
+            "manual_fields", "reserved_fields", "nachbearbeitung")},
         "ocr_regeln": {k: v for k, v in ocr_regeln(CFG).items() if k != "schluesselwoerter"},
         "pass2_system": PASS2_SYSTEM,
     }
@@ -3772,6 +3797,7 @@ def main():
 
     # Ein Teil aus dem Aufteilen trägt Marker, Titel und Feldwerte seines Ausgangsdokuments (erbe_verwerfen).
     erbe = erbe_offen(doc, TRACE_DIR)
+    felder_vorher = list(doc.get("custom_fields") or [])     # reserved fields survive the erbe (T-20)
     wie_import = os.environ.get("CLASSIFY_WIE_IMPORT") == "1"
     if erbe or wie_import:
         TRACE["erbe"] = {"ausgangsdokument": teildokument_von(doc.get("original_file_name")),
@@ -3858,6 +3884,10 @@ def main():
     # Felder, die NICHT von der KI gesteuert werden (behalten): Sonderfelder + manuelle Felder
     manual_fids = {resolve_field(cfields, n) for n in (CFG.get("manual_fields") or [])}
     skip_fids = {x for x in (summary_fid, mailctx_fid, mailfrom_fid, *manual_fids) if x}
+    # Reserved fields (T-20): out of the model's sight and kept as they are, on a split part too.
+    reserved_fids = reservierte_felder(CFG, cfields)
+    reservierte_werte_behalten(cur_vals, felder_vorher, reserved_fids)
+    skip_fids |= reserved_fids
     # Warranty (T-16): the end date is code's, never the model's — out of the model's fields, set below.
     g_jahre, g_bis = garantie_felder(cfields)
     if g_bis:

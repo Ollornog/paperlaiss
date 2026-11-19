@@ -29,6 +29,8 @@ Bitte vertraulich über GitHubs
   Eingang, ein geleaktes durch Ändern der Map rotieren.
 - **`reserved_tags` bleiben beim Writeback geschützt.** Status-, Richtungs- und Marker-Tags aus
   dieser Liste vergibt das Modell nie und sie bleiben beim Patchen der Metadaten erhalten.
+- **`reserved_fields` werden nie geschrieben.** Custom Fields aus dieser Liste sieht das Modell nicht,
+  und kein Weg des Klassifizierers setzt, ändert oder leert sie (auch nicht beim Aufteilen oder per Garantie-Code).
 
 ## Nicht im Umfang
 
