@@ -360,6 +360,7 @@ KNOTEN_FELDER = {
                                           ("ocr_regeln.wenn_kein_korrespondent", "Wenn kein Korrespondent erkannt")]),
     "schreiben": ("Nach Paperless schreiben", [("titel_setzen", "Titel setzen"),
                                                ("manual_fields", "Felder, die die KI nie anfasst"),
+                                               ("reserved_fields", "Reservierte Felder"),
                                                ("tagging_enabled", "KI vergibt Tags"),
                                                ("reserved_tags", "Reservierte Tags"),
                                                ("summary_field", "Feld für die Zusammenfassung"),
@@ -457,7 +458,7 @@ function zeichnen(){
       stand:[['Stammdaten erfassen',an(CFG.stammdaten_erfassen!==false)]]},
     {phase:'Schreiben',art:'paperless',id:'schreiben',titel:'Nach Paperless schreiben',knopf:knopf('schreiben'),
       was:'Schreibt das Ergebnis über die API zurück nach Paperless. Lehnt Paperless einen Wert ab, geht die Fehlermeldung in dieselbe KI-Unterhaltung; die KI korrigiert, dann wird erneut geschrieben.',
-      text:(CFG.titel_setzen!==false?'Titel („Korrespondent – Dokumentart Kennung“), ':'')+'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).map(txt).join(', ')||'—')+'.'},
+      text:(CFG.titel_setzen!==false?'Titel („Korrespondent – Dokumentart Kennung“), ':'')+'Typ, Korrespondent, Datum, Felder'+(CFG.tagging_enabled?', Tags':'')+'; Tag „'+txt(CFG.marker_tag)+'“. Nie angefasst: '+((CFG.manual_fields||[]).concat(CFG.reserved_fields||[]).map(txt).join(', ')||'—')+'.'},
     {phase:'Schreiben',art:'code',id:'nachbearbeitung',titel:'Eigenes Skript danach (optional)',knopf:knopf('nachbearbeitung'),
       was:'Optional: Ein eigenes Skript bekommt das Ergebnis, etwa für eine Verknüpfung in ein anderes System.',
       text:CFG.nachbearbeitung?'Eingerichtet: <b>'+txt(CFG.nachbearbeitung)+'</b>':'Nicht eingerichtet.'},
@@ -824,6 +825,10 @@ EINSTELLUNGEN = {
                      "Prüfen markiert. Einer je Zeile."),
     "manual_fields": ("Felder", "Felder, die die KI nie anfasst",
                       "Namen von Custom Fields, die nur von Hand gepflegt werden (z. B. Bezahlt-Am). Ein Eintrag je Zeile."),
+    "reserved_fields": ("Felder", "Reservierte Felder",
+                        "Custom Fields, die nur ein Mensch setzt (z. B. ein Auswahlfeld für den Vorgang). Die KI sieht sie "
+                        "nicht, paperlaiss setzt, ändert und leert sie nie, auch nicht bei einem Teil aus dem Aufteilen. "
+                        "Ein Eintrag je Zeile."),
     "leerseiten_entfernen": ("Allgemein", "Leere Seiten entfernen",
                              "An: beim Import fallen komplett weiße Seiten aus einem PDF (nur Staub unter 1 mm zählt als "
                              "weiß; Seitenzahl, Nummer oder Strich bleiben). Nie bei signierten, verschlüsselten PDFs, "

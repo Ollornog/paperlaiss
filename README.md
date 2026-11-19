@@ -446,6 +446,7 @@ an earlier rule consumed it in the same run.
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["regex"]}]`: with tag A the model's tag B is dropped, unless a pattern is in the text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name). A mail poller best passes them at the upload (`custom_fields` of `post_document` as `{id: value}`): Paperless sets them before the post-consume script runs |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
+| `reserved_fields` | `[]` | custom field names only a person sets (e.g. a select field for the case a document belongs to): the AI never sees them, paperlaiss never sets, changes or clears them, a split part keeps them |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |
 | `api_key_text` / `api_key_ocr` | – | empty = `MISTRAL_KEY` from the environment |

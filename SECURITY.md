@@ -29,6 +29,8 @@ rather than opening a public issue. Expect a first reply within a week.
   leaked one by editing the map.
 - **`reserved_tags` are protected on write-back.** Status, direction and marker tags in that list
   are never assigned by the model and are preserved when metadata is patched.
+- **`reserved_fields` are never written.** Custom fields in that list are not shown to the model, and
+  no path of the classifier sets, changes or clears them (split parts and the warranty code included).
 
 ## Not in scope
 

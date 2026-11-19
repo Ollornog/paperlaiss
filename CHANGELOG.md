@@ -15,6 +15,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 - Kit 0.48.0: the pin PR can carry the release assets (scripts, buttons, `SHA256SUMS`) the fleet repo keeps next to the
   compose file — configured by the variable `PIN_ANHAENGE`, each asset checked against the `SHA256SUMS` of the release;
   `fc-pin` now waits for the `release` job. Without the variable nothing changes.
+- **Reserved custom fields `reserved_fields`** (backlog T-20): field names only a person sets, e.g. a select field
+  that files documents under a case. The model does not see them (name and options stay out of the prompt), and
+  the classifier never sets, changes or clears them: on import, on the AI button, on a split part (which otherwise
+  drops every inherited value) and in the warranty code (a reserved warranty field turns the feature off). Stricter
+  than `manual_fields`. Empty by default, nothing changes without an entry; the panel lists the key among the settings.
 
 ## [0.12.0] - 2026-11-15
 

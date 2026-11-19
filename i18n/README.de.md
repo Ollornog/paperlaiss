@@ -373,6 +373,7 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["Regex"]}]`: bei Tag A fällt der KI-Tag B weg, außer ein Muster steht im Text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
+| `reserved_fields` | `[]` | Namen von Custom Fields, die nur ein Mensch setzt (z. B. ein Auswahlfeld für den Vorgang): die KI sieht sie nicht, paperlaiss setzt, ändert und leert sie nie, ein Teil aus dem Aufteilen behält sie |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |
 | `api_key_text` / `api_key_ocr` | – | leer = `MISTRAL_KEY` aus der Umgebung |
