@@ -3081,4 +3081,84 @@ _c20("panel preview: reserved field not among the model's fields, setting shown"
      "Vorgang" not in _vs["ki_felder"] and "Rechnungsnummer" in _vs["ki_felder"]
      and _vs["einstellungen"].get("reserved_fields") == ["vorgang"], _vs["ki_felder"])
 
+
+# ---- T-9 item 9: pinned model versions, never a moving "*-latest" alias
+import json as _json9  # noqa: E402
+_bsp = _json9.load(open(ROOT / "classify-config.json", encoding="utf-8"))
+r.check("T-9 model: defaults and the example config name a fixed version, no *-latest",
+        not str(classify.MODELL_VORGABE).endswith("-latest") and not str(classify.OCR_MODELL_VORGABE).endswith("-latest")
+        and not _bsp["model"].endswith("-latest") and not _bsp["ocr_model"].endswith("-latest")
+        and _bsp["model"] == classify.MODELL_VORGABE and _bsp["ocr_model"] == classify.OCR_MODELL_VORGABE,
+        f"{classify.MODELL_VORGABE} {classify.OCR_MODELL_VORGABE} {_bsp['model']} {_bsp['ocr_model']}")
+
+# ---- T-9 item 8: the trace keeps the four basic fields as the run left them
+_erg = classify.lauf_ergebnis({"correspondent": 3, "document_type": 2, "created": "2026-01-02", "title": "Alt"},
+                              {"correspondent": 9, "created": "2026-03-31T12:00:00+00:00", "tags": [1]})
+r.check("T-9 ergebnis: written value wins, otherwise the value the document had; date as YYYY-MM-DD",
+        _erg == {"correspondent": 9, "document_type": 2, "created": "2026-03-31", "title": "Alt"}, str(_erg))
+r.check("T-9 ergebnis: nothing known → None per field, no crash",
+        classify.lauf_ergebnis(None, {}) == dict.fromkeys(classify.ERGEBNIS_FELDER))
+_src9 = (ROOT / "classify.py").read_text(encoding="utf-8")
+r.check("T-9 ergebnis: wired — taken before the inherited values are dropped, stored with the writeback",
+        _src9.index("stand_vorher = {k: doc.get(k) for k in ERGEBNIS_FELDER}") < _src9.index("doc = erbe_verwerfen(doc)")
+        and '"ergebnis": lauf_ergebnis(stand_vorher, patch)' in _src9)
+
+# ---- T-9 item 1: probably own identifiers are proposed, not only dropped
+_v = classify.vorschlag_eintragen({}, "iban", "DE02 1203 0000 0000 2020 51", 4, 11, "2026-11-19")
+r.check("T-9 proposal: keyed by field and normalised value, with count, documents and date",
+        _v == {"iban:DE02120300000000202051": {"feld": "iban", "wert": "DE02 1203 0000 0000 2020 51", "dokumente": [11],
+                                               "korrespondenten": 4, "zuletzt": "2026-11-19"}}, str(_v))
+_v2 = classify.vorschlag_eintragen({**_v, "x": {"feld": "telefon"}}, "iban", "DE02120300000000202051", 5, 12, "2026-11-20")
+r.check("T-9 proposal: a known value gets the newest count and document; others stay",
+        _v2["iban:DE02120300000000202051"]["dokumente"] == [11, 12]
+        and _v2["iban:DE02120300000000202051"]["korrespondenten"] == 5 and "x" in _v2)
+_v3 = {"iban:DE02120300000000202051": {**_v2["iban:DE02120300000000202051"], "verworfen": True,
+                                       "dokumente": list(range(1, 12))}}
+_v3 = classify.vorschlag_eintragen(_v3, "iban", "DE02120300000000202051", 6, 3, "2026-11-21")
+r.check("T-9 proposal: a dismissed one stays dismissed; at most ten documents, the newest last",
+        _v3["iban:DE02120300000000202051"]["verworfen"] is True
+        and _v3["iban:DE02120300000000202051"]["dokumente"] == [2, 4, 5, 6, 7, 8, 9, 10, 11, 3])
+_tmp9 = tempfile.mkdtemp(prefix="paperlaiss-t9-")
+_alt_dir = classify.SCRIPT_DIR
+classify.SCRIPT_DIR = _tmp9
+try:
+    classify.vorschlaege_merken([("telefon", "+4930123456", 3)], "21")
+    classify.vorschlaege_merken([], "22")
+    _gemerkt = _json9.load(open(os.path.join(_tmp9, "eigene_vorschlaege.json"), encoding="utf-8"))
+    Path(_tmp9, "eigene_vorschlaege.json").write_text("[]", encoding="utf-8")
+    try:
+        classify.vorschlaege_merken([("telefon", "+4930123456", 3)], "23")
+        _kaputt_ok = False
+    except ValueError:
+        _kaputt_ok = Path(_tmp9, "eigene_vorschlaege.json").read_text(encoding="utf-8") == "[]"
+finally:
+    classify.SCRIPT_DIR = _alt_dir
+r.check("T-9 proposal: written under the store lock next to the store; a broken file is not overwritten",
+        _gemerkt == {"telefon:+4930123456": {"feld": "telefon", "wert": "+4930123456", "dokumente": [21],
+                                             "korrespondenten": 3, "zuletzt": _gemerkt.get("telefon:+4930123456", {}).get("zuletzt")}}
+        and _kaputt_ok and os.path.exists(os.path.join(_tmp9, "correspondents.json.lock")), str(_gemerkt))
+r.check("T-9 proposal: wired — every value counted at VERBREITET_AB or more, not in a dry run",
+        "_eigen_funde = [(f, w, n) for (f, w), n in _verbr.items() if n is not None and n >= VERBREITET_AB]" in _src9
+        and "if not DRY:\n                    try:\n                        vorschlaege_merken(_eigen_funde, did)" in _src9)
+
+
+# ---- T-9: title identifier per document type (configuration, empty by default)
+_tk = classify.titel_kennung_anweisung({"titel_kennung_je_typ": {"Einkommensteuerbescheid": "das Steuerjahr als JJJJ",
+                                                                 "Brief": " "}})
+r.check("T-9 title rule: one line per type with text, empty entries left out",
+        "- Einkommensteuerbescheid: das Steuerjahr als JJJJ" in _tk and "Brief" not in _tk, _tk)
+r.check("T-9 title rule: nothing configured or a wrong shape → no prompt part",
+        classify.titel_kennung_anweisung({}) == "" and classify.titel_kennung_anweisung({"titel_kennung_je_typ": ["x"]}) == "")
+_tt = classify.pass1_system_teile({**classify.CFG, "titel_setzen": True,
+                                   "titel_kennung_je_typ": {"Lohnabrechnung": "der Abrechnungsmonat als MM/JJJJ"}},
+                                  {"Lohnabrechnung": 1}, [], set(), False)
+_tt0 = classify.pass1_system_teile({**classify.CFG, "titel_setzen": False,
+                                    "titel_kennung_je_typ": {"Lohnabrechnung": "x"}}, {"Lohnabrechnung": 1}, [], set(), False)
+r.check("T-9 title rule: in the prompt right after the title instruction, and only with titel_setzen",
+        [n for _, n in _tt].index("Titel-Kennung je Dokumentart (aus „Titel-Kennung je Typ“)")
+        == [n for _, n in _tt].index("Titel (automatisch angehängt, weil „Titel setzen“ an ist)") + 1
+        and not any("Titel-Kennung" in str(n) for _, n in _tt0))
+r.check("T-9 example config: valid JSON, only keys the classifier knows",
+        set(_json9.load(open(ROOT / "deploy/beispiel-config-haushalt.json", encoding="utf-8"))) <= set(classify._BEKANNT))
+
 sys.exit(r.done())

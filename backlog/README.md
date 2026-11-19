@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 17/22 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 18/23 erledigt
 
 ## Aufgaben
 
@@ -19,7 +19,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-6](T-6-korrektur-log-was-menschen-nach-der-ki-geandert-ha.md)** Korrektur-Log: was Menschen nach der KI geändert haben · M-1
 * ☐ **[T-7](T-7-sammelscans-automatisch-teilen.md)** Sammelscans automatisch teilen · M-1
 * ☐ **[T-8](T-8-ausrichtung-je-dokument-korrigieren-kopfuber-schra.md)** Ausrichtung je Dokument korrigieren: kopfüber, Schräglage, Ecken · M-1
-* ◐ **[T-9](T-9-lehren-aus-einer-grosen-nacharbeit-fehlalarme-stam.md)** Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent · M-1
+* ☑ **[T-9](T-9-lehren-aus-einer-grosen-nacharbeit-fehlalarme-stam.md)** Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent · M-1
 * ☑ **[T-10](T-10-kaputte-scans-uberlast-alias-und-kontrolllauf.md)** Kaputte Scans, Überlast, Alias-Treffer und ein Kontrolllauf · M-1
 * ☑ **[T-11](T-11-feldfilter-tag-ausschluss-dubletten-und-stammdaten.md)** Feldfilter, Tag-Ausschluss, Dubletten und Stammdaten aus einer zweiten Durchsicht · M-1
 * ☑ **[T-12](T-12-zweitscans-abrechnungsmonate-wahrung-und-fremde-personen.md)** Zweitscans, Abrechnungsmonate, Währung und fremde Personen aus einer dritten Durchsicht · M-1
@@ -33,6 +33,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-20](T-20-reserved-fields.md)** Reserved custom fields the classifier never sets, changes or clears · M-1
 * ☑ **[T-21](T-21-info-seite.md)** Info page in the panel: what paperlaiss does and how to use it · M-1
 * ☑ **[T-22](T-22-panel-title-bar-wraps-on-narrow-screens.md)** Panel title bar and navigation wrap on narrow screens · M-1
+* ☐ **[T-23](T-23-formulare-mit-groesserem-modell-messen.md)** Formulare mit einem größeren Modell gegen die Sollliste messen · M-1
 
 ## Entscheidungen (ADR)
 

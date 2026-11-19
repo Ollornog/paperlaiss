@@ -92,6 +92,21 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
 - **Aktivität** (`/`) — fünf Kennzahlen und ein 30-Tage-Verlauf **filtern** die Liste (der Filter
   steht in der Adresse, *Zurück* hebt ihn auf), 100 Einträge je Seite. Eine Zeile öffnet den
   **Lauf**: Entscheidungsbaum, Prompt, Ausgabe der KI und den OCR-Text als Markdown.
+- **Nacharbeit** (`/nacharbeit`) — was Menschen nach einem KI-Lauf geändert haben, aus der Änderungshistorie von
+  Paperless und dem Vergleich mit dem, was der Lauf geschrieben hat (Trace `writeback`). Es zählen Änderungen eines
+  angemeldeten Benutzers nach dem Lauf; Änderungen ganz ohne Historieneintrag (Massenbearbeitung in der Dokumentliste,
+  Skripte) findet der Vergleich des heutigen Stands mit dem, was der Lauf hinterlassen hat (`writeback.ergebnis`, bei
+  älteren Traces abgeleitet), sie zählen als Korrektur *ohne Protokoll*. Der Abgleich läuft alle sechs Stunden im
+  Hintergrund (`PANEL_NACHARBEIT_INTERVALL_S`, `0` = aus), beim Öffnen der Seite, wenn der letzte älter als 30 Minuten
+  ist, oder über *Neu abgleichen*. *Sollliste* lädt die nachgearbeiteten Dokumente als Sollliste für `eval.py`
+  herunter. Nach dem Gegenlesen eines Stapels: in Paperless korrigieren (auch per Massenbearbeitung), *Neu
+  abgleichen*, *Sollliste*, dann `python3 eval.py soll-nacharbeit.json --wie-import`.
+- **Prüfen** (`/pruefen`) — die Dokumente, die gerade `unsicher_tag` oder `kaputt_tag` tragen, je mit den Gründen
+  ihres letzten Laufs (Trace `pruefen`), ohne jedes Dokument zu öffnen; dazu Kennungen, die wahrscheinlich die eigenen
+  sind: eine IBAN oder Telefonnummer auf Dokumenten von drei oder mehr Korrespondenten lernt paperlaiss nicht als
+  Stammdaten (`eigene_vorschlaege.json`), und eigene Kennungen, die noch in den Stammdaten stehen. *Als eigene
+  übernehmen* trägt den Wert in `eigene_kennungen` ein und entfernt ihn aus den Stammdaten aller Korrespondenten, *Aus
+  den Stammdaten räumen* entfernt ihn nur, *Nicht eigene* blendet den Vorschlag aus.
 - **Ablauf & Prompt** (`/ablauf`) — jeder Schritt, den ein Dokument durchläuft, aufklappbar mit Eingabe
   und Ausgabe; bei den KI-Aufrufen Prompt und Antwortformat. Der Prompt von Pass 1 ist dort
   bearbeitbar und wird auch so gezeigt, wie er gesendet wird (`CLASSIFY_PROMPT_VORSCHAU=1`). Ein Lauf
@@ -102,7 +117,9 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
 - **Einstellungen** (`/einstellungen`) — jeder Wert der wirksamen Konfiguration (Datei plus
   Vorgaben; gespeichert werden nur geänderte Schlüssel).
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
-- **JSON-API**: `/api/aktivitaet`, `/api/verlauf`, `/api/running`, `/api/trace/{id}`,
+- **JSON-API**: `/api/aktivitaet`, `/api/verlauf`, `/api/nacharbeit` (POST `/api/nacharbeit/abgleichen`, GET
+  `/api/nacharbeit/sollliste?tage=`), `/api/pruefen` (POST `/api/pruefen/kennung` mit `feld`, `wert`, `aktion` =
+  `uebernehmen`/`raeumen`/`verwerfen`), `/api/running`, `/api/trace/{id}`,
   `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST mit einem Entwurf für die Live-Vorschau beim Bearbeiten).
 - **Anmeldung** (`PANEL_AUTH`):
   - leer (Vorgabe) — Bearer-Token bzw. Cookie `PANEL_TOKEN`; ohne Token antwortet das Panel mit 503.
@@ -360,7 +377,7 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `enabled` | `true` | Klassifizierer an/aus |
 | `titel_setzen` | `true` | Titel „Korrespondent – Dokumentart Kennung“; überschrieben wie der Dokumenttyp (Import, KI-Knopf, Panel — nie im Bestands-Durchlauf) |
 | `leerseiten_entfernen` | `true` | komplett weiße Seiten beim Import entfernen (Vorab-Schritt `leerseiten.py`) |
-| `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral-Modelle |
+| `model` / `ocr_model` | `mistral-small-2603` / `mistral-ocr-4-1` | Mistral-Modelle, auf eine Fassung festgelegt: ein Alias wie `mistral-small-latest` wechselt das Modell ohne Ankündigung, das Panel warnt davor — die Fassung bewusst anheben und vorher mit `eval.py` messen |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR-Rescue-Verhalten; `ocr_always` ist der alte Schalter für `ocr_modus` `immer` |
 | `ocr_modus` | leer | `rescue` (OCR nur bei schwachem Text), `scans` (dazu jeder Scan und jedes Foto, digitale PDFs behalten ihren Text) oder `immer` (jedes Dokument); leer = `immer` mit `ocr_always`, sonst `rescue` — siehe unten |
 | `ocr_regeln` | siehe unten | wann ein Text als zu schwach gilt und per OCR neu gelesen wird |
@@ -379,6 +396,7 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `reserved_fields` | `[]` | Namen von Custom Fields, die nur ein Mensch setzt (z. B. ein Auswahlfeld für den Vorgang): die KI sieht sie nicht, paperlaiss setzt, ändert und leert sie nie, ein Teil aus dem Aufteilen behält sie |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |
+| `titel_kennung_je_typ` | `{}` | was die Kennung im Titel je Dokumenttyp ist, z. B. `{"Einkommensteuerbescheid": "das Steuerjahr (JJJJ)"}` — eine Reihe heißt gleich; siehe [Beispielkonfiguration für einen Haushalt](#beispielkonfiguration-für-einen-haushalt) |
 | `api_key_text` / `api_key_ocr` | – | leer = `MISTRAL_KEY` aus der Umgebung |
 
 ### Felder und Tags, die nur Menschen setzen
@@ -393,6 +411,23 @@ Gruppen *Felder* und *Tags*, oder die JSON-Datei); ohne Eintrag ändert sich nic
 | `reserved_tags` | Die KI vergibt diese Tags nie, und sie bleiben beim Schreiben erhalten (Status, Richtung, Marker). |
 
 Die **Info**-Seite des Panels zeigt dieselbe Übersicht.
+
+### Beispielkonfiguration für einen Haushalt
+
+Typ- und Tag-Beschreibungen, Prompt-Hinweise und Titelregeln gehören zu einer Installation, nicht in den
+Klassifizierer. [`deploy/beispiel-config-haushalt.json`](../deploy/beispiel-config-haushalt.json) ist ein Ausgangspunkt
+für ein Haushaltsarchiv mit Lohn-, Sozialversicherungs- und Steuerunterlagen — die Lehren aus dem Gegenlesen von rund
+110 solchen Dokumenten, bei denen das Modell ähnliche Formulare verwechselte und die Einzugsstelle oder die
+beschäftigte Person für den Arbeitgeber hielt:
+
+- `type_descriptions` für leicht verwechselte Formulare (Lohnsteuerbescheinigung, Lohnabrechnung, Meldebescheinigung
+  zur Sozialversicherung, Meldebestätigung), je mit dem Korrespondenten (der Arbeitgeber aus dem Feld „Name und
+  Anschrift des Arbeitgebers“, nicht das Finanzamt und nicht die Einzugsstelle);
+- `tag_descriptions` mit Gegenbeispielen („Gesundheit: nicht allein deshalb, weil eine Krankenkasse absendet“);
+- `titel_kennung_je_typ`, damit eine Reihe gleich heißt („… – Einkommensteuerbescheid 2023“).
+
+Die gebrauchten Schlüssel in die eigene `classify-config.json` (oder die Einstellungen im Panel) übernehmen und die
+eigenen Typ- und Tag-Namen einsetzen. Eine Änderung vorher und nachher mit `eval.py` gegen eine Sollliste messen.
 
 ### OCR-Fallback (`ocr_regeln`)
 

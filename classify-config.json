@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "model": "mistral-small-latest",
-  "ocr_model": "mistral-ocr-latest",
+  "model": "mistral-small-2603",
+  "ocr_model": "mistral-ocr-4-1",
   "ocr_enabled": true,
   "ocr_always": false,
   "ocr_min_len": 300,

@@ -192,6 +192,55 @@ r.check("Sollliste: eval.py prüft genau die drei Felder und ignoriert die Notiz
         == {"korrespondent": True, "typ": True, "datum": True}
         and ev.vergleiche(sl[13], {"korrespondent": "Amazon"}) == {"korrespondent": False, "typ": True})
 
+# ---- T-9 item 8: changes without a history entry (bulk edit in the document list, scripts, the ORM)
+NAMEN = {"correspondent": {"3": "Uniqa", "4": "Finanzamt"}, "document_type": {"2": "Rechnung", "5": "Bescheid"}}
+T_NEU = {**TRACE, "writeback": {**TRACE["writeback"], "ergebnis": {
+    "correspondent": 3, "document_type": 2, "created": "2026-10-01", "title": "Uniqa – Rechnung 4711"}}}
+STAND = {"correspondent": 4, "document_type": 2, "created": "2026-09-30", "title": "Uniqa – Rechnung 4711"}
+k = na.korrekturen(T_NEU, [], NAMEN, stand=STAND)
+r.check("ohne Protokoll: geänderter Korrespondent und Datum ohne Historie zählen, mit Namen statt IDs",
+        sorted((x["feld"], x["ki"], x["neu"], x["wer"], x["wann"]) for x in k["korrekturen"])
+        == [("Datum", "2026-10-01", "2026-09-30", "ohne Protokoll", None),
+            ("Korrespondent", "Uniqa", "Finanzamt", "ohne Protokoll", None)] and k["angefasst"], str(k))
+r.check("ohne Protokoll: unverändertes Dokument → keine Korrektur, nicht angefasst",
+        na.korrekturen(T_NEU, [], NAMEN, stand={**STAND, "correspondent": 3, "created": "2026-10-01T00:00:00+02:00"})
+        == {"felder": k["felder"], "angefasst": False, "korrekturen": []})
+_wf = [e("2026-10-14T17:00:00+00:00", None, {"correspondent": ["3", "4"]})]
+r.check("ohne Protokoll: eine Änderung, die ein Workflow protokolliert hat, bleibt draußen (wie bisher)",
+        [x["feld"] for x in na.korrekturen(T_NEU, _wf, NAMEN, stand={**STAND, "created": "2026-10-01"})["korrekturen"]] == [])
+_mensch = [e("2026-10-14T17:00:00+00:00", "meli", {"correspondent": ["3", "4"]})]
+r.check("ohne Protokoll: eine protokollierte Änderung zählt einmal, mit Benutzer",
+        [(x["feld"], x["wer"]) for x in na.korrekturen(T_NEU, _mensch, NAMEN, stand={**STAND, "created": "2026-10-01"})["korrekturen"]]
+        == [("Korrespondent", "meli")])
+_vor_lauf = [e("2026-10-14T15:00:00+00:00", "meli", {"correspondent": ["9", "3"]})]
+r.check("ohne Protokoll: ein Eintrag VOR dem Lauf erklärt nichts",
+        [x["feld"] for x in na.korrekturen(T_NEU, _vor_lauf, NAMEN, stand={**STAND, "created": "2026-10-01"})["korrekturen"]]
+        == ["Korrespondent"])
+r.check("ohne Protokoll: ohne Stand (alter Aufruf) nichts Neues",
+        na.korrekturen(T_NEU, [], NAMEN)["korrekturen"] == [])
+# Older traces without `ergebnis`: derived by name; the type only outside a bulk run (that one keeps a set type).
+_alt_t = {**TRACE, "writeback": {**TRACE["writeback"], "document_date": "2026-10-01"}}
+_ka = na.korrekturen(_alt_t, [], NAMEN, stand={"correspondent": 4, "document_type": 5, "created": "2026-10-01",
+                                              "title": "Uniqa – Rechnung 4711"})
+r.check("ältere Traces: Korrespondent und Typ per Name verglichen",
+        sorted((x["feld"], x["ki"], x["neu"]) for x in _ka["korrekturen"])
+        == [("Dokumenttyp", "Rechnung", "Bescheid"), ("Korrespondent", "Uniqa", "Finanzamt")], str(_ka))
+r.check("ältere Traces: gleicher Name → keine Korrektur",
+        na.korrekturen(_alt_t, [], NAMEN, stand={"correspondent": 3, "document_type": 2, "created": "2026-10-01",
+                                                 "title": "Uniqa – Rechnung 4711"})["korrekturen"] == [])
+r.check("ältere Traces: im Bestands-Durchlauf zählt der Typ nicht (der Lauf ließ einen gesetzten stehen)",
+        [x["feld"] for x in na.korrekturen({**_alt_t, "trigger": "Bestands-Durchlauf"}, [], NAMEN,
+                                           stand={"correspondent": 3, "document_type": 5, "created": "2026-10-01",
+                                                  "title": "Uniqa – Rechnung 4711"})["korrekturen"]] == [])
+r.check("ältere Traces: „bestehenden behalten“ → Korrespondent unbekannt, nicht verglichen",
+        "correspondent" not in na.ki_grundwerte({"writeback": {"correspondent": "bestehenden behalten (Pass 1 unsicher)"}}))
+_sl2 = na.sollliste([{**lauf(20, "2026-10-14T10:00:00+00:00", "Finanzamt"),
+                      "korrekturen": [{"feld": "Korrespondent", "ki": "Uniqa", "neu": "Finanzamt", "art": "geändert",
+                                       "wer": "ohne Protokoll", "wann": None}]}], JETZT)
+r.check("Sollliste: Korrektur ohne Protokoll kommt mit, die Notiz ohne Datum",
+        _sl2 and _sl2[0]["korrespondent"] == "Finanzamt" and _sl2[0]["notiz"] == "Korrespondent: Uniqa → Finanzamt (ohne Protokoll)",
+        str(_sl2))
+
 # ---- Speichern: ein überschriebener Trace darf seinen alten Lauf nicht mitnehmen
 _alt_l = {"1@2026-10-01T00:00:00+00:00": {"ts": "2026-10-01T00:00:00+00:00", "korrekturen": [{"feld": "Titel"}]}}
 _neu_l = {"1@2026-10-14T00:00:00+00:00": {"ts": "2026-10-14T00:00:00+00:00", "korrekturen": []}}

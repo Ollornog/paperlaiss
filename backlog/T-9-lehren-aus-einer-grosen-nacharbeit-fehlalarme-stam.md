@@ -1,7 +1,7 @@
 ---
 type: Task
 title: 'Lehren aus einer großen Nacharbeit: Fehlalarme, Stammdaten, Korrespondent'
-status: in-arbeit
+status: erledigt
 id: T-9
 milestone: M-1
 tags: [ki, eval, stammdaten, nacharbeit]
@@ -22,7 +22,19 @@ created: '2026-11-11'
 8. **Nacharbeit misst zu wenig:** zählt nur Änderungen angemeldeter Benutzer, wird nur auf Knopfdruck aufgefrischt. Regelmäßig auffrischen; Korrekturen aus einem Gegenlese-Lauf als Sollliste für `eval.py` übernehmen.
 9. **Modell gepinnt statt `*-latest`**, Formulare probeweise mit einem größeren Modell gegen die Sollliste messen.
 
-**Stand:** Punkte 1–6 als Fehlerbehebung umgesetzt (CHANGELOG „Unreleased“, Abschnitt „Behoben“). Offen aus 1: die wahrscheinlich eigene Kennung im Panel vorschlagen (heute wird sie nur nicht gelernt und nicht gemeldet) und früher falsch gelernte Werte aus dem Store räumen. Offen: 7–9.
+**Stand:** Punkte 1–6 als Fehlerbehebung umgesetzt (0.5.0, PR #171).
+
+**Stand 2026-11-19 (Rest, CHANGELOG „Unreleased“):**
+- 1 (Rest): wahrscheinlich eigene Kennungen landen in `eigene_vorschlaege.json`; die Panel-Seite *Prüfen* schlägt sie
+  vor und zeigt eigene Kennungen, die noch in den Stammdaten stehen. *Als eigene übernehmen* trägt in
+  `eigene_kennungen` ein und räumt den Wert aus allen Stammdaten (das sind die früher falsch gelernten Werte).
+- 7: Notiz am Dokument gibt es seit T-10 (`pruef_notiz`); neu die Seite *Prüfen* mit den Gründen je Dokument.
+- 8: Nacharbeit alle sechs Stunden im Hintergrund; Änderungen ohne Historieneintrag (Massenbearbeitung, Skripte)
+  zählen jetzt („ohne Protokoll“) und kommen in die Sollliste für `eval.py`.
+- 9: Modelle gepinnt (`mistral-small-2603`, `mistral-ocr-4-1`), Warnung im Panel bei `*-latest`. Die Messung der
+  Formulare mit einem größeren Modell steht als eigener Task T-23 (braucht eine Sollliste aus echten Dokumenten).
+- Vorschläge Konfiguration/Prompt: als Beispielkonfiguration `deploy/beispiel-config-haushalt.json` (README-Abschnitt),
+  dazu der neue Schlüssel `titel_kennung_je_typ` für die Titel-Vorlagen. Je Installation einzuspielen.
 
 **Vorschläge (Konfiguration/Prompt, je Installation):**
 - Typbeschreibungen für Lohnsteuerbescheinigung, Lohn-/Gehaltsabrechnung, Meldebescheinigung zur Sozialversicherung, Meldebestätigung (Wohnsitz) — heute fehlen sie, die Typen werden verwechselt.
