@@ -6,6 +6,10 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-19
+
+Panel title bar fix (backlog T-22).
+
 ### Behoben
 
 - **Panel title bar overflowed sideways on narrow screens (backlog T-22):** at 500 px the title bar with the navigation was
