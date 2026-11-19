@@ -166,6 +166,9 @@ CFG = {
     # Skript deploy/vorab/leerseiten.py aus derselben Config. Hier steht der Schlüssel, damit das
     # Panel ihn zeigt und speichert.
     "leerseiten_entfernen": True,
+    # Turn scanned pages that lie upside down at import — read by the pre-consume step deploy/vorab/ausrichtung.py
+    # from the same config (T-8); only the page's /Rotate changes, the image stays as scanned.
+    "kopfueber_drehen": True,
     # Kennungen der eigenen Firma. Sie stehen auf fast jedem eingehenden Dokument (Empfänger-
     # block, Lastschrift) und dürfen nie einem Absender zugeschlagen werden; eine Mail von einer
     # eigenen Domain ist eine Weiterleitung und ordnet nichts zu.
@@ -2555,6 +2558,37 @@ def teildokument_von(dateiname):
     return int(m.group(1)) if m else None
 
 
+# Names under which Paperless (3.x) consumes a NEW VERSION of a document: rotate (`<id>_rotated.pdf`, bulk_edit.rotate)
+# and the PDF editor with "new version" (`<id>_edited.pdf`, bulk_edit.edit_pdf update_document). The original stays as
+# version 0 (T-8).
+FASSUNG_RE = re.compile(r"^(\d+)_(?:rotated|edited)\.pdf$", re.IGNORECASE)
+
+
+LAUF_DOC = [None]      # the document this run classifies when it is not the one it was called for (a new version)
+
+
+def fassung_wurzel(version_id, dateiname, holen=None):
+    """The document a new version belongs to, or None.
+
+    Paperless runs the post-consume script for the version itself, but the API does not show versions
+    (`/documents/<version>/` is 404), so until 0.13 every rotation ended as an error in the log and the document kept
+    the classification of its upside-down text. The root is taken from the file name and confirmed by its `versions`
+    list — a name alone is not trusted. `holen` = get (replaceable in tests)."""
+    m = FASSUNG_RE.match(str(dateiname or "").strip())
+    if not m:
+        return None
+    wurzel = int(m.group(1))
+    try:
+        d = (holen or get)(f"/documents/{wurzel}/")
+    except Exception:
+        return None
+    versionen = d.get("versions") if isinstance(d, dict) else None
+    if any(isinstance(v, dict) and str(v.get("id")) == str(version_id) and not v.get("is_root")
+           for v in versionen or []):
+        return wurzel
+    return None
+
+
 def erbe_verwerfen(doc):
     """Das Dokument ohne die Metadaten, die es beim Aufteilen von seinem Ausgangsdokument bekam.
 
@@ -2600,7 +2634,7 @@ def typ_ueberschreibbar(source, force):
     CLASSIFY_FORCE über vorhandene Dokumente, deren Typ ein Mensch gesetzt haben kann. Die sichere
     Seite ist „stehen lassen": eine unbekannte Aufrufart überschreibt nie (Prüfrunde 2026-09-27 —
     „alles ausser bulk" hätte den dokumentierten Handaufruf in einer Schleife überschreiben lassen)."""
-    return source in ("knopf", "manual", "mail") or (source == "" and not force)
+    return source in ("knopf", "manual", "mail", "fassung") or (source == "" and not force)
 
 
 def typ_setzen(dt_id, bisher, darf_ueberschreiben):
@@ -3859,7 +3893,23 @@ def main():
 
     OCR_VERDACHT.clear()
     TRACE.pop("klassifiziert", None)      # set by THIS run only (save_trace keeps an earlier run's mark)
-    doc = get(f"/documents/{did}/")
+    try:
+        doc = get(f"/documents/{did}/")
+    except urllib.error.HTTPError as e:
+        # A new version (rotated, edited) runs the post-consume script under its own id, which the API does not
+        # show: classify the document it belongs to again — its text has changed (T-8).
+        if e.code != 404 or os.environ.get("CLASSIFY_DOC"):
+            raise
+        wurzel = fassung_wurzel(did, os.environ.get("DOCUMENT_ORIGINAL_FILENAME"))
+        if not wurzel:
+            log(f"skip {did}: über die API nicht lesbar (Fassung eines Dokuments, dessen Dateiname es nicht nennt?)")
+            return
+        global FORCE, SOURCE
+        log(f"fassung {did}: neue Fassung von Dokument {wurzel} — wird neu klassifiziert")
+        TRACE["fassung"] = {"id": int(did), "datei": os.environ.get("DOCUMENT_ORIGINAL_FILENAME")}
+        did, FORCE, SOURCE = str(wurzel), True, "fassung"
+        LAUF_DOC[0] = did          # ausfuehren() clears the running mark and records an error under this id
+        doc = get(f"/documents/{did}/")
     global CFG_LAUF
     CFG_LAUF = konto_cfg(CFG, doc.get("owner"))
     if CFG_LAUF.get("_konto"):
@@ -4053,6 +4103,7 @@ def main():
     TRACE["vorsuche"] = {"mail": mail_grund, "mail_kandidat": mail_corr["name"] if mail_corr else None,
                          "kandidaten": {c["name"]: _gefunden[c["id"]] for c in kand} or None}
     TRACE["trigger"] = ("KI-Knopf mit Hinweis" if hinweis else "KI-Knopf in Paperless" if SOURCE == "knopf"
+                        else "neue Fassung in Paperless (gedreht oder bearbeitet)" if SOURCE == "fassung"
                         else "Bestands-Durchlauf" if SOURCE == "bulk"
                         else "Mail-Import (Nachlauf mit Mail-Kontext)" if SOURCE == "mail"
                         else "manuell (Panel)" if (FORCE or FORCE_OCR) else "automatisch (Post-Consume)")
@@ -4752,14 +4803,14 @@ def ausfuehren():
         main()
         return 0
     except Exception as e:
-        eid = os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
+        eid = LAUF_DOC[0] or os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
         log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
         save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
         if voruebergehend(e) and eid != "?":
             abbruch_markieren(eid, e)
         return 2 if os.environ.get("CLASSIFY_DOC") else 0
     finally:
-        unmark_running(os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
+        unmark_running(LAUF_DOC[0] or os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID"))
 
 
 if __name__ == "__main__":

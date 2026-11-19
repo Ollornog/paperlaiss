@@ -6,6 +6,7 @@ betrifft, und lässt alles andere unberührt:
 
   mailbilder.py   eine .eml bekommt Kopf und große Bildseiten (Mail-Regel „ganze Mail“)
   leerseiten.py   ein PDF verliert komplett weiße Seiten
+  ausrichtung.py  Seiten eines Scans, die kopfüber liegen, werden gedreht (nur /Rotate, T-8)
 
 Die Schritte liegen im selben Ordner wie dieses Skript. Es endet IMMER mit 0 — ein fehlender,
 abgestürzter oder hängender Schritt hält keinen Import auf; jeder Schritt ersetzt die Arbeitskopie
@@ -15,7 +16,7 @@ import os
 import subprocess
 import sys
 
-SCHRITTE = ("mailbilder.py", "leerseiten.py")
+SCHRITTE = ("mailbilder.py", "leerseiten.py", "ausrichtung.py")
 FRIST = 300                     # Sekunden je Schritt
 
 

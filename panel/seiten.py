@@ -750,7 +750,7 @@ INFO_ANKER = {
     "ocr": "ocr-fallback-ocr_regeln",
     "von-hand": "manual-runs-and-testing",
     "menschenfelder": "fields-and-tags-only-people-set",
-    "vorab": "pre-consume-steps-blank-pages-mails-as-documents-optional",
+    "vorab": "pre-consume-steps-blank-pages-upside-down-pages-mails-as-documents-optional",
     "einsatz": "deployment-docker",
 }
 INFO_ABSCHNITTE = [("was", "Was es tut"), ("benutzung", "So wird es benutzt"),
@@ -831,7 +831,8 @@ def info() -> str:
                 'nie überschreibend) und nutzt ihn, um den Absender ohne KI-Aufruf als Kandidaten zu finden. '
                 + doku("stammdaten") + '.</p>')
         + _teil("Drumherum", _liste([
-            '<b>Vorab-Schritte</b> — komplett weiße Seiten entfernen, Mails mit Kopfzeile und großen Bildern als '
+            '<b>Vorab-Schritte</b> — komplett weiße Seiten entfernen, kopfüber liegende Seiten drehen, Mails mit '
+            'Kopfzeile und großen Bildern als '
             'Dokument. ' + doku("vorab"),
             '<b>Export</b> in Paperless — mehrere Dokumente als ein PDF mit Lesezeichen oder einzeln (auch als ZIP).',
             '<b>Eingang</b> — <code>POST /ingest</code> für Scanner und Skripte, mit Quelle-Tag. ' + doku("ingest"),
@@ -843,7 +844,7 @@ def info() -> str:
         '<div class="grid gap-5 text-sm">'
         + _teil("Der Normalfall", '<ol class="grid gap-2">'
                 '<li>1. Ein Dokument kommt an (Upload, Mail, Scanner, Eingang).</li>'
-                '<li>2. Optional entfernen die Vorab-Schritte leere Seiten.</li>'
+                '<li>2. Optional entfernen die Vorab-Schritte leere Seiten und drehen kopfüber liegende.</li>'
                 '<li>3. Paperless importiert es und ruft paperlaiss auf (Post-Consume).</li>'
                 '<li>4. paperlaiss lädt das Dokument, liest es bei Bedarf per OCR neu, sucht Kandidaten, lässt die KI '
                 'analysieren, gleicht den Korrespondenten ab, trägt Stammdaten nach und schreibt zurück.</li>'
@@ -1073,6 +1074,11 @@ EINSTELLUNGEN = {
                              "Was die Kennung im Titel je Dokumenttyp ist, als {\"Typname\": \"Beschreibung\"}, z. B. "
                              "{\"Einkommensteuerbescheid\": \"das Steuerjahr (JJJJ)\"} — damit eine Reihe gleich heißt. "
                              "Leer = die allgemeine Regel."),
+    "kopfueber_drehen": ("OCR", "Kopfüber liegende Seiten drehen",
+                         "An: beim Import liest Tesseract jede gescannte Seite einmal wie sie ist und einmal um 180° "
+                         "gedreht; ist die gedrehte klar besser lesbar, wird die Seite gedreht (nur die Lage im PDF, das "
+                         "Bild bleibt unverändert). Quer liegende Seiten dreht Paperless selbst. Wirkt über das "
+                         "Pre-Consume-Skript vorab.py."),
     "titel_setzen": ("Allgemein", "Titel setzen",
                      "An: der Titel wird „Korrespondent – Dokumentart Kennung“, z. B. „Beispiel GmbH – Rechnung 12/2026“; "
                      "die Kennung (Nummer, Zeitraum, Betreff) bestimmt die KI. Überschrieben wie der Dokumenttyp: beim Import, "

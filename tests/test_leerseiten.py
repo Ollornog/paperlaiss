@@ -143,7 +143,7 @@ with tempfile.TemporaryDirectory() as _td:
                          env={**os.environ, "DOCUMENT_WORKING_PATH": str(_eml)})
     r.check("Einstieg: fehlender Schritt (mailbilder) und Schritt mit Exit 7 → trotzdem Exit 0",
             _v2.returncode == 0 and "mailbilder.py fehlt" in _v2.stderr, _v2.stderr[-300:])
-for _s in ("leerseiten.py", "vorab.py", "mailbilder.py"):
+for _s in ("leerseiten.py", "vorab.py", "mailbilder.py", "ausrichtung.py"):
     r.check(f"{_s} ist ausführbar (Paperless ruft den Einstieg direkt auf)", os.access(VORAB / _s, os.X_OK))
 
 sys.exit(r.done())

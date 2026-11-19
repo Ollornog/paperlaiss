@@ -342,12 +342,12 @@ Daneben steht im Menü **Actions** ein zweiter Eintrag, **Export**. Der Dialog b
   folgen `PAPERLESS_TIME_ZONE`, sonst `TZ`. Das Panel muss als ein Prozess laufen (Aufträge liegen im
   Speicher).
 
-### Vorab-Schritte: leere Seiten, Mails als Dokument (optional)
+### Vorab-Schritte: leere Seiten, kopfüber liegende Seiten, Mails als Dokument (optional)
 
 `deploy/vorab/vorab.py` ist der Einstieg für `PAPERLESS_PRE_CONSUME_SCRIPT` (Paperless nimmt nur ein
 Skript). Er ruft die Schritte daneben nacheinander auf; jeder entscheidet selbst, ob die Datei ihn
 betrifft, ersetzt die Arbeitskopie nur am Ende und atomar, und alles endet immer mit 0 — kein Schritt
-hält je einen Import auf. Nur Standardbibliothek, dazu `gs` und `qpdf` aus dem Paperless-Abbild.
+hält je einen Import auf. Nur Standardbibliothek, dazu `gs`, `qpdf` und `tesseract` aus dem Paperless-Abbild.
 
 **Leere Seiten** (`leerseiten.py`, Schalter `leerseiten_entfernen`, Vorgabe an): jede Seite eines PDFs
 wird in Graustufen gerendert; eine Seite fällt nur, wenn sie *komplett* weiß ist — darauf nichts als
@@ -356,6 +356,24 @@ stehen. Gemessen an einem echten Archiv (604 PDFs, 1962 Seiten): genau die 11 le
 fallen, keine Seite mit Inhalt. Nie angefasst: PDFs mit einer Seite, verschlüsselte oder signierte,
 PDFs mit eingebetteten Dateien (E-Rechnung) und ein Dokument, dessen Seiten alle fallen würden. Das
 Ergebnis ist deterministisch, Paperless erkennt eine Dublette also weiter an der Prüfsumme.
+
+**Kopfüber liegende Seiten** (`ausrichtung.py`, Schalter `kopfueber_drehen`, Vorgabe an): Paperless dreht Seiten mit
+der Lageerkennung von Tesseract; die ist für 90° verlässlich, für 180° nicht (in einem Stapelscan von 117 Dokumenten
+lagen 25 kopfüber und blieben so). Hier liest Tesseract jede gescannte Seite — gerendert nur mit ihren Bildern, digitale
+Seiten und die unsichtbare OCR-Schicht eines Scanners bleiben außen vor — einmal wie sie ist und einmal um 180° gedreht;
+gedreht wird, wenn die gedrehte Lesung klar mehr gut erkannte Wörter hat (mindestens 12 und dreimal so viele). Eine gut
+lesbare Seite wird nicht zweimal gelesen, eine quer liegende bleibt für Paperless. Geändert wird nur der Eintrag
+`/Rotate` der Seite, das gescannte Bild bleibt byte-gleich und lässt sich mit dem Drehen in Paperless zurücknehmen.
+Sprachen aus `PAPERLESS_OCR_LANGUAGE`. Nie angefasst: verschlüsselte oder signierte PDFs und PDFs mit eingebetteten
+Dateien. Rund eine Sekunde je Seite, höchstens 60 Seiten und vier Minuten.
+
+**Von Hand in Paperless gedreht:** *Drehen* und der PDF-Editor mit *Neue Fassung* (Paperless 3.x) behalten das
+Original als Fassung 0 und lesen die gedrehte Datei als neue Fassung ein. Deren Post-Consume-Lauf trägt die ID der
+Fassung, die die API nicht zeigt; `classify.py` findet das Dokument über den Dateinamen, den Paperless der Fassung gibt
+(`<id>_rotated.pdf`, `<id>_edited.pdf`), bestätigt es in dessen `versions` und klassifiziert es neu wie der KI-Knopf
+(Typ und Titel dürfen ersetzt werden). Eine Fassung, die unter anderem Dateinamen hochgeladen wurde, wird mit einer
+Logzeile übersprungen — dort hilft der KI-Knopf. Begradigen je Dokument, ein Winkel von Hand und das Zuschneiden über
+vier Ecken gehören nicht zu paperlaiss (Backlog T-24).
 
 **Mails als Dokument mit Kopf und großen Bildern** (`mailbilder.py`) für Mail-Regeln, die die **ganze Mail** übernehmen (`.eml`, PDF-Layout „nur HTML“).
 Bevor Paperless die Mail rendert, setzt es einen kleinen Kopf (Von, An, Datum, Betreff) und je Bild der
@@ -377,6 +395,7 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `enabled` | `true` | Klassifizierer an/aus |
 | `titel_setzen` | `true` | Titel „Korrespondent – Dokumentart Kennung“; überschrieben wie der Dokumenttyp (Import, KI-Knopf, Panel — nie im Bestands-Durchlauf) |
 | `leerseiten_entfernen` | `true` | komplett weiße Seiten beim Import entfernen (Vorab-Schritt `leerseiten.py`) |
+| `kopfueber_drehen` | `true` | gescannte Seiten, die kopfüber liegen, beim Import drehen (Vorab-Schritt `ausrichtung.py`) |
 | `model` / `ocr_model` | `mistral-small-2603` / `mistral-ocr-4-1` | Mistral-Modelle, auf eine Fassung festgelegt: ein Alias wie `mistral-small-latest` wechselt das Modell ohne Ankündigung, das Panel warnt davor — die Fassung bewusst anheben und vorher mit `eval.py` messen |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR-Rescue-Verhalten; `ocr_always` ist der alte Schalter für `ocr_modus` `immer` |
 | `ocr_modus` | leer | `rescue` (OCR nur bei schwachem Text), `scans` (dazu jeder Scan und jedes Foto, digitale PDFs behalten ihren Text) oder `immer` (jedes Dokument); leer = `immer` mit `ocr_always`, sonst `rescue` — siehe unten |
