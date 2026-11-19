@@ -593,7 +593,7 @@ def nacharbeit() -> str:
                   f'class="text-muted-foreground">lädt…</td></tr></tbody></table></div>')
     return (
         kopf("Nacharbeit", "Was Menschen nach einem KI-Lauf geändert haben — laut Änderungshistorie von "
-             "Paperless. Nie angefasste Dokumente zählen als richtig.", zeitraum)
+             "Paperless, dazu Änderungen ohne Protokoll (Massenbearbeitung, Skripte). Nie angefasste Dokumente zählen als richtig.", zeitraum)
         + '<p id="na-stand" class="text-muted-foreground text-sm mb-4"></p>'
         + f'<div class="flex gap-4">{karten}</div>'
         + filterleiste
@@ -660,6 +660,76 @@ async function laden(){
 }
 async function abgleichen(){ try{ await senden('/api/nacharbeit/abgleichen',{}); }catch(e){} laden(); }
 function sollliste(){ location.href=PL_BASIS+'/api/nacharbeit/sollliste?tage='+encodeURIComponent(F.tage); }
+laden();
+"""
+
+
+# ---------------------------------------------------------------- Prüfen (T-9 items 1 and 7)
+FELD_NAMEN = {"iban": "IBAN", "telefon": "Telefon", "email": "E-Mail", "ustid": "USt-ID"}
+
+
+def pruefen() -> str:
+    def tab(kennung: str, spalten: list[str]) -> str:
+        return ('<div class="overflow-x-auto"><table class="table"><thead><tr>'
+                + "".join(f"<th>{s}</th>" for s in spalten)
+                + f'</tr></thead><tbody id="{kennung}"><tr><td colspan="{len(spalten)}" '
+                  f'class="text-muted-foreground">lädt…</td></tr></tbody></table></div>')
+    import json
+    return (
+        kopf("Prüfen", "Dokumente mit Prüf-Markierung und warum — ohne jedes Dokument zu öffnen. Dazu Kennungen, "
+             "die wahrscheinlich eure eigenen sind.",
+             f'<button type="button" class="btn" data-variant="outline" data-size="sm" onclick="laden()">'
+             f'{symbol("refresh-ccw")}Neu laden</button>')
+        + '<p id="pr-stand" class="text-muted-foreground text-sm mb-4"></p>'
+        + abschnitt("Markierte Dokumente", tab("pr-doks", ["Dokument", "Grund", "Lauf"]),
+                    '<span id="pr-anzahl" class="text-muted-foreground text-sm"></span>', kennung="pr-dokumente")
+        + abschnitt("Wahrscheinlich eigene Kennungen",
+                    '<p class="text-muted-foreground text-sm mb-4">Eine IBAN oder Telefonnummer, die auf Dokumenten '
+                    'vieler Korrespondenten steht, lernt paperlaiss nicht als Stammdaten. „Als eigene übernehmen“ trägt '
+                    'sie in die eigenen Kennungen ein und entfernt sie aus den Stammdaten aller Korrespondenten.</p>'
+                    + tab("pr-kennungen", ["Kennung", "Warum", "Aktion"]),
+                    kennung="pr-eigene")
+        + "<script>" + _JS_GRUND + "const FELD=" + json.dumps(FELD_NAMEN, ensure_ascii=False) + ";"
+        + _JS_PRUEFEN + "</script>"
+    )
+
+
+_JS_PRUEFEN = r"""
+const leer=(n,t)=>'<tr><td colspan="'+n+'" class="text-muted-foreground">'+txt(t)+'</td></tr>';
+let K=[];
+async function laden(){
+  let d; try{ d=await holen('/api/pruefen'); }
+  catch(e){ document.getElementById('pr-stand').textContent='Fehler: '+e.message; return; }
+  const basis=d.paperless||location.origin;
+  document.getElementById('pr-stand').textContent=d.tags.length?'Markierung: '+d.tags.join(', '):
+    'Kein Prüf-Tag eingerichtet (Einstellungen: unsicher_tag, kaputt_tag) — die Gründe stehen dann nur in der Aktivität.';
+  document.getElementById('pr-anzahl').textContent=d.dokumente.length+' Dokumente';
+  document.getElementById('pr-doks').innerHTML=d.dokumente.length?d.dokumente.map(z=>
+    '<tr data-doc="'+z.doc+'"><td class="min-w-0"><a class="underline" href="'+txt(basis)+'/documents/'+z.doc+'/details" target="_blank" rel="noopener">#'+z.doc+'</a> '+txt(z.titel)+
+    '<div class="text-muted-foreground text-xs">'+txt(z.korrespondent||'')+(z.typ?' · '+txt(z.typ):'')+'</div></td>'+
+    '<td><ul class="space-y-1">'+z.gruende.map(g=>'<li>'+(g.art?'<span class="badge" data-variant="outline">'+txt(g.art)+'</span> ':'')+txt(g.text)+'</li>').join('')+'</ul></td>'+
+    '<td class="whitespace-nowrap tabular-nums text-muted-foreground"><a class="underline" href="'+txt(PL_BASIS)+'/?doc='+z.doc+'">'+txt((z.lauf||'').replace('T',' ').slice(0,16)||'Lauf')+'</a></td></tr>').join('')
+    :leer(3,'Keine markierten Dokumente.');
+  K=d.kennungen;
+  document.getElementById('pr-kennungen').innerHTML=K.length?K.map((k,i)=>
+    '<tr data-kennung="'+i+'"><td><span class="badge" data-variant="secondary">'+txt(FELD[k.feld]||k.feld)+'</span> <span class="font-mono">'+txt(k.wert)+'</span>'+
+    '<div class="text-muted-foreground text-xs" data-bei>'+(k.bei.length?'in den Stammdaten bei '+k.bei.map(c=>'#'+txt(c)).join(', '):'in keinen Stammdaten')+'</div></td>'+
+    '<td>'+txt(k.grund)+(k.dokumente.length?'<div class="text-muted-foreground text-xs">zuletzt in '+k.dokumente.slice(-3).map(x=>'<a class="underline" href="'+txt(basis)+'/documents/'+x+'/details" target="_blank" rel="noopener">#'+x+'</a>').join(', ')+'</div>':'')+'</td>'+
+    '<td><div class="flex flex-wrap gap-2">'+(k.schon_eigen
+      ?'<button type="button" class="btn" data-size="sm" data-aktion="raeumen" onclick="aktion(this)">Aus den Stammdaten räumen</button>'
+      :'<button type="button" class="btn" data-size="sm" data-aktion="uebernehmen" onclick="aktion(this)">Als eigene übernehmen</button>'+
+       '<button type="button" class="btn" data-variant="outline" data-size="sm" data-aktion="verwerfen" onclick="aktion(this)">Nicht eigene</button>')+
+    '</div></td></tr>').join(''):leer(3,'Keine Vorschläge.');
+  if(d.je_konto&&K.length) document.getElementById('pr-stand').textContent+=' · Übernommen wird in die gemeinsamen eigenen Kennungen, nicht in die eines Kontos.';
+}
+// Index and action from data attributes: a value with an apostrophe would break an onclick with inserted text.
+async function aktion(el){
+  const k=K[Number(el.closest('tr').dataset.kennung)], a=el.dataset.aktion;
+  try{ const r=await senden('/api/pruefen/kennung',{feld:k.feld,wert:k.wert,aktion:a});
+    document.getElementById('pr-stand').textContent=(a==='verwerfen'?'Verworfen: ':'Erledigt: ')+k.wert+(r.aus_stammdaten&&r.aus_stammdaten.length?' — aus den Stammdaten von '+r.aus_stammdaten.length+' Korrespondenten entfernt':'');
+  }catch(e){ document.getElementById('pr-stand').textContent='Fehler: '+e.message; return; }
+  laden();
+}
 laden();
 """
 
@@ -783,7 +853,10 @@ def info() -> str:
             seite_("/", "<b>Aktivität</b>") + ' — was lief. Die Kästen und das Diagramm filtern, eine Zeile öffnet den '
             'Lauf mit Prompt und Antwort. Oben rechts: Dok-ID eingeben und <b>Neu klassifizieren</b> oder <b>mit OCR</b>.',
             seite_("/nacharbeit", "<b>Nacharbeit</b>") + ' — was Menschen nach der KI geändert haben, je Feld, '
-            'Korrespondent und Typ, jeder Fall mit Link; die Sollliste für <code>eval.py</code>.',
+            'Korrespondent und Typ, jeder Fall mit Link (auch Massenbearbeitung ohne Protokoll); die Sollliste für '
+            '<code>eval.py</code>.',
+            seite_("/pruefen", "<b>Prüfen</b>") + ' — markierte Dokumente mit dem Grund ihres letzten Laufs; Kennungen, '
+            'die wahrscheinlich eure eigenen sind, mit einem Klick in die eigenen Kennungen übernehmen.',
             seite_("/ablauf", "<b>Ablauf &amp; Prompt</b>") + ' — alle Schritte; der Prompt ist dort bearbeitbar.',
             seite_("/einstellungen", "<b>Einstellungen</b>") + ' — alle Werte mit Erklärung; gespeichert werden nur die '
             'geänderten Schlüssel. API-Schlüssel gehören in die Umgebung.']) + doku("panel", "Panel in der README"))
@@ -876,7 +949,8 @@ EINSTELLUNGEN = {
                    "Setzt paperlaiss nach jeder Klassifizierung. Ein Dokument mit diesem Tag wird beim "
                    "automatischen Lauf nicht noch einmal klassifiziert (Schleifenschutz). Leer: kein Tag, die "
                    "Marke steht unsichtbar im Trace des Dokuments (traces/<id>.json, „klassifiziert“)."),
-    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 1 und 2)."),
+    "model": ("KI-Modell & Prompt", "Modell", "Mistral-Modell für die Analyse (Pass 1 und 2). Eine feste Fassung "
+                                               "(z. B. mistral-small-2603), kein „-latest“: das wechselt still."),
     "temperature": ("KI-Modell & Prompt", "Temperatur",
                     "Wie frei das Modell antwortet: 0 = immer gleich, höher = kreativer. Für Klassifizierung niedrig halten (0–0,2)."),
     "content_max_len": ("KI-Modell & Prompt", "Text bis (Zeichen, gesamt)",
@@ -895,7 +969,8 @@ EINSTELLUNGEN = {
                   "„immer“: jedes Dokument. Leer: „immer“, wenn „Immer OCR“ an ist, sonst „rescue“."),
     "ocr_always": ("OCR", "Immer OCR", "Jedes Dokument per Mistral-OCR neu lesen, auch wenn der Text gut ist. Kostet je Seite. "
                    "Alter Schalter, gleich OCR-Modus „immer“; ein gesetzter OCR-Modus geht vor."),
-    "ocr_model": ("OCR", "OCR-Modell", "Mistral-Modell für die Texterkennung."),
+    "ocr_model": ("OCR", "OCR-Modell", "Mistral-Modell für die Texterkennung. Eine feste Fassung "
+                                 "(z. B. mistral-ocr-4-1), kein „-latest“."),
     "ocr_min_len": ("OCR", "Mindestlänge (Zeichen)", "Kürzerer Text gilt als unbrauchbar und wird per OCR neu gelesen."),
     "ocr_regeln.min_schluesselwoerter": ("OCR", "Mindestens bekannte Wörter",
                                          "So viele Wörter aus der Liste „Bekannte Wörter“ muss der Text enthalten, sonst OCR."),
@@ -994,6 +1069,10 @@ EINSTELLUNGEN = {
                              "An: beim Import fallen komplett weiße Seiten aus einem PDF (nur Staub unter 1 mm zählt als "
                              "weiß; Seitenzahl, Nummer oder Strich bleiben). Nie bei signierten, verschlüsselten PDFs, "
                              "E-Rechnungen oder wenn alle Seiten leer wären. Wirkt über das Pre-Consume-Skript vorab.py."),
+    "titel_kennung_je_typ": ("Allgemein", "Titel-Kennung je Typ",
+                             "Was die Kennung im Titel je Dokumenttyp ist, als {\"Typname\": \"Beschreibung\"}, z. B. "
+                             "{\"Einkommensteuerbescheid\": \"das Steuerjahr (JJJJ)\"} — damit eine Reihe gleich heißt. "
+                             "Leer = die allgemeine Regel."),
     "titel_setzen": ("Allgemein", "Titel setzen",
                      "An: der Titel wird „Korrespondent – Dokumentart Kennung“, z. B. „Beispiel GmbH – Rechnung 12/2026“; "
                      "die Kennung (Nummer, Zeitraum, Betreff) bestimmt die KI. Überschrieben wie der Dokumenttyp: beim Import, "
@@ -1064,7 +1143,10 @@ function flach(cfg){ const out=[];
   } return out; }
 function feld(pfad,v){
   const [gruppe,titel,text]=META[pfad]||['Weitere',pfad,''], id='f_'+pfad.replace(/\W/g,'_');
-  const hilfe=text?'<p class="text-muted-foreground text-sm">'+txt(text)+'</p>':'';
+  let hilfe=text?'<p class="text-muted-foreground text-sm">'+txt(text)+'</p>':'';
+  if((pfad==='model'||pfad==='ocr_model')&&/-latest$/i.test(String(v||'')))
+    hilfe+='<div class="alert" data-variant="warning" data-latest="'+txt(pfad)+'"><h2>Achtung: wanderndes Modell</h2>'
+      +'<section>„'+txt(v)+'“ zeigt auf die jeweils neueste Fassung und kann ohne Ankündigung wechseln. Besser eine feste Fassung eintragen.</section></div>';
   if(typeof v==='boolean') return [gruppe,'<div class="field" role="group" data-orientation="horizontal"><input class="input" type="checkbox" role="switch" id="'+id+'"'+(v?' checked':'')+'><label class="label" for="'+id+'">'+txt(titel)+'</label></div>'+hilfe];
   let e;
   if(pfad==='system_prompt') e='<textarea class="textarea max-h-96 font-mono" rows="12" id="'+id+'">'+txt(v)+'</textarea>';

@@ -105,16 +105,27 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
 - **Rework** (`/nacharbeit`) — what people changed after an AI run, read from the Paperless change
   history (`/api/documents/<id>/history/`) and compared with what the run wrote (trace `writeback`).
   Counted are changes by a signed-in user after the run (changes without a user, e.g. workflows,
-  and the run's own writes are not). Rate per field, per correspondent, per document type and per
+  and the run's own writes are not). Changes that leave no history entry at all — the bulk editor of the
+  document list, scripts — are found by comparing the document now with what the run left (trace
+  `writeback.ergebnis`; older traces: derived) and count as corrections *ohne Protokoll*. Rate per field, per correspondent, per document type and per
   week, plus every single case with a link to the document and the run. Documents nobody touched
-  count as correct, so the rate is a lower bound. The comparison runs in the background when the
-  page is opened and the last one is older than 30 minutes (or via *Neu abgleichen*); results are
+  count as correct, so the rate is a lower bound. The comparison runs in the background every six hours
+  (`PANEL_NACHARBEIT_INTERVALL_S`, `0` = off), when the page is opened and the last one is older than
+  30 minutes, or via *Neu abgleichen*; results are
   kept in `nacharbeit.json` next to the traces, so a run survives when its trace is overwritten.
   The token user needs to see the document history (admin or owner). *Sollliste* downloads the
   reworked documents as a target list for `eval.py` (`soll-nacharbeit.json`): one entry per document
   whose correspondent, type or date was corrected, from its latest run only; the uncorrected
   correspondent and type count as confirmed, a value cleared by hand becomes `null`, and a `notiz`
-  says what was changed. Review it before merging it into your own target list.
+  says what was changed. Review it before merging it into your own target list. After a review of a
+  whole batch this is the way to turn the corrections into a target list: correct in Paperless (bulk edits
+  count too), *Neu abgleichen*, *Sollliste*, then `python3 eval.py soll-nacharbeit.json --wie-import`.
+- **Check** (`/pruefen`) — the documents that carry `unsicher_tag` or `kaputt_tag` now, each with the reasons of
+  its last run (trace `pruefen`), so nobody has to open every document; and the identifiers that are probably
+  your own: an IBAN or phone number printed on documents of three or more correspondents is not learned as master
+  data (`eigene_vorschlaege.json`), and own identifiers that still sit in the master data. *Als eigene übernehmen*
+  adds the value to `eigene_kennungen` and removes it from every correspondent in the store, *Aus den Stammdaten
+  räumen* only removes it, *Nicht eigene* hides the proposal.
 - **Flow & prompt** (`/ablauf`) — every step a document goes through, each with its input and output
   to expand; for the AI calls the prompt and the answer format. The Pass-1 prompt is editable in
   place and also shown exactly as it is sent (`CLASSIFY_PROMPT_VORSCHAU=1`). A run in the activity
@@ -125,7 +136,7 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
 - **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
   saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
-- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/nacharbeit` (POST `/api/nacharbeit/abgleichen`, GET `/api/nacharbeit/sollliste?tage=`), `/api/running`, `/api/trace/{id}`,
+- **JSON API**: `/api/aktivitaet`, `/api/verlauf`, `/api/nacharbeit` (POST `/api/nacharbeit/abgleichen`, GET `/api/nacharbeit/sollliste?tage=`), `/api/pruefen` (POST `/api/pruefen/kennung` with `feld`, `wert`, `aktion` = `uebernehmen`/`raeumen`/`verwerfen`), `/api/running`, `/api/trace/{id}`,
   `/api/reclassify`, `/api/config` (GET/POST), `/api/prompt-vorschau` (GET; POST with a draft for the live preview while editing).
 - **Sign-in** (`PANEL_AUTH`):
   - empty (default) — bearer token / cookie `PANEL_TOKEN`; without a token the panel answers 503.
@@ -430,7 +441,7 @@ an earlier rule consumed it in the same run.
 | `enabled` | `true` | classifier on/off |
 | `titel_setzen` | `true` | title "Correspondent – document type identifier"; overwritten like the document type (import, AI button, panel — never in a bulk run) |
 | `leerseiten_entfernen` | `true` | remove completely white pages at import (pre-consume step `leerseiten.py`) |
-| `model` / `ocr_model` | `mistral-small-latest` / `mistral-ocr-latest` | Mistral models |
+| `model` / `ocr_model` | `mistral-small-2603` / `mistral-ocr-4-1` | Mistral models, pinned to a version: an alias such as `mistral-small-latest` changes the model without notice, and the panel warns about it — raise the pin on purpose and measure with `eval.py` first |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour; `ocr_always` is the old switch for `ocr_modus` `immer` |
 | `ocr_modus` | empty | `rescue` (OCR only for weak text), `scans` (also every scan and photo, digital PDFs keep their text) or `immer` (every document); empty = `immer` with `ocr_always`, else `rescue` — see below |
 | `ocr_regeln` | see below | when a text counts as too weak and is re-read by OCR |
@@ -452,6 +463,7 @@ an earlier rule consumed it in the same run.
 | `reserved_fields` | `[]` | custom field names only a person sets (e.g. a select field for the case a document belongs to): the AI never sees them, paperlaiss never sets, changes or clears them, a split part keeps them |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |
+| `titel_kennung_je_typ` | `{}` | what the identifier in the title is per document type, e.g. `{"Einkommensteuerbescheid": "das Steuerjahr (JJJJ)"}` — a series gets the same title pattern; see [Example configuration for a household](#example-configuration-for-a-household) |
 | `api_key_text` / `api_key_ocr` | – | empty = `MISTRAL_KEY` from the environment |
 
 ### Fields and tags only people set
@@ -466,6 +478,22 @@ Three keys keep the classifier away from what a person maintains. Enter one name
 | `reserved_tags` | The AI never assigns these tags, and they survive a write-back (status, direction, marker). |
 
 The panel's **Info** page shows the same summary.
+
+### Example configuration for a household
+
+Type and tag descriptions, prompt hints and title rules belong to an installation, not to the classifier.
+[`deploy/beispiel-config-haushalt.json`](deploy/beispiel-config-haushalt.json) is a starting point for a household
+archive with payroll, social security and tax documents — the lessons of a review of about 110 such documents, where
+the model mixed up similar forms and took the collecting health insurer or the employee for the employer:
+
+- `type_descriptions` for forms that are easily confused (Lohnsteuerbescheinigung, Lohnabrechnung, Meldebescheinigung
+  zur Sozialversicherung, Meldebestätigung), each saying who the correspondent is (the employer from the field
+  „Name und Anschrift des Arbeitgebers“, not the tax office or the collecting agency);
+- `tag_descriptions` with counter-examples („Gesundheit: nicht allein deshalb, weil eine Krankenkasse absendet“);
+- `titel_kennung_je_typ`, so that a series is named alike („… – Einkommensteuerbescheid 2023“).
+
+Copy the keys you need into your `classify-config.json` (or the panel's settings) and use your own type and tag
+names. Measure a change with `eval.py` against a target list before and after.
 
 ### OCR fallback (`ocr_regeln`)
 

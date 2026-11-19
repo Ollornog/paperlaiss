@@ -58,11 +58,18 @@ FORCE_OCR = os.environ.get("CLASSIFY_FORCE_OCR") == "1"
 NO_OCR = os.environ.get("CLASSIFY_NO_OCR") == "1"
 SOURCE = os.environ.get("CLASSIFY_SOURCE", "")
 
+# Pinned model versions, not the moving "*-latest" aliases (T-9 item 9): an alias switches the model under a
+# running installation without notice, and a measured hit rate (eval.py) no longer says anything. Raise the pin
+# on purpose, measure against the reference list, then roll out. Checked 2026-11-19 against /v1/models: the
+# alias mistral-small-latest pointed to mistral-small-2603, mistral-ocr-latest to mistral-ocr-4-1.
+MODELL_VORGABE = "mistral-small-2603"
+OCR_MODELL_VORGABE = "mistral-ocr-4-1"
+
 # --- Config (vom Panel schreibbar, mit Defaults) ---
 CFG = {
     "enabled": True,
-    "model": "mistral-small-latest",
-    "ocr_model": "mistral-ocr-latest",
+    "model": MODELL_VORGABE,
+    "ocr_model": OCR_MODELL_VORGABE,
     "ocr_enabled": True,
     "ocr_always": False,               # alias of ocr_modus "immer" (until 0.11 the only switch)
     "ocr_modus": "",                   # rescue | scans | immer; empty = "immer" with ocr_always, else "rescue" (T-19)
@@ -151,6 +158,10 @@ CFG = {
     # Titel aus dem Muster „Korrespondent – Dokumentart Kennung“ (PO 2026-09-27). Überschrieben wird
     # wie beim Dokumenttyp: beim Import, beim KI-Knopf und im Panel, nie beim Bestands-Durchlauf.
     "titel_setzen": True,
+    # What the identifier in the title is, per document type: {"Einkommensteuerbescheid": "das Steuerjahr (JJJJ)"}.
+    # Goes into the title instruction of the prompt, so that a series is named alike ("… – Einkommensteuerbescheid
+    # 2023" instead of once the tax number, once "für 2023"; T-9). Empty = the general rule only.
+    "titel_kennung_je_typ": {},
     # Komplett weiße Seiten beim Import entfernen — liest nicht classify.py, sondern das Pre-Consume-
     # Skript deploy/vorab/leerseiten.py aus derselben Config. Hier steht der Schlüssel, damit das
     # Panel ihn zeigt und speichert.
@@ -954,6 +965,45 @@ def sperre_oeffnen(pfad):
     mit "a": legte das Panel die Datei zuerst an (root, 0644), scheiterte danach jede Stammdaten-
     Erfassung des Klassifizierers mit PermissionError — still, nur als Zeile im Log."""
     return os.fdopen(os.open(pfad, os.O_RDONLY | os.O_CREAT, 0o666), "rb")
+
+
+VORSCHLAEGE = "eigene_vorschlaege.json"
+VORSCHLAG_DOKUMENTE = 10
+
+
+def vorschlag_eintragen(alt, feld, wert, anzahl, did, heute):
+    """Proposals of probably own identifiers (T-9 item 1), pure: (old dict, finding) → new dict.
+
+    Key "<feld>:<normalised value>". The panel shows them on `/pruefen` and can take one over into
+    `eigene_kennungen`. A dismissed proposal stays dismissed; a known one gets the newest count and document."""
+    neu = dict(alt or {})
+    k = f"{feld}:{norm_iban(wert) if feld == 'iban' else norm_telefon(wert)}"
+    e = dict(neu.get(k) or {"feld": feld, "wert": wert, "dokumente": []})
+    doks = [d for d in e.get("dokumente") or [] if d != did] + [did]
+    e.update({"korrespondenten": anzahl, "zuletzt": heute, "dokumente": doks[-VORSCHLAG_DOKUMENTE:]})
+    neu[k] = e
+    return neu
+
+
+def vorschlaege_merken(funde, did):
+    """Write the probably own identifiers of this run under the store lock (the panel edits the same file).
+    `funde` = [(feld, wert, anzahl)]. A broken file is not overwritten."""
+    if not funde:
+        return
+    import fcntl
+    pfad = os.path.join(SCRIPT_DIR, VORSCHLAEGE)
+    with sperre_oeffnen(os.path.join(SCRIPT_DIR, "correspondents.json.lock")) as sperre:
+        fcntl.flock(sperre, fcntl.LOCK_EX)
+        try:
+            alt = json.load(open(pfad, encoding="utf-8"))
+        except FileNotFoundError:
+            alt = {}
+        if not isinstance(alt, dict):
+            raise ValueError(f"{VORSCHLAEGE} hat den falschen Aufbau — nicht überschrieben")
+        neu = alt
+        for feld, wert, anzahl in funde:
+            neu = vorschlag_eintragen(neu, feld, wert, anzahl, int(did), f"{datetime.date.today():%Y-%m-%d}")
+        schreibe_json(pfad, neu)
 
 
 def stammdaten_schreiben(cid, aenderung):
@@ -2902,6 +2952,22 @@ def nach_lauf_gesichtet(trace, historie):
     return False
 
 
+ERGEBNIS_FELDER = ("correspondent", "document_type", "created", "title")
+
+
+def lauf_ergebnis(vorher, patch):
+    """The four basic fields as the document holds them after this run: the written value, else the one it had.
+
+    Stored in the trace (`writeback.ergebnis`, ids and the date as YYYY-MM-DD) so that the panel can see a later
+    change that left no entry in the history of Paperless: a bulk edit in the document list or a script writes
+    without an audit log entry, and the review of a large batch was invisible to "Nacharbeit" (T-9 item 8)."""
+    aus = {}
+    for k in ERGEBNIS_FELDER:
+        v = patch[k] if k in patch else (vorher or {}).get(k)
+        aus[k] = str(v)[:10] if k == "created" and v else v
+    return aus
+
+
 def gesetzt(vorher_tags, tag_ids, tagname_by_id, cur_vals, cfs, fname_by_id):
     """What this run changed itself: (KI tag names it added, {field name: value} it set to a new value).
     Stored in the trace for the next run's clean-up (vorlauf_kandidaten)."""
@@ -3630,6 +3696,18 @@ def pass1_system(cfg, types, tags_all, reserved, mit_summary):
     return "".join(t for t, _ in pass1_system_teile(cfg, types, tags_all, reserved, mit_summary))
 
 
+def titel_kennung_anweisung(cfg):
+    """The per-type rule for titel_kennung (`titel_kennung_je_typ`), or "" — entries without text are left out."""
+    regeln = cfg.get("titel_kennung_je_typ") or {}
+    if not isinstance(regeln, dict):
+        return ""
+    zeilen = [f"- {typ}: {str(was).strip()}" for typ, was in regeln.items() if str(was or "").strip()]
+    if not zeilen:
+        return ""
+    return ("\nFür diese Dokumentarten ist titel_kennung GENAU das Folgende (gleiche Schreibweise für jedes Dokument "
+            "der Art, damit eine Reihe gleich heißt):\n" + "\n".join(zeilen))
+
+
 def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
     """pass1_system() in Stuecken (Text, Name des eingesetzten Teils oder None) — fuers Panel."""
     if cfg.get("tagging_enabled"):
@@ -3653,6 +3731,9 @@ def pass1_system_teile(cfg, types, tags_all, reserved, mit_summary):
         teile.append((ABSENDER_ANWEISUNG, "Absender-Stammdaten (automatisch angehängt, weil „Stammdaten erfassen“ an ist)"))
     if cfg.get("titel_setzen", True):
         teile.append((TITEL_ANWEISUNG, "Titel (automatisch angehängt, weil „Titel setzen“ an ist)"))
+        je_typ = titel_kennung_anweisung(cfg)
+        if je_typ:
+            teile.append((je_typ, "Titel-Kennung je Dokumentart (aus „Titel-Kennung je Typ“)"))
     if mit_summary:
         teile.append((SUMMARY_ANWEISUNG, "Zusammenfassung (automatisch angehängt, weil ein Zusammenfassungs-Feld eingestellt ist)"))
     return teile
@@ -3797,6 +3878,7 @@ def main():
 
     # Ein Teil aus dem Aufteilen trägt Marker, Titel und Feldwerte seines Ausgangsdokuments (erbe_verwerfen).
     erbe = erbe_offen(doc, TRACE_DIR)
+    stand_vorher = {k: doc.get(k) for k in ERGEBNIS_FELDER}     # what Paperless holds, inherited values included
     felder_vorher = list(doc.get("custom_fields") or [])     # reserved fields survive the erbe (T-20)
     wie_import = os.environ.get("CLASSIFY_WIE_IMPORT") == "1"
     if erbe or wie_import:
@@ -4243,6 +4325,14 @@ def main():
             if mail_from and not _mail:
                 v = {**v, "absender_mail": "nicht übernommen — gehört nicht erkennbar zu diesem Absender (Portal?)"}
             TRACE["stammdaten"] = {"geschrieben": g, "verworfen": v, "trocken": bool(DRY or not corr_id)}
+            _eigen_funde = [(f, w, n) for (f, w), n in _verbr.items() if n is not None and n >= VERBREITET_AB]
+            if _eigen_funde:
+                TRACE["eigene_vorschlaege"] = [{"feld": f, "wert": w, "korrespondenten": n} for f, w, n in _eigen_funde]
+                if not DRY:
+                    try:
+                        vorschlaege_merken(_eigen_funde, did)
+                    except Exception as e:
+                        log(f"vorschlag-fail {did}: {e!r}")
             if g:
                 stamm_info = " | stammdaten+" + ",".join(g)
             # Passen die Daten des Dokuments zum Korrespondenten? Eine Kennung, die einem ANDEREN gehört,
@@ -4377,7 +4467,7 @@ def main():
         patch.pop("custom_fields", None); patch_doc(did, patch)
     tg, fg = gesetzt(set(tag_ids_on), tag_ids, tagname_by_id, cur_vals, patch.get("custom_fields"),
                      {f["id"]: f["name"] for f in cfields})
-    TRACE["writeback"].update({"tags_gesetzt": tg, "fields_gesetzt": fg,
+    TRACE["writeback"].update({"tags_gesetzt": tg, "fields_gesetzt": fg, "ergebnis": lauf_ergebnis(stand_vorher, patch),
                                "vorlauf_entfernt": (TRACE.get("vorlauf") or {}).get("entfernt")})
     if not ok and str(err).startswith(ZEIT):
         TRACE["writeback"]["fehler"] = err

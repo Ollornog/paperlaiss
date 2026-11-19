@@ -26,6 +26,7 @@ ENV:
                   (20), EXPORT_SPEICHER_MB (10000, alle fertigen zusammen), EXPORT_PARALLEL (1), EXPORT_TMP; PAPERLESS_PUBLIC_URL für die Links nach Paperless
 """
 import os, sys, json, re, glob, html, hmac, secrets, shutil, subprocess, datetime, tempfile, threading, time, traceback
+import contextlib
 import urllib.request, urllib.error, zoneinfo
 from fastapi import BackgroundTasks, Body, FastAPI, Request, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
@@ -38,6 +39,7 @@ import exportlogik
 import exportpdf
 import huelle
 import nacharbeit
+import pruefliste
 import routing
 import seiten
 
@@ -68,7 +70,13 @@ ROUTE_SHARE_HUB = routing.parse_users(os.environ.get("PANEL_ROUTE_SHARE_WITH_HUB
 
 from kern import GEHEIM_FELDER  # Geheimnis-Felder der Config: nie ausgeliefert, nie geschrieben (kern.py)
 
-app = FastAPI(title="paperlaiss")
+@contextlib.asynccontextmanager
+async def _lebenszeit(_app):
+    _nacharbeit_takt_starten()
+    yield
+
+
+app = FastAPI(title="paperlaiss", lifespan=_lebenszeit)
 # Aussehen: vendortes C22 (scripts/vendor-c22.sh). Ohne Anmeldung, wie das Logo — die
 # Anmeldeseite braucht es, bevor jemand angemeldet ist, und es enthält nichts Schützenswertes.
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -812,6 +820,10 @@ def api_verlauf(request: Request, tage: int = 30):
 # und seine Korrekturen bleiben so erhalten.
 NACHARBEIT = os.path.join(CLASSIFY_DIR, "nacharbeit.json")
 NACHARBEIT_FRISCH_S = 1800      # älter → beim Öffnen der Seite im Hintergrund neu abgleichen
+# Regular refresh in the background (T-9 item 8): until 0.13 the comparison ran only when someone opened the page,
+# so the corrections of a review that nobody looked at in the panel aged out of the traces. 0 = off.
+_NA_TAKT = (os.environ.get("PANEL_NACHARBEIT_INTERVALL_S") or "").strip()
+NACHARBEIT_INTERVALL_S = int(_NA_TAKT) if _NA_TAKT.isdigit() else 21600
 _NA_SPERRE = threading.Lock()
 _NA = {"laeuft": False, "fehler": None}
 
@@ -841,8 +853,7 @@ def _nacharbeit_lesen():
 def _nacharbeit_lauf():
     try:
         zone = _zone()
-        namen = {"correspondent": {str(c["id"]): c["name"] for c in _alle("/correspondents/?page_size=1000&fields=id,name")},
-                 "document_type": {str(t["id"]): t["name"] for t in _alle("/document_types/?page_size=1000&fields=id,name")}}
+        namen = _namen()
         traces = []
         for p in glob.glob(os.path.join(TRACE_DIR, "*.json")):
             try:
@@ -856,7 +867,7 @@ def _nacharbeit_lauf():
         ids = sorted({d for d, _ in traces})
         for i in range(0, len(ids), 100):
             teil = ",".join(map(str, ids[i:i + 100]))
-            for d in _alle(f"/documents/?id__in={teil}&page_size=100&fields=id,title,correspondent,document_type"):
+            for d in _alle(f"/documents/?id__in={teil}&page_size=100&fields=id,title,correspondent,document_type,created"):
                 doks[d["id"]] = d
         neu = {}
         for did, t in traces:
@@ -873,7 +884,7 @@ def _nacharbeit_lauf():
                 "titel": d.get("title"),
                 "korrespondent": namen["correspondent"].get(str(d.get("correspondent"))),
                 "typ": namen["document_type"].get(str(d.get("document_type"))),
-                **nacharbeit.korrekturen(t, hist if isinstance(hist, list) else [], namen, zone)}
+                **nacharbeit.korrekturen(t, hist if isinstance(hist, list) else [], namen, zone, stand=d)}
         alt = _nacharbeit_lesen().get("laeufe") or {}
         schreibe_json(NACHARBEIT, {"stand": _jetzt().isoformat(timespec="seconds"),
                                    "laeufe": nacharbeit.zusammenfuehren(alt, neu)})
@@ -892,6 +903,23 @@ def _nacharbeit_anstossen():
     _NA["laeuft"] = True
     threading.Thread(target=_nacharbeit_lauf, daemon=True).start()
     return True
+
+
+def _nacharbeit_takt(intervall, warten=time.sleep, runden=None):
+    """Every `intervall` seconds a comparison (none while one is running). `runden` limits the loop in tests."""
+    n = 0
+    while runden is None or n < runden:
+        warten(intervall)
+        _nacharbeit_anstossen()
+        n += 1
+
+
+def _nacharbeit_takt_starten():
+    if NACHARBEIT_INTERVALL_S > 0:
+        threading.Thread(target=_nacharbeit_takt, args=(NACHARBEIT_INTERVALL_S,), daemon=True,
+                         name="nacharbeit-takt").start()
+        return True
+    return False
 
 
 @app.get("/api/nacharbeit")
@@ -932,6 +960,86 @@ def api_nacharbeit_sollliste(request: Request, tage: int = 0):
 def nacharbeit_seite(request: Request):
     guard(request)
     return seite("Nacharbeit", "/nacharbeit", seiten.nacharbeit())
+
+
+# ---------- Prüfen: markierte Dokumente mit Grund, wahrscheinlich eigene Kennungen (T-9 items 1 and 7) ----------
+# Logic in pruefliste.py; here fetching (Paperless, traces, store) and writing (config, store) only.
+VORSCHLAEGE = os.path.join(CLASSIFY_DIR, "eigene_vorschlaege.json")   # written by classify.py
+PRUEFEN_MAX = 500
+
+
+def _json_lesen(pfad, vorgabe):
+    try:
+        d = json.load(open(pfad, encoding="utf-8"))
+        return d if isinstance(d, type(vorgabe)) else vorgabe
+    except (OSError, ValueError):
+        return vorgabe
+
+
+def _namen():
+    return {"correspondent": {str(c["id"]): c["name"] for c in _alle("/correspondents/?page_size=1000&fields=id,name")},
+            "document_type": {str(t["id"]): t["name"] for t in _alle("/document_types/?page_size=1000&fields=id,name")}}
+
+
+@app.get("/api/pruefen")
+def api_pruefen(request: Request):
+    guard(request)
+    cfg = _cfg_oeffentlich()
+    gesucht = {str(cfg.get(k) or "").strip().lower() for k in ("unsicher_tag", "kaputt_tag")} - {""}
+    tags = [t for t in _alle("/tags/?page_size=1000&fields=id,name") if t["name"].strip().lower() in gesucht]
+    doks = []
+    if tags:
+        ids = ",".join(str(t["id"]) for t in tags)
+        doks = _alle(f"/documents/?tags__id__in={ids}&page_size=100&ordering=-modified"
+                     "&fields=id,title,correspondent,document_type,tags")[:PRUEFEN_MAX]
+    traces = {d["id"]: _json_lesen(os.path.join(TRACE_DIR, f"{d['id']}.json"), {}) for d in doks}
+    return {"tags": [t["name"] for t in tags], "dokumente": pruefliste.dokumente(doks, traces, _namen() if doks else {}),
+            "kennungen": pruefliste.kennungen(_json_lesen(VORSCHLAEGE, {}), _korr_store(), cfg.get("eigene_kennungen")),
+            "je_konto": bool(cfg.get("kennungen_je_konto")),
+            "paperless": exportlogik.paperless_basis(PAPERLESS_PUBLIC_URL, "", "")}
+
+
+@app.post("/api/pruefen/kennung")
+async def api_pruefen_kennung(request: Request):
+    # aktion: uebernehmen (into eigene_kennungen and out of the store), raeumen (out of the store only),
+    # verwerfen (the proposal is not shown again).
+    guard(request)
+    body = await request.json()
+    feld, wert, aktion = body.get("feld"), str(body.get("wert") or "").strip(), body.get("aktion")
+    if feld not in pruefliste.KENNUNG_FELDER or not pruefliste.schluessel(feld, wert) \
+            or aktion not in ("uebernehmen", "raeumen", "verwerfen"):
+        raise HTTPException(400, "feld, wert und aktion (uebernehmen, raeumen, verwerfen) nötig")
+    import fcntl
+    k = pruefliste.schluessel(feld, wert)
+    with _KORR_LOCK, sperre_oeffnen(CORR_STORE + ".lock") as sperre:
+        fcntl.flock(sperre, fcntl.LOCK_EX)
+        vorschlaege = _json_lesen(VORSCHLAEGE, {})
+        treffer = [s for s, v in vorschlaege.items() if isinstance(v, dict) and v.get("feld") == feld
+                   and pruefliste.schluessel(feld, v.get("wert")) == k]
+        weg = []
+        if aktion == "verwerfen":
+            for s in treffer:
+                vorschlaege[s] = {**vorschlaege[s], "verworfen": True}
+        else:
+            if aktion == "uebernehmen":
+                datei = _cfg()
+                datei["eigene_kennungen"] = pruefliste.eigene_ergaenzen(
+                    datei.get("eigene_kennungen") or _cfg_oeffentlich().get("eigene_kennungen"), feld, wert)
+                schreibe_json(CONFIG, datei)
+            store, weg = pruefliste.store_raeumen(_korr_store(), feld, wert)
+            if weg:
+                schreibe_json(CORR_STORE, store)
+            for s in treffer:
+                vorschlaege.pop(s)
+        if treffer:
+            schreibe_json(VORSCHLAEGE, vorschlaege)
+    return {"ok": True, "aktion": aktion, "aus_stammdaten": weg}
+
+
+@app.get("/pruefen", response_class=HTMLResponse)
+def pruefen_seite(request: Request):
+    guard(request)
+    return seite("Prüfen", "/pruefen", seiten.pruefen())
 
 
 @app.get("/api/config/schema")

@@ -61,6 +61,7 @@ _ICONS = {
 NAVIGATION: list[tuple[str, str, str]] = [
     ("Aktivität", "/", "chart-column"),
     ("Nacharbeit", "/nacharbeit", "pencil"),
+    ("Prüfen", "/pruefen", "triangle-alert"),
     ("Ablauf & Prompt", "/ablauf", "git-branch"),
     ("Einstellungen", "/einstellungen", "settings"),
     ("Info", "/info", "info"),

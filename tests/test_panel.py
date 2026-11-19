@@ -405,6 +405,27 @@ r.check("Nacharbeit: alle vier Zugänge rufen guard() zuerst",
             isinstance(f.body[0], _ast2.Expr) and getattr(getattr(f.body[0].value, "func", None), "id", None) == "guard"
             for f in _na_routen.values()))
 
+# ---- T-9: "Prüfen" shows document reasons and master data — every way in behind guard(); the identifier action
+# writes config, store and proposals under the same lock as classify.py (correspondents.json.lock).
+_pr = {f.name: f for f in _ast2.walk(_app) if isinstance(f, (_ast2.FunctionDef, _ast2.AsyncFunctionDef))
+       and f.name in ("api_pruefen", "api_pruefen_kennung", "pruefen_seite")}
+r.check("T-9 Prüfen: all three ways in call guard() first",
+        len(_pr) == 3 and all(isinstance(f.body[0], _ast2.Expr) and getattr(getattr(f.body[0].value, "func", None), "id", None)
+                              == "guard" for f in _pr.values()))
+_kn = _pr.get("api_pruefen_kennung")
+_mit = [w for w in _ast2.walk(_kn) if isinstance(w, _ast2.With)] if _kn else []
+r.check("T-9 Prüfen: config, store and proposals are written only inside the store lock",
+        len(_mit) == 1 and "_KORR_LOCK" in _ast2.unparse(_mit[0].items[0].context_expr)
+        and "CORR_STORE + '.lock'" in _ast2.unparse(_mit[0].items[1].context_expr)
+        and {"CONFIG", "CORR_STORE", "VORSCHLAEGE"} == {
+            c.args[0].id for c in _ast2.walk(_mit[0]) if isinstance(c, _ast2.Call) and getattr(c.func, "id", None) == "schreibe_json"}
+        and not [c for c in _ast2.walk(_kn) if isinstance(c, _ast2.Call) and getattr(c.func, "id", None) == "schreibe_json"
+                 and not any(c is x for x in _ast2.walk(_mit[0]))])
+_lz = next((f for f in _ast2.walk(_app) if isinstance(f, _ast2.AsyncFunctionDef) and f.name == "_lebenszeit"), None)
+r.check("T-9 Nacharbeit: the app starts the regular comparison at startup (lifespan)",
+        _lz is not None and "_nacharbeit_takt_starten()" in _ast2.unparse(_lz)
+        and "lifespan=_lebenszeit" in (ROOT / "panel/app.py").read_text(encoding="utf-8"))
+
 # ---- T-15: master-data proposals from classify.py, reduced to the dialog's fields
 _va = kern.vorschlag_aus_ausgabe('log line\n{"korrespondent": "X AG", "dokumente": 3, "vorschlag": {"iban": [{"wert": "DE02", '
                                  '"dokument": 1}], "geheim": [{"wert": "x"}], "telefon": [{"wert": ""}]}, "verworfen": {"iban": ["a: b"]}}\n')

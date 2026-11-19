@@ -12,6 +12,12 @@ Skripte) zählen nicht. Einträge in den ersten Sekunden nach dem Lauf auch nich
 Schreibvorgänge des Laufs selbst (der Klassifizierer schreibt unter dem Token-Benutzer, und der
 kann ein Mensch sein).
 
+Changes WITHOUT a history entry (T-9 item 8): the bulk editor of the document list and scripts write
+past the audit log, so the review of a large batch (110 documents, a third of the correspondents
+corrected) did not show up at all. For the four basic fields the current value of the document is
+therefore compared with the value the run left (`writeback.ergebnis`, older traces: derived from the
+run); a difference no history entry explains counts as a correction "ohne Protokoll".
+
 Reine Logik ohne Netz und ohne FastAPI — `tests/test_nacharbeit.py` prüft sie direkt. Das Holen
 und Speichern steht in `app.py`.
 """
@@ -26,6 +32,8 @@ from collections import Counter
 GRUNDFELDER = {"title": "Titel", "correspondent": "Korrespondent",
                "document_type": "Dokumenttyp", "created": "Datum"}
 TAGS = "Tags"
+# Who made a change that left no history entry (bulk edit, script).
+OHNE_PROTOKOLL = "ohne Protokoll"
 # Was ein Lauf noch selbst schreibt, nachdem der Trace-Zeitstempel gesetzt ist, bzw. was um den
 # Zeitstempel herum gleichzeitig passiert (Post-Consume, Uhrabweichung).
 GNADE_S = 15
@@ -93,10 +101,47 @@ def _art(ki: str | None, neu: str) -> str:
     return "geändert"
 
 
-def korrekturen(trace: dict, historie: list, namen: dict | None = None, zone: str = "") -> dict:
+def ki_grundwerte(trace: dict) -> dict:
+    """Paperless field → value the run left on the document (ids as text, date YYYY-MM-DD), only where known.
+
+    New traces carry `writeback.ergebnis`. For older ones it is derived: a written title or date; the type the
+    run named, except in a bulk run (that one keeps a type already set); the correspondent by NAME (prefix
+    `name:`) from „exakt='X'“ and the like, unknown when the run kept the existing one."""
+    import re
+    wb = trace.get("writeback") or {}
+    erg = wb.get("ergebnis")
+    if isinstance(erg, dict):
+        return {k: _wert(erg.get(k))[:10] if k == "created" else _wert(erg.get(k)) for k in GRUNDFELDER if k in erg}
+    aus = {}
+    if wb.get("title"):
+        aus["title"] = _wert(wb["title"])
+    if wb.get("document_date"):
+        aus["created"] = _wert(wb["document_date"])[:10]
+    if wb.get("document_type") and trace.get("trigger") != "Bestands-Durchlauf":
+        aus["document_type"] = "name:" + _wert(wb["document_type"])
+    m = re.search(r"'(.*)'", str(wb.get("correspondent") or ""))
+    if m and m.group(1):
+        aus["correspondent"] = "name:" + m.group(1)
+    return aus
+
+
+def _per_name(ki: str, feld: str) -> bool:
+    return feld in ("correspondent", "document_type") and ki.startswith("name:")
+
+
+def _gleich_name(ki: str, jetzt: str, feld: str, namen: dict) -> bool:
+    if _per_name(ki, feld):
+        return ki[5:] == namen.get(feld, {}).get(jetzt, jetzt if not jetzt.isdigit() else "")
+    return ki == jetzt
+
+
+def korrekturen(trace: dict, historie: list, namen: dict | None = None, zone: str = "",
+                stand: dict | None = None) -> dict:
     """Ein Lauf und die Historie seines Dokuments → was danach von Hand geändert wurde.
 
     `namen` übersetzt IDs der Historie: {"correspondent": {"12": "Name"}, "document_type": {...}}.
+    `stand` is the document as it is now (correspondent, document_type, created, title): a basic field that
+    differs from what the run left although no history entry touched it is a correction "ohne Protokoll".
     Ergebnis: {"felder": [...], "angefasst": bool, "korrekturen": [{feld, ki, neu, art, wer, wann}]}.
     """
     namen = namen or {}
@@ -125,6 +170,9 @@ def korrekturen(trace: dict, historie: list, namen: dict | None = None, zone: st
     erst: dict = {}      # Feld → (KI-Wert, erste Änderung)
     zuletzt: dict = {}   # Feld → (neuer Wert, wer, wann)
     tags_weg: dict = {}
+    # Basic fields any later history entry touched, with or without a user (a workflow): those are explained.
+    erklaert = {f for e in historie or [] if (_utc(e.get("timestamp") or "") or grenze) > grenze
+                for f in (e.get("changes") or {}) if f in GRUNDFELDER}
     for t, wer, e in spaeter:
         wann = t.isoformat(timespec="seconds")
         for feld, aend in (e.get("changes") or {}).items():
@@ -155,7 +203,23 @@ def korrekturen(trace: dict, historie: list, namen: dict | None = None, zone: st
         aus.append({"feld": feld, "ki": ki, "neu": neu, "art": _art(ki, neu), "wer": wer, "wann": wann})
     for tag, (wer, wann) in sorted(tags_weg.items()):
         aus.append({"feld": TAGS, "ki": tag, "neu": "", "art": "entfernt", "wer": wer, "wann": wann})
-    return {"felder": felder, "angefasst": bool(spaeter), "korrekturen": aus}
+    ohne = False
+    if isinstance(stand, dict):
+        for feld, ki in ki_grundwerte(trace).items():
+            if feld in erklaert or feld not in stand:
+                continue
+            jetzt = _wert(stand.get(feld))
+            jetzt = jetzt[:10] if feld == "created" else jetzt
+            if _gleich_name(ki, jetzt, feld, namen):
+                continue
+            ki_n = ki[5:] if _per_name(ki, feld) else name(feld, ki)
+            neu_n = name(feld, jetzt)
+            if feld == "created":
+                ki_n, neu_n = ki_n[:10], neu_n[:10]
+            ohne = True
+            aus.append({"feld": GRUNDFELDER[feld], "ki": ki_n, "neu": neu_n, "art": _art(ki_n, neu_n),
+                        "wer": OHNE_PROTOKOLL, "wann": None})
+    return {"felder": felder, "angefasst": bool(spaeter) or ohne, "korrekturen": aus}
 
 
 def _quote(teil: int, basis: int) -> float:
@@ -280,7 +344,8 @@ def sollliste(laeufe: list, jetzt: datetime.datetime, tage: int = 0) -> list:
         if len(soll) == 1:
             continue                    # nichts, was eval.py prüfen könnte
         soll["notiz"] = "; ".join(
-            f"{f}: {'?' if k['ki'] is None else k['ki'] or 'leer'} → {k['neu'] or 'leer'} ({k['wer']}, {str(k['wann'])[:10]})"
+            f"{f}: {'?' if k['ki'] is None else k['ki'] or 'leer'} → {k['neu'] or 'leer'} ({k['wer']}"
+            + (f", {str(k['wann'])[:10]})" if k.get("wann") else ")")
             for f, k in korr.items())
         aus.append(soll)
     return aus

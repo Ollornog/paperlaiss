@@ -6,6 +6,49 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+Lessons from a large review, the rest (backlog T-9 items 1, 7, 8, 9).
+
+### Hinzugefügt
+
+- **Panel page *Prüfen* (`/pruefen`, T-9 item 7):** the documents that carry `unsicher_tag` or `kaputt_tag` now, each
+  with the reasons of its last run from the trace (`pruefen`) and links to the document and the run — nobody has to
+  open every document to see why it is flagged. Without a reason in the trace (flag set by hand, older run) the row
+  says so. Logic in the new `panel/pruefliste.py`.
+- **Probably own identifiers proposed (T-9 item 1):** an IBAN or phone number that is not learned because it is
+  printed on documents of three or more correspondents is now recorded in `eigene_vorschlaege.json` (next to the
+  store, under its lock; never in a dry run; trace key `eigene_vorschlaege`). *Prüfen* lists these proposals and the
+  own identifiers that still sit in the master data (learned before they were configured). *Als eigene übernehmen*
+  adds the value to `eigene_kennungen` and removes it, with its provenance note, from every correspondent in
+  `correspondents.json`; *Aus den Stammdaten räumen* only removes it; *Nicht eigene* hides the proposal for good.
+  API: `GET /api/pruefen`, `POST /api/pruefen/kennung`.
+- **`titel_kennung_je_typ`:** what the identifier in the title is per document type (e.g. the tax year), so a series
+  is named alike. Empty by default; in the prompt right after the title instruction.
+- **Example configuration for a household** (`deploy/beispiel-config-haushalt.json`, README section): type
+  descriptions for easily confused payroll and social-security forms with the correct correspondent, tag descriptions
+  with counter-examples, title identifiers per type.
+- `tests/abbild_pruefen.py` (CI job `image`): the real panel against a stand-in for Paperless — *Prüfen*, the three
+  identifier actions, the token, and a bulk change in *Nacharbeit*. `tests/test_pruefliste.py`,
+  `tests/test_browser_pruefen.py` (real Chrome: reasons in the row, buttons per kind, the click, phone width, the model
+  warning).
+
+### Geändert
+
+- **Models pinned (T-9 item 9):** defaults `mistral-small-2603` and `mistral-ocr-4-1` instead of `mistral-small-latest`
+  / `mistral-ocr-latest` (checked 2026-11-19 against `/v1/models`: the aliases pointed to exactly these, so nothing
+  changes for an installation on the defaults). A `*-latest` in the settings shows a warning in the panel. An
+  installation with `"model": "mistral-small-latest"` in its own `classify-config.json` keeps it until changed.
+- **Nacharbeit is refreshed regularly (T-9 item 8):** every six hours in the background
+  (`PANEL_NACHARBEIT_INTERVALL_S`, `0` = off), besides opening the page and *Neu abgleichen*.
+
+### Behoben
+
+- **Nacharbeit missed bulk edits (T-9 item 8):** the bulk editor of the document list and scripts change documents
+  without an entry in the Paperless history, so the review of a batch of about 110 documents (a third of the
+  correspondents corrected) did not show up. The run now stores the four basic fields it left (`writeback.ergebnis`);
+  the comparison sets them against the document as it is now, and a difference no history entry explains counts as a
+  correction *ohne Protokoll* (older traces: derived from the run, the type not for a bulk run). Changes a workflow
+  logged still do not count. Such corrections reach the *Sollliste* for `eval.py` like any other.
+
 ## [0.13.1] - 2026-11-19
 
 Panel title bar fix (backlog T-22).

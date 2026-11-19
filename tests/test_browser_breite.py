@@ -34,7 +34,9 @@ if not CHROME:
 # Jede Seite des Panels (Pfad = Eintrag der Navigation) mit ihrem Inhalt.
 SEITEN = {"/": ("Aktivität", seiten.aktivitaet), "/nacharbeit": ("Nacharbeit", seiten.nacharbeit),
           "/ablauf": ("Ablauf & Prompt", seiten.ablauf), "/einstellungen": ("Einstellungen", seiten.einstellungen),
-          "/info": ("Info", seiten.info)}
+          "/info": ("Info", seiten.info), "/pruefen": ("Prüfen", seiten.pruefen)}
+r.check("jede Seite der Navigation wird gemessen", set(SEITEN) == {p for _, p, _ in huelle.NAVIGATION},
+        str({p for _, p, _ in huelle.NAVIGATION} ^ set(SEITEN)))
 
 PROBE = """<pre id="ergebnis"></pre><script>
 window.addEventListener('load', () => setTimeout(() => {

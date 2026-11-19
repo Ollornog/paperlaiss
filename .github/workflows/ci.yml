@@ -90,6 +90,12 @@ jobs:
           docker run --rm -e CLASSIFY_PY=/src/classify.py -v "$PWD/tests:/tests:ro"
           -v "$PWD/classify.py:/src/classify.py:ro" paperlaiss-panel:ci python /tests/abbild_ocr_art.py
 
+      # Prüfen and Nacharbeit (T-9): the real app against a stand-in for Paperless; app.py needs FastAPI.
+      - name: Prüfen und Nacharbeit — Panel-Routen im Abbild prüfen
+        run: >-
+          docker run --rm -v "$PWD/tests:/tests:ro"
+          -v "$PWD/classify.py:/src/classify.py:ro" paperlaiss-panel:ci python /tests/abbild_pruefen.py
+
   vorab:
     # Die Vorab-Schritte (Pre-Consume) laufen im Paperless-Abbild und brauchen dessen gs und qpdf —
     # die stdlib-Suite hat beides nicht. Geprüft wird deshalb im Abbild, in derselben Version wie in

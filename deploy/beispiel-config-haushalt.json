@@ -1,0 +1,19 @@
+{
+  "type_descriptions": {
+    "Lohnsteuerbescheinigung": "Ausdruck der elektronischen Lohnsteuerbescheinigung für ein Kalenderjahr (Bruttoarbeitslohn, einbehaltene Lohnsteuer). Korrespondent ist der Arbeitgeber aus dem Feld „Name und Anschrift des Arbeitgebers“, nicht das Finanzamt und nicht die Person, für die sie ausgestellt ist.",
+    "Lohnabrechnung": "Monatliche Lohn- oder Gehaltsabrechnung (Brutto, Netto, Abzüge, Abrechnungsmonat). Korrespondent ist der Arbeitgeber, auch wenn eine Krankenkasse oder ein Abrechnungsdienst genannt ist.",
+    "Meldebescheinigung zur Sozialversicherung": "Meldung des Arbeitgebers an die Sozialversicherung (Beschäftigungszeit, beitragspflichtiges Entgelt, Personengruppe). Korrespondent ist der Arbeitgeber, nicht die Einzugsstelle (Krankenkasse). NICHT die Meldebestätigung über einen Wohnsitz.",
+    "Meldebestätigung": "Bestätigung des Einwohnermeldeamts über An-, Um- oder Abmeldung eines Wohnsitzes. Korrespondent ist die Stadt oder Gemeinde. NICHT die Meldebescheinigung zur Sozialversicherung."
+  },
+  "tag_descriptions": {
+    "Meldewesen": "Wohnsitz, Melderegister, Ausweise. NICHT die Meldebescheinigung zur Sozialversicherung (die gehört zu Arbeit/Lohn).",
+    "Gesundheit": "Arztbriefe, Befunde, Rezepte, Leistungen einer Krankenkasse. NICHT allein deshalb, weil eine Krankenkasse absendet (Beitragsbescheinigungen, Meldungen zur Sozialversicherung).",
+    "Steuer": "Steuererklärung, Steuerbescheid, Lohnsteuerbescheinigung, Belege für die Steuer. NICHT Meldungen zur Sozialversicherung."
+  },
+  "titel_kennung_je_typ": {
+    "Einkommensteuerbescheid": "das Steuerjahr als JJJJ",
+    "Lohnsteuerbescheinigung": "das Kalenderjahr als JJJJ",
+    "Lohnabrechnung": "der Abrechnungsmonat als MM/JJJJ",
+    "Meldebescheinigung zur Sozialversicherung": "der Meldezeitraum als JJJJ"
+  }
+}
