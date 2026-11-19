@@ -17,7 +17,7 @@ skip_browser = "--no-browser" in sys.argv
 
 suiten = sorted(HERE.glob("test_*.py"))
 if skip_browser:
-    suiten = [s for s in suiten if s.name != "test_browser.py"]
+    suiten = [s for s in suiten if not s.name.startswith("test_browser")]
 
 rot: list[str] = []
 for suite in suiten:

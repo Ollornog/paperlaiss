@@ -96,7 +96,9 @@ aus dem Design-System [C22](https://github.com/Ollornog/C22), vendort unter `pan
   und Ausgabe; bei den KI-Aufrufen Prompt und Antwortformat. Der Prompt von Pass 1 ist dort
   bearbeitbar und wird auch so gezeigt, wie er gesendet wird (`CLASSIFY_PROMPT_VORSCHAU=1`). Ein Lauf
   in der Aktivität erscheint mit denselben Schritten und seinen echten Prompts und Antworten.
-- **Info** (`/info`) — was paperlaiss ist, Links zum Repository und zu den Bausteinen.
+- **Info** (`/info`) — die Anleitung im Panel: was paperlaiss kann, wie man es benutzt (Ablauf, Knöpfe, Felder und
+  Tags, die nur Menschen setzen), die Einstellungen nach Gruppen und die Grenzen. Die Liste der Einstellungen wird aus
+  derselben Quelle erzeugt wie die Seite *Einstellungen*; für Einzelheiten verweist sie auf die Abschnitte dieser README.
 - **Einstellungen** (`/einstellungen`) — jeder Wert der wirksamen Konfiguration (Datei plus
   Vorgaben; gespeichert werden nur geänderte Schlüssel).
 - **Manuell klassifizieren** — eine Doc-ID, neu klassifiziert oder per OCR erzwungen.
@@ -372,11 +374,25 @@ späteren Regeln, sobald eine frühere sie im selben Lauf übernommen hat.
 | `arbeitgeber_ohne_felder` | Vertragsnummer, Rechnungsnummer, Aktenzeichen | Felder, die die KI bei den Typen aus `arbeitgeber_typen` nie füllt |
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["Regex"]}]`: bei Tag A fällt der KI-Tag B weg, außer ein Muster steht im Text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optionale Felder (per Name) |
+| `manual_fields` | `[]` | Namen von Custom Fields, die nur von Hand gepflegt werden (z. B. Bezahlt-Am): die KI sieht und schreibt sie nie; ein Teil aus dem Aufteilen erbt ihren Wert nicht |
 | `reserved_tags` | `[]` | Tag-Namen, die die KI nie vergibt (Status / Richtung / Marker) |
 | `reserved_fields` | `[]` | Namen von Custom Fields, die nur ein Mensch setzt (z. B. ein Auswahlfeld für den Vorgang): die KI sieht sie nicht, paperlaiss setzt, ändert und leert sie nie, ein Teil aus dem Aufteilen behält sie |
 | `system_prompt` | – | leer = eingebauter Prompt (`{TYPES}` / `{TAGBLOCK}` werden ersetzt; das ältere `{TAGS}` bekommt die reine Tag-Liste; bei aktivem Tagging ohne beide Platzhalter wird der Tag-Block angehängt) |
 | `tag_descriptions` | `{}` | Beschreibungen je Tag (nur bei aktivem Tagging) |
 | `api_key_text` / `api_key_ocr` | – | leer = `MISTRAL_KEY` aus der Umgebung |
+
+### Felder und Tags, die nur Menschen setzen
+
+Drei Schlüssel halten den Klassifizierer von dem fern, was ein Mensch pflegt. Ein Name je Zeile (*Einstellungen*,
+Gruppen *Felder* und *Tags*, oder die JSON-Datei); ohne Eintrag ändert sich nichts.
+
+| Schlüssel | Wirkung |
+|---|---|
+| `manual_fields` | Die KI sieht das Feld nicht und schreibt es nicht. Ein Teil aus dem Aufteilen erbt seinen Wert nicht. |
+| `reserved_fields` | Strenger: Name und Auswahlwerte erreichen den Prompt nie, und paperlaiss setzt, ändert und leert das Feld auf keinem Weg — ein Teil aus dem Aufteilen behält es ebenfalls. Ist es eines der beiden Garantiefelder, ist die Garantie-Funktion aus. Groß- und Kleinschreibung zählt nicht. |
+| `reserved_tags` | Die KI vergibt diese Tags nie, und sie bleiben beim Schreiben erhalten (Status, Richtung, Marker). |
+
+Die **Info**-Seite des Panels zeigt dieselbe Übersicht.
 
 ### OCR-Fallback (`ocr_regeln`)
 
