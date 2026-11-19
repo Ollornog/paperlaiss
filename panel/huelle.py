@@ -111,6 +111,9 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
     `.btn` ghost/sm), keine Seitenleiste — vier Seiten brauchen keine. Titelleiste und Inhalt
     stehen in derselben Spur (`max-w-5xl`), damit sie auf breiten Schirmen bündig bleiben. Die aktive Seite ist
     hinterlegt (`bg-accent`) und semantisch markiert (`aria-current`).
+
+    Schmal umbricht die Leiste (`flex-wrap`): erst rutscht die Navigation unter das Logo, dann bricht sie selbst
+    auf Zeilen um. Ohne das lief sie bei 500 px seitlich über (T-22); auf breiten Schirmen bleibt alles einzeilig.
     """
     def punkt(name: str, pfad: str, sym: str) -> str:
         if pfad == aktiv:
@@ -123,11 +126,11 @@ def seite(titel: str, aktiv: str, inhalt: str, abmelden: bool = False) -> str:
             f'{symbol("log-out")}Abmelden</a>' if abmelden else "")
     koerper = f"""<div class="flex h-screen w-full flex-col bg-background text-foreground">
   <header class="shrink-0 border-b bg-card">
-    <div class="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-2">
+    <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-3 px-4 py-2">
       <a href="{u("/")}" class="flex items-center gap-2 text-base font-bold">
         <img src="{u("/logo.png")}" alt="" width="28" height="28"> paperlaiss
       </a>
-      <nav class="ms-2 flex items-center gap-1" aria-label="Hauptbereiche">{punkte}</nav>
+      <nav class="ms-2 flex flex-wrap items-center gap-1" aria-label="Hauptbereiche">{punkte}</nav>
       <div class="ms-auto flex items-center gap-3">{raus}</div>
     </div>
   </header>

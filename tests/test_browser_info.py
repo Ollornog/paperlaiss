@@ -8,7 +8,8 @@ Stylesheet greift, ob die Tabellen Zeilen haben oder ob eine Sprungmarke ins Lee
 
 Geprüft: das Stylesheet greift (Abschnitte sind abgesetzte Karten, die aktive Navigation ist hinterlegt); jede
 Sprungmarke trifft ein Element; die Konfigurationstabellen haben so viele Zeilen wie die Einstellungen Schlüssel;
-kein Element lädt etwas von einer fremden Herkunft; der Inhalt bricht auf Handybreite nicht seitlich aus (Tabellen rollen in ihrem Bereich).
+kein Element lädt etwas von einer fremden Herkunft; die GANZE Seite (Titelleiste, Navigation und Inhalt) bricht auf Handybreite nicht
+seitlich aus (Tabellen rollen in ihrem Bereich). Die Breite aller Panel-Seiten misst `tests/test_browser_breite.py`.
 
 Fehlt Chrome, ist der Test ROT (nicht übersprungen). `run_all.py --no-browser` lässt ihn in der kurzen Schleife weg.
 """
@@ -50,15 +51,17 @@ window.addEventListener('load', () => setTimeout(() => {
   e.fremd = [...document.querySelectorAll('[src],link[href]')].map(x => x.getAttribute('src') || x.getAttribute('href'))
     .filter(u => /^(https?:)?\\/\\//.test(u));
   e.ueberschriften = document.querySelectorAll('h1').length;
-  // Der Inhalt (`main`) darf nicht breiter sein als sein Fenster: eine Tabelle muss in ihrem Rollbereich bleiben.
-  // Die Titelleiste mit der Navigation gehört zum Gerüst aller Seiten und ist nicht Gegenstand dieses Tests.
+  // Die ganze Seite darf nicht breiter sein als ihr Fenster: Titelleiste mit Navigation UND Inhalt; eine Tabelle muss in
+  // ihrem Rollbereich bleiben. (Bis 0.13.0 maß der Test nur `main`; die Titelleiste lief bei 500 px über, T-22.)
   // Jede Tabelle steht in einem Rollbereich: ein schmaler Schirm schneidet nichts ab und weitet die Seite nicht.
   e.tabellen = document.querySelectorAll('main table').length;
   e.tabellen_ohne_rollbereich = [...document.querySelectorAll('main table')]
     .filter(t => !['auto', 'scroll'].includes(getComputedStyle(t.parentElement).overflowX)).length;
+  const d = document.documentElement;
+  e.breite_ok = d.scrollWidth <= window.innerWidth;
+  e.breite = [d.scrollWidth, window.innerWidth];
   const m = document.querySelector('main');
-  e.breite_ok = m.scrollWidth <= m.clientWidth + 1;
-  e.breite = [m.scrollWidth, m.clientWidth];
+  e.inhalt_ok = m.scrollWidth <= m.clientWidth + 1;
   document.getElementById('ergebnis').textContent = JSON.stringify(e);
 }, 300));
 </script>"""
@@ -96,7 +99,8 @@ r.check("die Konfigurationstabellen haben eine Zeile je Einstellung, keine ohne 
 r.check("nichts wird von einer fremden Herkunft geladen", e.get("fremd") == [], str(e.get("fremd")))
 r.check("genau eine Hauptüberschrift", e.get("ueberschriften") == 1)
 h = lauf(390)
-r.check("auf Handybreite bricht der Inhalt nicht seitlich aus", h.get("breite_ok") is True, str(h.get("breite")))
+r.check("auf Handybreite bricht die ganze Seite nicht seitlich aus (Titelleiste, Navigation, Inhalt)",
+        h.get("breite_ok") is True and h.get("inhalt_ok") is True, str(h.get("breite")))
 r.check("jede Tabelle steht in einem Rollbereich",
         e.get("tabellen", 0) >= 5 and e.get("tabellen_ohne_rollbereich") == 0, f"{e.get('tabellen')} / ohne: {e.get('tabellen_ohne_rollbereich')}")
 

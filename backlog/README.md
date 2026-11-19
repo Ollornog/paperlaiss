@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 16/21 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 17/22 erledigt
 
 ## Aufgaben
 
@@ -32,6 +32,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-19](T-19-ocr-nur-fuer-scans-und-freigabe-an-den-hub.md)** OCR nur für Scans und Fotos, Freigabe an den Hub ohne Tag · M-1
 * ☑ **[T-20](T-20-reserved-fields.md)** Reserved custom fields the classifier never sets, changes or clears · M-1
 * ☑ **[T-21](T-21-info-seite.md)** Info page in the panel: what paperlaiss does and how to use it · M-1
+* ☑ **[T-22](T-22-panel-title-bar-wraps-on-narrow-screens.md)** Panel title bar and navigation wrap on narrow screens · M-1
 
 ## Entscheidungen (ADR)
 

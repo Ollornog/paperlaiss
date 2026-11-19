@@ -6,6 +6,15 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben
+
+- **Panel title bar overflowed sideways on narrow screens (backlog T-22):** at 500 px the title bar with the navigation was
+  about 855 px wide on every panel page, so the page scrolled horizontally. The bar and the navigation now wrap
+  (`flex-wrap`, canonical C22 class; the vendored stylesheet is untouched); desktop layout is unchanged. New
+  `tests/test_browser_breite.py` measures every panel page in real Chrome at 500, 390 and 360 px
+  (`scrollWidth <= innerWidth`, every navigation item inside the window) and checks the bar stays one line at 1280 px;
+  `tests/test_browser_info.py` now measures the whole page, not only the content area.
+
 ## [0.13.0] - 2026-11-19
 
 Info page in the panel, reserved custom fields (backlog T-20, T-21).
