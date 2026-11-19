@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-19
+
 Lessons from a large review, the rest (backlog T-9 items 1, 7, 8, 9); upside-down pages and new versions (T-8).
 
 ### Hinzugefügt
