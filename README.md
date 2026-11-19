@@ -404,12 +404,12 @@ A second entry, **Export**, sits next to it in the **Actions** menu. Its dialog 
   links; unset: the address of the Paperless page that called, same origin only). Times follow
   `PAPERLESS_TIME_ZONE`, otherwise `TZ`. The panel must run as a single process (jobs live in memory).
 
-### Pre-consume steps: blank pages, mails as documents (optional)
+### Pre-consume steps: blank pages, upside-down pages, mails as documents (optional)
 
 `deploy/vorab/vorab.py` is the entry for `PAPERLESS_PRE_CONSUME_SCRIPT` (Paperless takes only one
 script). It runs the steps lying next to it, one after the other; each decides itself whether the
 file concerns it, replaces the working copy only at the end and atomically, and everything always
-exits 0 — no step ever blocks an import. Stdlib only, plus `gs` and `qpdf` from the Paperless image.
+exits 0 — no step ever blocks an import. Stdlib only, plus `gs`, `qpdf` and `tesseract` from the Paperless image.
 
 **Blank pages** (`leerseiten.py`, switch `leerseiten_entfernen`, on by default): every page of a PDF
 is rendered in greyscale; a page goes only if it is *completely* white — nothing on it but dust
@@ -421,6 +421,22 @@ batch of 106 scans: 40 of 41 blank backs go, none of 257 pages with content).
 Never touched: single-page PDFs, encrypted or signed ones, PDFs with embedded files (e-invoices),
 and a document whose pages would all go. The result is deterministic, so Paperless still detects a
 duplicate by its checksum.
+
+**Upside-down pages** (`ausrichtung.py`, switch `kopfueber_drehen`, on by default): Paperless turns pages with
+Tesseract's orientation detection, which is reliable for 90° but not for 180° (in a stack scan of 117 documents 25 lay
+upside down and stayed so). Here every scanned page — rendered with images only, so digital pages and a scanner's
+invisible OCR layer are left out — is read by Tesseract as it is and turned by 180°; it is turned when the turned
+reading has clearly more well-recognised words (at least 12 and three times as many). A page that reads well is not
+read twice; a page lying at 90° is left to Paperless. Only the page's `/Rotate` entry changes, the scanned image stays
+byte for byte, so it can be undone with Paperless' own rotate. Languages from `PAPERLESS_OCR_LANGUAGE`. Never touched:
+encrypted or signed PDFs and PDFs with embedded files. About one second per page; at most 60 pages and four minutes.
+
+**Turned by hand in Paperless:** *Rotate* and the PDF editor with *new version* (Paperless 3.x) keep the original as
+version 0 and consume the turned file as a new version. Its post-consume run carries the id of the version, which the
+API does not show; `classify.py` finds the document by the file name Paperless gives the version (`<id>_rotated.pdf`,
+`<id>_edited.pdf`), confirms it in the document's `versions`, and classifies it again like the AI button (type and
+title may be replaced). A version uploaded under another file name is skipped with a log line — use the AI button.
+Straightening per document, a hand-set angle and four-corner cropping are not part of paperlaiss (backlog T-24).
 
 **Mails as documents with header and large images** (`mailbilder.py`) for mail rules that consume the **whole mail** (`.eml`, PDF layout "HTML only"). Before Paperless
 renders the mail it adds a small header (from, to, date, subject) and one full-size page per image
@@ -441,6 +457,7 @@ an earlier rule consumed it in the same run.
 | `enabled` | `true` | classifier on/off |
 | `titel_setzen` | `true` | title "Correspondent – document type identifier"; overwritten like the document type (import, AI button, panel — never in a bulk run) |
 | `leerseiten_entfernen` | `true` | remove completely white pages at import (pre-consume step `leerseiten.py`) |
+| `kopfueber_drehen` | `true` | turn scanned pages that lie upside down at import (pre-consume step `ausrichtung.py`) |
 | `model` / `ocr_model` | `mistral-small-2603` / `mistral-ocr-4-1` | Mistral models, pinned to a version: an alias such as `mistral-small-latest` changes the model without notice, and the panel warns about it — raise the pin on purpose and measure with `eval.py` first |
 | `ocr_enabled` / `ocr_always` / `ocr_min_len` | `true` / `false` / `300` | OCR rescue behaviour; `ocr_always` is the old switch for `ocr_modus` `immer` |
 | `ocr_modus` | empty | `rescue` (OCR only for weak text), `scans` (also every scan and photo, digital PDFs keep their text) or `immer` (every document); empty = `immer` with `ocr_always`, else `rescue` — see below |

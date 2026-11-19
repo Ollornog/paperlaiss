@@ -6,9 +6,24 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
-Lessons from a large review, the rest (backlog T-9 items 1, 7, 8, 9).
+Lessons from a large review, the rest (backlog T-9 items 1, 7, 8, 9); upside-down pages and new versions (T-8).
 
 ### Hinzugefügt
+
+- **Upside-down pages turned at import (T-8):** new pre-consume step `deploy/vorab/ausrichtung.py` (switch
+  `kopfueber_drehen`, on by default; run by `vorab.py` after the blank pages). Every scanned page is read by Tesseract
+  as it is and turned by 180° and turned when the turned reading has clearly more well-recognised words; a page that
+  reads well is read once, a page lying at 90° is left to Paperless. Only `/Rotate` changes — the scanned image stays
+  byte for byte, the result is deterministic. Paperless' own orientation detection had left 25 of 117 documents of a
+  stack scan upside down. Measured in the Paperless 3.4.2 image: about one second per page. The release now has eight
+  assets; an installation that installs the scripts one by one must add `ausrichtung.py`.
+- **A new version is classified again (T-8):** rotating a document or saving it from the PDF editor as a new version
+  (Paperless 3.x) runs the post-consume script under the id of the version, which the API does not show. `classify.py`
+  now finds the document by the version's file name (`<id>_rotated.pdf`, `<id>_edited.pdf`), confirms it in its
+  `versions`, and classifies it again like the AI button (trace `fassung`, trigger "neue Fassung"). Until now every
+  rotation ended as an error in the log and the document kept the classification of its upside-down text.
+- Decision record ADR-4 (what Paperless 3.4 can do itself, what paperlaiss adds); straightening per document and
+  four-corner cropping split off as T-24.
 
 - **Panel page *Prüfen* (`/pruefen`, T-9 item 7):** the documents that carry `unsicher_tag` or `kaputt_tag` now, each
   with the reasons of its last run from the trace (`pruefen`) and links to the document and the run — nobody has to
@@ -32,6 +47,8 @@ Lessons from a large review, the rest (backlog T-9 items 1, 7, 8, 9).
   warning).
 
 ### Geändert
+
+- CI job `vorab` runs in the Paperless image 3.4.2 (was 3.2.1), the version the installations use.
 
 - **Models pinned (T-9 item 9):** defaults `mistral-small-2603` and `mistral-ocr-4-1` instead of `mistral-small-latest`
   / `mistral-ocr-latest` (checked 2026-11-19 against `/v1/models`: the aliases pointed to exactly these, so nothing

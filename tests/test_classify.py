@@ -91,19 +91,21 @@ import contextlib as _ctx, io as _io
 def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder=(), feldwerte=(), typ=None,
           dry=True, source="", force=False, korr=None, titel="Beleg", typen=None, besitzer=None, cfg=None,
           datei=None, hinzu=None, patch_ergebnis=None, tags=(), alle_tags=(), mehr_routen=None, ocr_text=None,
-          seiten=None):
+          seiten=None, aufruf=None, versionen=None):
     aufrufe = {"ocr": 0, "chat": []}
     # mehr_routen first: "/documents/5/history/" must not be answered by "/documents/5/".
     routen = {**(mehr_routen or {}), "/documents/5/": {"id": 5, "content": text, "title": titel, "tags": list(tags),
                                 "custom_fields": list(feldwerte), "created": "2026-01-01", "document_type": typ,
                                 "correspondent": korr, "owner": 3 if besitzer else None,
-                                "original_file_name": datei, "added": hinzu, "page_count": seiten},
+                                "original_file_name": datei, "added": hinzu, "page_count": seiten,
+                                **({"versions": versionen} if versionen else {})},
               "/users/3/": besitzer or {},
               "/tags/": {"results": list(alle_tags)}, "/document_types/": {"results": list(typen or [{"id": 1, "name": "Rechnung"}, {"id": 2, "name": "Mahnung"}])},
               "/correspondents/": {"results": list(korrespondenten)}, "/custom_fields/": {"results": list(felder)}}
 
     def get(pfad, raw=False):
-        return next(v for k, v in routen.items() if pfad.startswith(k))
+        v = next(v for k, v in routen.items() if pfad.startswith(k))
+        return v() if callable(v) else v
 
     def ocr(did):
         aufrufe["ocr"] += 1
@@ -134,14 +136,20 @@ def _lauf(chat_antworten, force_ocr=False, text=_gut, korrespondenten=(), felder
     classify.TOK, classify.DRY, classify.FORCE_OCR = "x", dry, force_ocr
     classify.send, classify.patch_doc, classify.SCRIPT_DIR = send, patch_doc, tmp
     classify.SOURCE, classify.FORCE = source, force
-    os.environ["CLASSIFY_DOC"] = "5"
+    env = aufruf if aufruf is not None else {"CLASSIFY_DOC": "5"}
+    os.environ.update(env)
     try:
         with _ctx.redirect_stdout(_io.StringIO()):
             classify.main()
+    except Exception as e:
+        if aufruf is None:
+            raise
+        aufrufe["fehler"] = e
     finally:
         for n, v in alt.items():
             setattr(classify, n, v)
-        os.environ.pop("CLASSIFY_DOC", None)
+        for k in env:
+            os.environ.pop(k, None)
     aufrufe["get"] = get
     return aufrufe
 
@@ -3160,5 +3168,48 @@ r.check("T-9 title rule: in the prompt right after the title instruction, and on
         and not any("Titel-Kennung" in str(n) for _, n in _tt0))
 r.check("T-9 example config: valid JSON, only keys the classifier knows",
         set(_json9.load(open(ROOT / "deploy/beispiel-config-haushalt.json", encoding="utf-8"))) <= set(classify._BEKANNT))
+
+
+# ---- T-8: a new version (rotated or edited in Paperless) gets the document it belongs to classified again
+import urllib.error as _ue  # noqa: E402
+
+
+def _404():
+    raise _ue.HTTPError("http://x/api/documents/77/", 404, "Not Found", None, None)
+
+
+_VERS = {"versions": [{"id": 77, "is_root": False}, {"id": 5, "is_root": True}]}
+r.check("T-8 version root: name and versions list agree → the root",
+        classify.fassung_wurzel("77", "5_rotated.pdf", lambda p: _VERS if p == "/documents/5/" else {}) == 5
+        and classify.fassung_wurzel(77, "5_edited.pdf", lambda p: _VERS) == 5)
+r.check("T-8 version root: a name alone is not trusted (version not listed, root itself, other name, API error)",
+        classify.fassung_wurzel("78", "5_rotated.pdf", lambda p: _VERS) is None
+        and classify.fassung_wurzel("5", "5_rotated.pdf", lambda p: _VERS) is None
+        and classify.fassung_wurzel("77", "scan.pdf", lambda p: _VERS) is None
+        and classify.fassung_wurzel("77", "5_edit_1.pdf", lambda p: _VERS) is None
+        and classify.fassung_wurzel("77", "5_rotated.pdf", lambda p: _404()) is None)
+# The document was classified before (marker tag): an automatic run would skip it — a new version must not.
+_f = _lauf([_ok], dry=False, typ=2, mehr_routen={"/documents/77/": _404}, versionen=_VERS["versions"],
+           tags=[9], alle_tags=[{"id": 9, "name": "ai-processed"}], cfg={"marker_tag": "ai-processed"},
+           aufruf={"DOCUMENT_ID": "77", "DOCUMENT_ORIGINAL_FILENAME": "5_rotated.pdf"})
+_ft = dict(classify.TRACE)
+classify.LAUF_DOC[0] = None
+r.check("T-8 version run: post-consume of version 77 classifies document 5 again, as a forced run (despite the marker)",
+        "fehler" not in _f and len(_f["chat"]) == 1 and _f.get("patch") and _ft.get("fassung") == {"id": 77, "datei": "5_rotated.pdf"}
+        and _ft.get("trigger", "").startswith("neue Fassung"), str(_f.get("fehler")) + str(_ft.get("trigger")))
+r.check("T-8 version run: the old type of the upside-down text may be replaced (like the AI button)",
+        [p.get("document_type") for p in _f["patch"]][:1] == [1], str(_f.get("patch")))
+_f2 = _lauf([_ok], dry=False, mehr_routen={"/documents/77/": _404}, versionen=_VERS["versions"],
+            aufruf={"DOCUMENT_ID": "77", "DOCUMENT_ORIGINAL_FILENAME": "neue-fassung.pdf"})
+r.check("T-8 version run: root unknown → skipped with a log line, no error, nothing written",
+        "fehler" not in _f2 and not _f2["chat"] and not _f2.get("patch"))
+_f3 = _lauf([_ok], dry=False, mehr_routen={"/documents/6/": _404}, aufruf={"CLASSIFY_DOC": "6", "DOCUMENT_ORIGINAL_FILENAME": "5_rotated.pdf"})
+r.check("T-8 version run: a 404 for a document asked for by id (panel, button) stays an error",
+        isinstance(_f3.get("fehler"), _ue.HTTPError) and not _f3["chat"], repr(_f3.get("fehler")))
+r.check("T-8 type: a new version may replace the type like the AI button",
+        classify.typ_ueberschreibbar("fassung", True) is True)
+_src8 = (ROOT / "classify.py").read_text(encoding="utf-8")
+r.check("T-8 run mark: the running mark and an error go to the document actually classified",
+        "unmark_running(LAUF_DOC[0] or" in _src8 and "eid = LAUF_DOC[0] or" in _src8)
 
 sys.exit(r.done())

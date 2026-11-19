@@ -109,10 +109,16 @@ jobs:
         run: >-
           docker run --rm --entrypoint python3
           -v "$PWD/tests:/tests:ro" -v "$PWD/deploy:/deploy:ro"
-          ghcr.io/paperless-ngx/paperless-ngx:3.2.1 /tests/abbild_leerseiten.py
+          ghcr.io/paperless-ngx/paperless-ngx:3.4.2 /tests/abbild_leerseiten.py
+      # Upside-down pages (T-8): gs, qpdf and Tesseract from the Paperless image, scans built by the test.
+      - name: Kopfüber — Seiten lesen und drehen im Paperless-Abbild prüfen
+        run: >-
+          docker run --rm --entrypoint python3
+          -v "$PWD/tests:/tests:ro" -v "$PWD/deploy:/deploy:ro"
+          ghcr.io/paperless-ngx/paperless-ngx:3.4.2 /tests/abbild_ausrichtung.py
       # OCR-Modus „scans“ (T-19): der Post-Consume-Lauf misst die Seiten mit pikepdf aus dem Paperless-Abbild.
       - name: OCR-Modus — Scan oder digital mit pikepdf im Paperless-Abbild prüfen
         run: >-
           docker run --rm --entrypoint python3 -e CLASSIFY_PY=/src/classify.py
           -v "$PWD/tests:/tests:ro" -v "$PWD/classify.py:/src/classify.py:ro"
-          ghcr.io/paperless-ngx/paperless-ngx:3.2.1 /tests/abbild_ocr_art.py
+          ghcr.io/paperless-ngx/paperless-ngx:3.4.2 /tests/abbild_ocr_art.py

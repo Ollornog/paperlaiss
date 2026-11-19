@@ -221,7 +221,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir dist
-          cp classify.py deploy/vorab/vorab.py deploy/vorab/leerseiten.py deploy/vorab/mailbilder.py \
+          cp classify.py deploy/vorab/vorab.py deploy/vorab/leerseiten.py deploy/vorab/mailbilder.py deploy/vorab/ausrichtung.py \
              deploy/paperless-knoepfe/10-paperlaiss-knoepfe.sh deploy/paperless-knoepfe/paperlaiss-knoepfe.js \
              deploy/eingang/eingang.py dist/
           # Namen ohne ./ — so stehen sie auch als Subjekt in der Beglaubigung.
@@ -246,7 +246,7 @@ jobs:
       - name: Prüfsummen gegen die heruntergeladenen Dateien
         run: |
           cd dist
-          [ "$(grep -c . SHA256SUMS)" = "7" ] || { echo "SHA256SUMS nennt nicht genau sieben Dateien"; exit 1; }
+          [ "$(grep -c . SHA256SUMS)" = "8" ] || { echo "SHA256SUMS nennt nicht genau acht Dateien"; exit 1; }
           sha256sum -c SHA256SUMS
 
   # ⚠️ NUR beim Tag. Kein Checkout, kein pip: lädt die fertigen Anhänge, beglaubigt sie, legt das
