@@ -367,6 +367,10 @@ def auth_einstellungen(env):
     return out
 
 
+# Felder der Config, die Geheimnisse tragen koennen: werden nie ausgeliefert und nie ueber die API geschrieben
+# und stehen nie auf der Info-Seite. Sie gehoeren in die Umgebung (MISTRAL_KEY), nicht in eine Datei, die eine
+# offene Weboberflaeche lesen kann.
+GEHEIM_FELDER = ("api_key_text", "api_key_ocr")
 KENNZAHL_ARTEN = ("klassifiziert", "ocr", "repariert", "fehler", "pruefen", "uebersprungen")
 _DOC = None
 

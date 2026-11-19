@@ -66,10 +66,7 @@ ROUTE_HUB = os.environ.get("PANEL_ROUTE_HUB", "").strip()
 ROUTE_UPLOADERS = routing.parse_users(os.environ.get("PANEL_ROUTE_UPLOADERS", ""))
 ROUTE_SHARE_HUB = routing.parse_users(os.environ.get("PANEL_ROUTE_SHARE_WITH_HUB", ""))
 
-# Felder der Config, die Geheimnisse tragen koennen: werden nie ausgeliefert und nie
-# ueber die API geschrieben. Sie gehoeren in die Umgebung (MISTRAL_KEY), nicht in eine
-# Datei, die eine offene Weboberflaeche lesen kann.
-GEHEIM_FELDER = ("api_key_text", "api_key_ocr")
+from kern import GEHEIM_FELDER  # Geheimnis-Felder der Config: nie ausgeliefert, nie geschrieben (kern.py)
 
 app = FastAPI(title="paperlaiss")
 # Aussehen: vendortes C22 (scripts/vendor-c22.sh). Ohne Anmeldung, wie das Logo — die

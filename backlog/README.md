@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 15/20 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 16/21 erledigt
 
 ## Aufgaben
 
@@ -31,6 +31,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-18](T-18-neue-stammdaten-ohne-besitzer.md)** Neue Stammdaten ohne Besitzer, auch unter einem Dienstkonto · M-1
 * ☑ **[T-19](T-19-ocr-nur-fuer-scans-und-freigabe-an-den-hub.md)** OCR nur für Scans und Fotos, Freigabe an den Hub ohne Tag · M-1
 * ☑ **[T-20](T-20-reserved-fields.md)** Reserved custom fields the classifier never sets, changes or clears · M-1
+* ☑ **[T-21](T-21-info-seite.md)** Info page in the panel: what paperlaiss does and how to use it · M-1
 
 ## Entscheidungen (ADR)
 

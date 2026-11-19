@@ -6,8 +6,21 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-19
+
+Info page in the panel, reserved custom fields (backlog T-20, T-21).
+
 ### Hinzugefügt
 
+- **Info page rewritten (`/info`, backlog T-21):** the user guide inside the panel — what paperlaiss does, how to use
+  it (flow, panel pages, buttons in Paperless, manual runs, fields and tags only people set, routing and rights), the
+  settings by group and the limits. The settings list is generated from the same source as the *Settings* page
+  (`EINSTELLUNGEN`), so a new key shows up by itself; secret keys never do. For details the page links to sections of
+  the README, and a test checks that every anchor exists in `README.md`. New README section *Fields and tags only people
+  set* (German mirror included) and the `manual_fields` row in the configuration table. Tests: `tests/test_panel_info.py`
+  (structure, one source, anchors, wiring, no third-party resources) and `tests/test_browser_info.py` (real Chrome with the
+  vendored C22 stylesheet: cards, navigation, jump marks, table rows, phone width). `GEHEIM_FELDER` moved to
+  `panel/kern.py` as the one place; `run_all.py --no-browser` skips every `test_browser*.py`.
 - Release automation (kit 0.45.2): a merged Dependabot PR that changes `panel/Dockerfile` or the panel lock now cuts a
   patch release by itself: the auto-merge dispatches `release.yml` (`automatik=vorbereiten`), `scripts/_release_automatik.py`
   opens the PR `release/v<version>` (`pyproject.toml` and this changelog), the tag follows its merge, and the tag run

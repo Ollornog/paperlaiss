@@ -9,7 +9,8 @@ Klassen im JavaScript stehen immer in doppelten Anführungszeichen (class=, dann
 """
 from __future__ import annotations
 
-from huelle import abschnitt, dialog, kopf, symbol
+from huelle import abschnitt, dialog, e, kopf, symbol, u
+from kern import GEHEIM_FELDER
 
 # Die fünf Kennzahlen: Art (wie kern.log_art), Titel, Symbol, Badge-Variante.
 ARTEN = [
@@ -664,42 +665,202 @@ laden();
 
 
 # ---------------------------------------------------------------- Info
+# Die Info-Seite ist die Anleitung im Panel. Sie hat KEINE zweite Pflege der Einstellungen: Gruppen, Schlüssel,
+# Titel und Kurzbeschreibung kommen aus EINSTELLUNGEN (dieselbe Quelle wie die Seite „Einstellungen"). Für die
+# Einzelheiten verweist sie auf Abschnitte der README; `tests/test_panel_info.py` prüft, dass jeder dieser Anker
+# in der README (und ihrer deutschen Fassung) wirklich als Überschrift existiert.
+README_URL = "https://github.com/Ollornog/paperlaiss/blob/main/README.md"
+INFO_ANKER = {
+    "panel": "panel",
+    "knoepfe": "buttons-in-paperless-optional",
+    "routing": "routing-by-person-tags",
+    "ingest": "ingest-api",
+    "stammdaten": "correspondent-metadata",
+    "konfiguration": "configuration-classify-configjson",
+    "ocr": "ocr-fallback-ocr_regeln",
+    "von-hand": "manual-runs-and-testing",
+    "menschenfelder": "fields-and-tags-only-people-set",
+    "vorab": "pre-consume-steps-blank-pages-mails-as-documents-optional",
+    "einsatz": "deployment-docker",
+}
+INFO_ABSCHNITTE = [("was", "Was es tut"), ("benutzung", "So wird es benutzt"),
+                   ("konfiguration", "Konfiguration"), ("grenzen", "Grenzen"), ("bausteine", "Bausteine und Lizenzen")]
+
+
+def _liste(punkte: list[str]) -> str:
+    return '<ul class="grid gap-2 text-sm">' + "".join(f"<li>{p}</li>" for p in punkte) + "</ul>"
+
+
+def _teil(titel: str, koerper: str) -> str:
+    return f'<div class="grid min-w-0 gap-2"><h3 class="font-medium">{titel}</h3>{koerper}</div>'
+
+
+def _kurz(text: str) -> str:
+    """Erster Satz einer Beschreibung (bis zum ersten „. ")."""
+    ende = text.find(". ")
+    return text if ende < 0 else text[:ende + 1]
+
+
+def info_konfiguration() -> str:
+    """Die Einstellungen nach Gruppen, aus EINSTELLUNGEN. API-Schlüssel stehen nie darin."""
+    geheim = set(GEHEIM_FELDER)
+    je: dict[str, list[tuple[str, str, str]]] = {}
+    for schluessel, (gruppe, titel, text) in EINSTELLUNGEN.items():
+        if schluessel.split(".")[0] in geheim:
+            continue
+        je.setdefault(gruppe, []).append((schluessel, titel, text))
+    karten = []
+    for gruppe in GRUPPEN:
+        if gruppe not in je:
+            continue
+        zeilen = "".join(
+            f'<tr><td class="whitespace-nowrap"><code>{e(k)}</code></td><td class="font-medium">{e(t)}</td>'
+            f'<td class="text-muted-foreground">{e(_kurz(x))}</td></tr>' for k, t, x in je[gruppe])
+        karten.append(_teil(e(gruppe), '<div class="overflow-x-auto"><table class="table"><thead><tr>'
+                            '<th>Schlüssel</th><th>Name</th><th>Wirkung</th></tr></thead>'
+                            f'<tbody>{zeilen}</tbody></table></div>'))
+    return "".join(karten)
+
+
 def info() -> str:
     def link(href: str, text: str) -> str:
         return (f'<a class="btn" data-variant="outline" data-size="sm" href="{href}" rel="noopener">'
                 f'{symbol("external-link")}{text}</a>')
-    return (kopf("Info", "Was paperlaiss ist und wo es herkommt.",
-                 link("https://github.com/Ollornog/paperlaiss", "paperlaiss auf GitHub"))
-            + '<div>'
-            + abschnitt("Was es macht", (
-                '<div class="grid gap-3 text-sm">'
-                '<p>paperlaiss ist eine Middleware für Paperless-ngx: Es liest neue Dokumente, lässt eine KI '
-                '(Mistral) Dokumenttyp, Korrespondent, Datum und Felder bestimmen und schreibt das Ergebnis '
-                'zurück — geerdet gegen den vorhandenen Bestand, damit keine erfundenen Korrespondenten oder '
-                'Typen entstehen. Schwachen Text liest es vorher per Mistral-OCR neu.</p>'
-                '<p>Stammdaten (Tags, Korrespondenten, Typen) bleiben in Paperless. Dieses Panel ist für den '
-                'Fall da, dass etwas hängt oder eingestellt werden muss.</p></div>'))
-            + abschnitt("So wird es benutzt", (
-                '<ul class="grid gap-2 text-sm">'
-                '<li><b>Automatisch</b> — nach jedem Import ruft Paperless paperlaiss auf (Post-Consume).</li>'
-                '<li><b>KI-Knopf in Paperless</b> — in der Dokumentansicht und im Menü „Actions“ der '
-                'Mehrfachauswahl: optional ein Hinweis, dann liest paperlaiss das Dokument per OCR neu und '
-                'klassifiziert es neu.</li>'
-                '<li><b>Aktivität</b> — was lief; eine Zeile zeigt den Lauf mit Prompt und Antwort der KI.</li>'
-                '<li><b>Nacharbeit</b> — was Menschen nach der KI geändert haben: Quote je Feld, '
-                'Korrespondent und Typ, dazu jeder einzelne Fall.</li>'
-                '<li><b>Ablauf &amp; Prompt</b> — jeder Schritt mit Eingabe und Ausgabe; der Prompt ist dort bearbeitbar.</li>'
-                '<li><b>Einstellungen</b> — alle Werte mit Erklärung.</li></ul>'))
-            + abschnitt("Bausteine und Lizenzen", (
-                '<ul class="grid gap-2 text-sm">'
-                '<li>paperlaiss — MIT-Lizenz.</li>'
-                '<li>Aussehen: <a class="underline" href="https://github.com/Ollornog/C22" rel="noopener">C22</a> '
-                '(Basecoat, Tailwind; Schrift Inter unter SIL Open Font License).</li>'
-                '<li>Anmeldung: <a class="underline" href="https://github.com/Ollornog/TinySesam" rel="noopener">TinySesam</a>.</li>'
-                '<li>KI und Texterkennung: Mistral.</li>'
-                '<li>Icon: <a class="underline" href="https://www.flaticon.com/authors/magnific" rel="noopener">'
-                'Origami by Magnific – flaticon.com</a>.</li></ul>'))
-            + '</div>')
+
+    def doku(schluessel: str, text: str = "Mehr in der README") -> str:
+        return (f'<a class="underline" href="{README_URL}#{INFO_ANKER[schluessel]}" rel="noopener">{text}</a>')
+
+    def seite_(pfad: str, text: str) -> str:
+        return f'<a class="underline" href="{u(pfad)}">{text}</a>'
+
+    sprung = "".join(
+        f'<a class="btn" data-variant="ghost" data-size="sm" href="#{k}">{t}</a>' for k, t in INFO_ABSCHNITTE)
+    was = (
+        '<div class="grid gap-4 text-sm">'
+        '<p>paperlaiss ist ein Klassifizierer für Paperless-ngx mit diesem Panel. Es läuft nach jedem Import (als '
+        'Post-Consume-Skript), auf Knopfdruck in Paperless oder von Hand aus dem Panel, lässt die KI '
+        '(Mistral) das Dokument lesen und schreibt das Ergebnis über die Paperless-API zurück — geerdet gegen den '
+        'vorhandenen Bestand, damit keine erfundenen Korrespondenten oder Typen entstehen.</p>'
+        + _teil("Was bei einem Lauf herauskommt", _liste([
+            '<b>Dokumenttyp und Korrespondent</b> — abgeglichen mit dem, was in Paperless schon steht (Namen, Aliase, '
+            'Stammdaten). Ein ähnlicher Name führt zu einer Rückfrage an die KI, nicht zu einem Duplikat.',
+            '<b>Felder</b> — je Feld ein Wert, leer (löschen) oder „BEHALTEN“, wenn die KI unsicher ist.',
+            '<b>Datum und Titel</b> — das tatsächliche Dokumentdatum statt eines nur erwähnten, der Titel nach dem '
+            'Muster „Korrespondent – Dokumentart Kennung“ (schaltbar).',
+            '<b>Tags und Zusammenfassung</b> — nur wenn eingeschaltet.',
+            '<b>OCR</b> — schwacher Text wird per Mistral-OCR neu gelesen, je nach Modus nur bei schwachem Text, bei '
+            'Scans und Fotos oder immer. ' + doku("ocr", "Regeln")]))
+        + _teil("Prüfen statt Raten", _liste([
+            'Unsichere Fälle bekommen das Prüf-Tag und erscheinen als „Prüfen“ in der Aktivität: Dublette oder Teilkopie, '
+            'Sammeldokument, kaputter Scan (leere oder fehlende Seiten, erfundener OCR-Text), eine eigene Person als '
+            'Korrespondent, kein Datum im Text, widersprüchliche Stammdaten.',
+            'Lehnt Paperless einen Wert ab, korrigiert die KI ihn selbst, bis das Schreiben gelingt.']))
+        + _teil("Stammdaten der Korrespondenten", '<p>Paperless kennt zu Korrespondenten keine eigenen Felder. paperlaiss '
+                'führt dafür einen eigenen Speicher (E-Mail, Domains, Telefon, Adresse, Kundennummer, USt-ID, IBAN, '
+                'Aliase, Kontext), trägt Werte aus Dokumenten nach (nur in leere Felder oder als weiterer Wert, '
+                'nie überschreibend) und nutzt ihn, um den Absender ohne KI-Aufruf als Kandidaten zu finden. '
+                + doku("stammdaten") + '.</p>')
+        + _teil("Drumherum", _liste([
+            '<b>Vorab-Schritte</b> — komplett weiße Seiten entfernen, Mails mit Kopfzeile und großen Bildern als '
+            'Dokument. ' + doku("vorab"),
+            '<b>Export</b> in Paperless — mehrere Dokumente als ein PDF mit Lesezeichen oder einzeln (auch als ZIP).',
+            '<b>Eingang</b> — <code>POST /ingest</code> für Scanner und Skripte, mit Quelle-Tag. ' + doku("ingest"),
+            '<b>Routing</b> — <code>POST /route</code> als Ziel eines Paperless-Webhooks: Dokumente nach Personen-Tag '
+            'übergeben oder freigeben. ' + doku("routing"),
+            '<b>Garantie</b> — bei Käufen trägt die KI die Jahre ein, das Ende rechnet der Code.']))
+        + '</div>')
+    benutzung = (
+        '<div class="grid gap-5 text-sm">'
+        + _teil("Der Normalfall", '<ol class="grid gap-2">'
+                '<li>1. Ein Dokument kommt an (Upload, Mail, Scanner, Eingang).</li>'
+                '<li>2. Optional entfernen die Vorab-Schritte leere Seiten.</li>'
+                '<li>3. Paperless importiert es und ruft paperlaiss auf (Post-Consume).</li>'
+                '<li>4. paperlaiss lädt das Dokument, liest es bei Bedarf per OCR neu, sucht Kandidaten, lässt die KI '
+                'analysieren, gleicht den Korrespondenten ab, trägt Stammdaten nach und schreibt zurück.</li>'
+                '<li>5. Jeder Schritt steht mit Eingabe und Ausgabe unter ' + seite_("/ablauf", "Ablauf &amp; Prompt")
+                + '. Ein automatischer Lauf bearbeitet jedes Dokument nur einmal (Marker-Tag oder Marke im Trace).</li></ol>')
+        + _teil("Im Panel", _liste([
+            seite_("/", "<b>Aktivität</b>") + ' — was lief. Die Kästen und das Diagramm filtern, eine Zeile öffnet den '
+            'Lauf mit Prompt und Antwort. Oben rechts: Dok-ID eingeben und <b>Neu klassifizieren</b> oder <b>mit OCR</b>.',
+            seite_("/nacharbeit", "<b>Nacharbeit</b>") + ' — was Menschen nach der KI geändert haben, je Feld, '
+            'Korrespondent und Typ, jeder Fall mit Link; die Sollliste für <code>eval.py</code>.',
+            seite_("/ablauf", "<b>Ablauf &amp; Prompt</b>") + ' — alle Schritte; der Prompt ist dort bearbeitbar.',
+            seite_("/einstellungen", "<b>Einstellungen</b>") + ' — alle Werte mit Erklärung; gespeichert werden nur die '
+            'geänderten Schlüssel. API-Schlüssel gehören in die Umgebung.']) + doku("panel", "Panel in der README"))
+        + _teil("Knöpfe in Paperless (wenn eingerichtet)", _liste([
+            '<b>KI</b> — in der Dokumentansicht und im Menü „Actions“ der Mehrfachauswahl: optional ein Hinweis, dann '
+            'liest paperlaiss das Dokument per OCR neu und klassifiziert es neu. Verarbeitet werden nur Dokumente, die '
+            'die angemeldete Person ändern darf.',
+            '<b>Export</b> — im selben Menü: ein PDF aus allen markierten Dokumenten (mit Lesezeichen, Seitenzahlen, '
+            'Inhaltsverzeichnis) oder jedes einzeln mit Dateinamen-Vorlage, nummeriert, als ZIP. Leserecht genügt.',
+            '<b>Stammdaten vorschlagen</b> — im Korrespondenten-Dialog: paperlaiss liest dessen Dokumente und macht '
+            'Vorschläge mit Fundstelle. Nichts wird geschrieben, bis man „Übernehmen“ und dann „Save“ wählt.'])
+                + doku("knoepfe", "Einrichtung und Einzelheiten"))
+        + _teil("Von Hand, ohne Panel", '<p>Umgebungsvariablen am Aufruf von <code>classify.py</code>: '
+                '<code>CLASSIFY_DOC</code> (welches Dokument), <code>CLASSIFY_DRY</code> (nur anzeigen, nichts '
+                'schreiben), <code>CLASSIFY_FORCE</code> (erneut klassifizieren), <code>CLASSIFY_FORCE_OCR</code> '
+                '(OCR erzwingen), <code>CLASSIFY_KONTROLLE</code> (Prüfläufe ohne KI), <code>CLASSIFY_STAMMDATEN</code> '
+                '(Stammdaten-Vorschläge), <code>CLASSIFY_GARANTIE</code> (täglicher Garantie-Abgleich). '
+                + doku("von-hand", "Beispiele") + '.</p>')
+        + _teil("Felder und Tags, die nur Menschen setzen", _liste([
+            '<code>manual_fields</code> — die KI sieht das Feld nicht und schreibt es nicht. Ein Teil aus dem Aufteilen '
+            'eines Dokuments erbt den Wert nicht.',
+            '<code>reserved_fields</code> — strenger: Name und Auswahlwerte erreichen die KI nie, paperlaiss setzt, '
+            'ändert und leert das Feld auf keinem Weg, auch nicht bei einem Teil aus dem Aufteilen. Ist es eines der '
+            'beiden Garantiefelder, ist die Garantie-Funktion aus. Groß- und Kleinschreibung zählt nicht.',
+            '<code>reserved_tags</code> — die KI vergibt diese Tags nie, und sie bleiben beim Schreiben erhalten '
+            '(Status, Richtung, Marker).'])
+                + '<p class="text-muted-foreground">Eintragen unter ' + seite_("/einstellungen", "Einstellungen")
+                + ' (Felder bzw. Tags), ein Name je Zeile. Ohne Eintrag ändert sich nichts. '
+                + doku("menschenfelder") + '.</p>')
+        + _teil("Rechte und Besitzer", '<p>Der Klassifizierer vergibt keinen Besitzer und keine Rechte. Das erledigen '
+                'Paperless selbst oder das Routing: Dokumente des Hub-Kontos mit genau einem Personen-Tag gehen an diese '
+                'Person, bei anderen Besitzern bekommt die Person Sehen und Ändern. Rechte werden nur ergänzt, nie '
+                'entzogen; ein zweiter Aufruf ändert nichts. ' + doku("routing") + '.</p>')
+        + '</div>')
+    konfiguration = (
+        '<div class="grid gap-5 text-sm">'
+        '<p>Die Konfiguration liegt in <code>classify-config.json</code> und wird unter '
+        + seite_("/einstellungen", "Einstellungen") + ' bearbeitet; die Liste unten stammt aus derselben Quelle. Ohne '
+        'Eintrag gilt der Vorgabewert. Geheimnisse (<code>MISTRAL_KEY</code>, <code>PAPERLESS_TOKEN</code>, '
+        'Panel-Zugang, Routing- und Ingest-Token) stehen nie in dieser Datei, sondern in der Umgebung. '
+        + doku("konfiguration", "Tabelle mit Vorgaben in der README") + '.</p>'
+        + info_konfiguration() + '</div>')
+    grenzen = (
+        '<div class="grid gap-3 text-sm">'
+        + _liste([
+            'Stammdaten (Tags, Korrespondenten, Typen) bleiben in Paperless; das Panel ist kein Stammdaten-Editor.',
+            'Keine Besitz- und Rechtevergabe durch den Klassifizierer, keine Verknüpfungen von Verträgen oder Geräten, '
+            'keine Steuerautomatik — das ist installationsspezifisch (dafür gibt es das eigene Skript nach dem '
+            'Schreiben).',
+            'KI und Texterkennung kommen von Mistral; ohne Schlüssel und Netz läuft keine Klassifizierung. Die KI kann '
+            'sich irren: Grounding und Prüfhinweise verringern das, ersetzen die Durchsicht aber nicht.',
+            'Die Nacharbeit-Quote ist eine Untergrenze: Dokumente, die niemand angefasst hat, zählen als richtig.',
+            'Ein bereits gesetzter Dokumenttyp wird nur bei einem echten Import, über den KI-Knopf und aus dem Panel '
+            'ersetzt, nicht bei Handläufen mit <code>CLASSIFY_FORCE</code> oder Bestandsläufen.',
+            'Ein erneuter Lauf nimmt nur zurück, was der vorige selbst gesetzt hat und was seither niemand geändert hat; '
+            'ohne lesbare Paperless-Historie nimmt er nichts zurück.',
+            'Die Knöpfe hängen an der Oberfläche von Paperless: ändert sich deren Seite, fehlen sie, Paperless läuft '
+            'weiter. „Alle auswählen“ über mehrere Seiten erfasst für den KI-Knopf nur die sichtbaren Dokumente.',
+            'Das Panel läuft als ein Prozess (Export-Aufträge liegen im Speicher), höchstens <code>PANEL_PARALLEL</code> '
+            'Aufträge gleichzeitig.',
+            'Das Projekt ist vor 1.0: Schnittstellen und Aufbau können sich noch ändern.'])
+        + '</div>')
+    bausteine = (
+        '<ul class="grid gap-2 text-sm">'
+        '<li>paperlaiss — MIT-Lizenz.</li>'
+        '<li>Aussehen: <a class="underline" href="https://github.com/Ollornog/C22" rel="noopener">C22</a> '
+        '(Basecoat, Tailwind; Schrift Inter unter SIL Open Font License).</li>'
+        '<li>Anmeldung: <a class="underline" href="https://github.com/Ollornog/TinySesam" rel="noopener">TinySesam</a>.</li>'
+        '<li>KI und Texterkennung: Mistral.</li>'
+        '<li>Icon: <a class="underline" href="https://www.flaticon.com/authors/magnific" rel="noopener">'
+        'Origami by Magnific – flaticon.com</a>.</li></ul>')
+    inhalt = {"was": was, "benutzung": benutzung, "konfiguration": konfiguration, "grenzen": grenzen,
+              "bausteine": bausteine}
+    return (kopf("Info", "Was paperlaiss kann und wie man es benutzt.",
+                 link(README_URL, "README auf GitHub") + link("https://github.com/Ollornog/paperlaiss", "Repository"))
+            + f'<nav class="flex flex-wrap gap-1" aria-label="Abschnitte der Info-Seite">{sprung}</nav>'
+            + "<div>" + "".join(abschnitt(t, inhalt[k], kennung=k) for k, t in INFO_ABSCHNITTE) + "</div>")
 
 
 # ---------------------------------------------------------------- Einstellungen

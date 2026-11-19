@@ -119,7 +119,9 @@ Docker network, sharing the `scripts/` volume. Its look comes from the
   to expand; for the AI calls the prompt and the answer format. The Pass-1 prompt is editable in
   place and also shown exactly as it is sent (`CLASSIFY_PROMPT_VORSCHAU=1`). A run in the activity
   list is shown with the same steps and its real prompts and answers.
-- **Info** (`/info`) — what paperlaiss is, links to the repository and the building blocks.
+- **Info** (`/info`) — the user guide inside the panel: what paperlaiss does, how to use it (flow, buttons, fields
+  and tags only people set), the settings by group and its limits. The settings list is generated from the same
+  source as the *Settings* page; for details it links back to the sections of this README.
 - **Settings** (`/einstellungen`) — every value of the effective configuration (file plus defaults;
   saving writes only the changed keys).
 - **Classify manually** — a document ID, reclassified or forced through OCR.
@@ -445,11 +447,25 @@ an earlier rule consumed it in the same run.
 | `konten.<user>.tags` | – | tags every document of that account gets (needs `kennungen_je_konto`), e.g. for uploads from the web — Paperless workflows cannot filter by owner |
 | `tag_ausschluss` | `[]` | `[{"tag": "A", "ohne": ["B"], "ausser_text": ["regex"]}]`: with tag A the model's tag B is dropped, unless a pattern is in the text |
 | `summary_field` / `mail_context_field` / `mail_from_field` | – | optional fields (by name). A mail poller best passes them at the upload (`custom_fields` of `post_document` as `{id: value}`): Paperless sets them before the post-consume script runs |
+| `manual_fields` | `[]` | custom field names that are only kept by hand (e.g. a paid-on date): the AI never sees or writes them; a split part does not inherit their value |
 | `reserved_tags` | `[]` | tag names the AI never assigns (status / direction / marker) |
 | `reserved_fields` | `[]` | custom field names only a person sets (e.g. a select field for the case a document belongs to): the AI never sees them, paperlaiss never sets, changes or clears them, a split part keeps them |
 | `system_prompt` | – | empty = built-in prompt (`{TYPES}` / `{TAGBLOCK}` are substituted; the older `{TAGS}` gets the bare tag list; with tagging on and neither placeholder, the tag block is appended) |
 | `tag_descriptions` | `{}` | per-tag descriptions (only when tagging is on) |
 | `api_key_text` / `api_key_ocr` | – | empty = `MISTRAL_KEY` from the environment |
+
+### Fields and tags only people set
+
+Three keys keep the classifier away from what a person maintains. Enter one name per line (*Settings*, groups
+*Fields* and *Tags*, or the JSON file); without an entry nothing changes.
+
+| Key | Effect |
+|---|---|
+| `manual_fields` | The AI does not see the field and does not write it. A split part does not inherit its value. |
+| `reserved_fields` | Stricter: name and select options never reach the prompt, and paperlaiss sets, changes or clears the field on no path — a split part keeps it too. If it is one of the two warranty fields, the warranty feature is off. Case-insensitive. |
+| `reserved_tags` | The AI never assigns these tags, and they survive a write-back (status, direction, marker). |
+
+The panel's **Info** page shows the same summary.
 
 ### OCR fallback (`ocr_regeln`)
 
