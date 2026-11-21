@@ -101,7 +101,7 @@ updates:
   # Die Wegwerf-Ziele der Generalprobe (release.yml auf jedem PR). Ihr Update nimmt die
   # Generalprobe selbst ab: Startet die Registry nicht, ist release.yml rot.
   # NICHT unter .github/ (2026-11-13): Dort darf Dependabot für docker-Dateien keinen PR anlegen („The request contains
-  # invalid or unauthorized changes“, TinySesam .github/rehearsal 2026-11-12, connect-suite .github/grype 2026-11-05).
+  # invalid or unauthorized changes“, TinySesam .github/rehearsal 2026-11-12, ein weiteres Repo .github/grype 2026-11-05).
   # tests/test_repo.py hält jedes docker-Ökosystem aus .github/ heraus.
   - package-ecosystem: docker-compose
     directory: /tools/generalprobe

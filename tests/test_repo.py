@@ -79,7 +79,7 @@ r.check("Dependabot: der `docker`-Eintrag (Basisabbild) läuft täglich",
         re.search(r"^\s*interval:\s*daily\b", _docker, re.M) is not None,
         "monatlich verpasst das Ruhefenster neu gepushter Basis-Tags")
 # docker-Dateien nie unter .github/: Dort darf Dependabot keinen PR anlegen („The request contains invalid or unauthorized
-# changes“, dependency_file_not_supported — TinySesam .github/rehearsal 2026-11-12, connect-suite .github/grype
+# changes“, dependency_file_not_supported — TinySesam .github/rehearsal 2026-11-12, ein weiteres Repo .github/grype
 # 2026-11-05). pip unter .github/audit ist nicht betroffen.
 _in_github = []
 for _e in re.split(r"\n  - ", _dep)[1:]:
