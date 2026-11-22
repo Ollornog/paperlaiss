@@ -1,7 +1,7 @@
 ---
 type: Task
 title: 'Probe: backlog push takes the text fast lane'
-status: offen
+status: erledigt
 id: T-32
 milestone: M-1
 created: '2026-11-22'
