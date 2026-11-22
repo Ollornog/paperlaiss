@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 19/24 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 19/31 erledigt
 
 ## Aufgaben
 
@@ -35,6 +35,13 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☑ **[T-22](T-22-panel-title-bar-wraps-on-narrow-screens.md)** Panel title bar and navigation wrap on narrow screens · M-1
 * ☐ **[T-23](T-23-formulare-mit-groesserem-modell-messen.md)** Formulare mit einem größeren Modell gegen die Sollliste messen · M-1
 * ☐ **[T-24](T-24-begradigen-je-dokument-und-vier-ecken.md)** Begradigen je Dokument abschalten oder Winkel setzen, vier Ecken entzerren · M-1
+* ☐ **[T-25](T-25-detect-duplicates-between-a-digital-original-and-a.md)** Detect duplicates between a digital original and a scan · M-1
+* ☐ **[T-26](T-26-capture-bank-statements-and-match-them-against-inv.md)** Capture bank statements and match them against invoices · M-1
+* ☐ **[T-27](T-27-folder-import-in-the-panel-with-content-matching-a.md)** Folder import in the panel with content matching against the stock · M-1
+* ☐ **[T-28](T-28-watcher-for-hanging-paperless-requests.md)** Watcher for hanging Paperless requests · M-1
+* ☐ **[T-29](T-29-empty-pages-in-the-existing-stock.md)** Empty pages in the existing stock · M-1
+* ☐ **[T-30](T-30-pass-2-assign-correspondent-inside-the-pass-1-conv.md)** Pass 2 (assign correspondent) inside the pass 1 conversation · M-1
+* ☐ **[T-31](T-31-measure-quality-against-paperless-built-in-classif.md)** Measure quality against Paperless' built-in classifier · M-1
 
 ## Entscheidungen (ADR)
 
