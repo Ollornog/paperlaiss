@@ -37,11 +37,13 @@
 #   Symlink, kein +x — ein ausführbares „.md“ ist ein Skript), und
 #   KEIN PROGRAMM DARF SIE BEIM NAMEN NENNEN: Steht ihr Dateiname (als Wort) in einer getrackten Datei, die selbst kein
 #   Text von der Liste ist, fährt die volle Suite — pyproject `readme = "README.md"`, ein Generator, der API.md schreibt,
-#   ein Release-Workflow, der CHANGELOG.md liest. Ausgenommen sind nur die Leser, die im Text-Modus ohnehin laufen:
+#   ein Release-Workflow, der CHANGELOG.md liest. Liegt die Datei in einem Unterordner (backlog/README.md), zählt der
+#   blosse Name nur aus ihrem Ordnerbaum oder aus einer Zeile, die auch einen Teil des Ordnerpfads als Wort nennt
+#   (den vollen Pfad oder `ROOT / "docs" / "API.md"`), seit Kit 0.52.2. Grenze: über Zeilen zusammengesetzte Pfade. Ausgenommen sind nur die Leser, die im Text-Modus ohnehin laufen:
 #   tests/test_repo.py und die Kit-Dateien, einzeln genannt (tests/_kit/, scripts/_nur_text.sh, _residue_check.sh,
 #   _backlog.py, .githooks/pre-push). Eine Markdown-Datei, die ihn nennt (auch außerhalb der Liste, etwa i18n/), ist
 #   kein Leser — außer das Repo führt Markdown aus (Signatur doctest-glob, doctest.testfile, mktestdocs …) und ein
-#   Programm nennt diese Markdown-Datei (zweite Stufe: voller Pfad, oder der Name aus ihrem eigenen Ordnerbaum). Ist die Datei über einen getrackten Symlink außerhalb der Liste erreichbar,
+#   Programm nennt diese Markdown-Datei (zweite Stufe, gleiche Ordnerregel). Ist die Datei über einen getrackten Symlink außerhalb der Liste erreichbar,
 #   fährt ebenfalls die volle Suite. Submodule zählen immer (`--ignore-submodules=none`).
 #   Grenze (benannt): Ein Programm, das Text per Glob liest (`docs/*.md`), nennt keinen Namen — das Repo verengt dann.
 #
@@ -179,16 +181,33 @@ done < <(git ls-files -s -z 2>/dev/null)
 # Wer nennt den Namen? 0 = ein Programm (stdout: wer), 1 = niemand, 2 = Suche gescheitert. $2 = auch über Texte der
 # Liste weitersuchen (eine Stufe): Ein Text, der selbst ausgeführt wird (Doctest in der README), ist ein Leser, wenn
 # ihn ein Programm beim Namen nennt (Fund 4).
-genannt_von() {  # genannt_von <Name> <ja|nein> <eigener Pfad> [<Ordner>: nur Leser darin zählen den blossen Namen]
-    local name="$1" weiter="$2" selbst="$3" ordner="${4:-}" treffer voll l rc
+genannt_von() {  # genannt_von <Name> <ja|nein> <eigener Pfad> [<Ordner> der Datei, leer = Wurzel]
+    local name="$1" weiter="$2" selbst="$3" ordner="${4:-}" treffer l rc teil gefiltert=""
+    local -a teile=() muster=()
     treffer="$(git -c core.quotePath=false grep -l -F -w -e "$name" -- . "${text_leser[@]}" 2>/dev/null)"; rc=$?
     [[ $rc -gt 1 ]] && return 2
     if [[ -n "$ordner" ]]; then
-        # Zweite Stufe: der blosse Name nur aus dem eigenen Ordnerbaum (eine Rolle nennt ihre README relativ), sonst
-        # nur der volle Pfad — `readme = "README.md"` in pyproject meint die Wurzel, nicht backlog/README.md.
-        voll="$(git -c core.quotePath=false grep -l -F -w -e "$selbst" -- . "${text_leser[@]}" 2>/dev/null)"; rc=$?
-        [[ $rc -gt 1 ]] && return 2
-        treffer="$(printf '%s\n' "$voll"; while IFS= read -r l; do [[ "$l" == "$ordner"/* ]] && printf '%s\n' "$l"; done <<<"$treffer")"
+        # Datei in einem Unterordner (seit Kit 0.52.2 auch in der ersten Stufe): Der blosse Name zählt nur aus dem eigenen
+        # Ordnerbaum (eine Rolle nennt ihre README relativ) oder aus einer Zeile, die auch einen Teil des Ordnerpfads als
+        # Wort nennt — den vollen Pfad (`"backlog/README.md"`) oder zusammengesetzt (`ROOT / "docs" / "API.md"`). In
+        # derselben Zeile: Die Auto-Merge-Vorlage des Kits erwähnt den Zweig `backlog` im Kommentar, und eine
+        # Release-Liste nennt die Wurzel-README weiter unten (DashMyBoard) — das liest den Backlog-Index nicht.
+        # `readme = "README.md"` in pyproject meint die Wurzel, nicht backlog/README.md — und ein Go-Test mit einer
+        # Wiki-Seite "README.md" liest den Backlog-Index nicht (UnderDoc 2026-11-22: jeder `dokutool backlog`-Push fuhr
+        # deshalb die volle Suite, über 180 s). Gross-/Kleinschreibung zählt: Pfade auf Linux unterscheiden sie auch.
+        IFS=/ read -r -a teile <<<"$ordner"
+        for teil in "${teile[@]}"; do [[ -n "$teil" ]] && muster+=(-e "$teil"); done
+        while IFS= read -r l; do
+            [[ -z "$l" ]] && continue
+            if [[ "$l" != "$ordner"/* ]]; then
+                git -c core.quotePath=false grep -q -F -w -e "$name" --and \( "${muster[@]}" \) -- ":(literal)$l" \
+                    2>/dev/null; rc=$?
+                [[ $rc -gt 1 ]] && return 2
+                [[ $rc -eq 0 ]] || continue
+            fi
+            gefiltert+="$l"$'\n'
+        done <<<"$treffer"
+        treffer="$gefiltert"
     fi
     while IFS= read -r l; do
         [[ -z "$l" || "$l" == "$selbst" ]] && continue       # eine Datei, die ihren eigenen Namen nennt, liest sich nicht
@@ -249,7 +268,8 @@ for f in "${dateien[@]}"; do
             exit 1
         fi
     done
-    leser="$(genannt_von "${f##*/}" "$md_laeuft" "$f")"; rc=$?
+    o="${f%/*}"; [[ "$o" == "$f" ]] && o=""
+    leser="$(genannt_von "${f##*/}" "$md_laeuft" "$f" "$o")"; rc=$?
     if [[ $rc -eq 2 ]]; then
         echo "volle Suite: Suche nach Lesern von $f gescheitert (git grep)"
         exit 1
