@@ -322,16 +322,48 @@ jobs:
     needs: pruefsummen
     if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # three attempts plus 80 s of pauses stay far below
     permissions:
       id-token: write      # Sigstore-Identität wie am Tag
       attestations: write  # Probe-Beglaubigung an GitHub übergeben
     steps:
       - name: "Generalprobe: Probedatei"
         run: echo "paperlaiss Generalprobe ${GITHUB_SHA} — kein Artefakt" > generalprobe.txt
-      - name: "Generalprobe: Herkunft beglaubigen"
+      # Retry (kit 0.54.0, PO 2026-11-22): Sigstore's transparency log sometimes answers "error fetching tlog
+      # entry - (404)" right after the write. The action has no retry input, so: attempt 1 and 2 lenient, a pause
+      # before each next attempt (20 s, 60 s), attempt 3 strict — if it fails too, the job is red. Only the
+      # attestation repeats; `outcome` is the result before continue-on-error, a skipped step stops the chain.
+      - name: "Rehearsal: attest provenance (attempt 1)"
+        id: beglaubigen-1
+        continue-on-error: true  # attempt 2 follows on failure
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: generalprobe.txt
+      - name: "Rehearsal: wait 20 s before attempt 2"
+        if: steps.beglaubigen-1.outcome == 'failure'
+        run: sleep 20
+      - name: "Rehearsal: attest provenance (attempt 2)"
+        id: beglaubigen-2
+        if: steps.beglaubigen-1.outcome == 'failure'
+        continue-on-error: true  # attempt 3 follows on failure
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: generalprobe.txt
+      - name: "Rehearsal: wait 60 s before attempt 3"
+        if: steps.beglaubigen-2.outcome == 'failure'
+        run: sleep 60
+      - name: "Rehearsal: attest provenance (attempt 3, strict)"
+        if: steps.beglaubigen-2.outcome == 'failure'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: generalprobe.txt
+      # What a user runs after a release, here against the probe file with the signer pinned: proves that one of
+      # the attempts left an attestation that `gh attestation verify` accepts.
+      - name: "Rehearsal: verify the attestation"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNER: ${{ github.repository }}/.github/workflows/release.yml
+        run: gh attestation verify generalprobe.txt --repo "$GITHUB_REPOSITORY" --signer-workflow "$SIGNER"
 
   # Release automation (kit 0.45.0): scripts/_release_automatik.py bumps the version or sets the tag, with the app token (this repo
   # only), so that the PR and the tag start workflows (the workflow token starts none).

@@ -28,7 +28,17 @@
 #     origin/master — der erste, den es gibt), Unterschied zum ARBEITSBAUM (gestagt und ungestagt) plus neue ungetrackte
 #     Dateien. `--no-renames`: ein Umzug roles/x.md → docs/x.md zeigte sonst nur den neuen Namen.
 #     Kein Standardzweig, merge-base scheitert → volle Suite. Ein veralteter Standardzweig vergrößert die Liste nur.
+#   * GitHub Actions, event push to a branch (since kit 0.53.0, PO 2026-11-22: "main after a text-only commit runs
+#     only the fast check"): base is the `before` SHA of the event payload ($GITHUB_EVENT_PATH), compared with HEAD,
+#     which must be GITHUB_SHA. One commit: before = HEAD^ (a merge commit: its first parent). Several commits in one
+#     push: text only if all of them together are text only (before..HEAD). Full suite when before is missing or all
+#     zeros (first push, new branch), when the push was forced, when it pushes a tag, when the payload is unreadable
+#     (neither jq nor python3), or when before cannot be fetched.
+#   * Any other event in GitHub Actions (schedule, workflow_dispatch, release, merge_group …) → full suite, always.
 #   * Keine Änderung (Push auf den Standardzweig selbst) → volle Suite. Der Standardzweig wird immer voll geprüft.
+#     Since 0.53.0 that holds outside Actions; in Actions a push that changes only text runs the fast check (above).
+#     Named limit: the fast check on a push trusts that before was checked in full — a red main stays red only
+#     in the earlier run, the text push itself turns green.
 #
 # STANDARD-ERLAUBNISLISTE (eine für alle Repos, nur hier): Markdown, das kein Programm liest, rendert oder ausliefert —
 #     *.md in der Wurzel · docs/**.md · backlog/**.md · changelog.d/**.md
@@ -125,6 +135,56 @@ if [[ "${GITHUB_ACTIONS:-}" == true && "${GITHUB_EVENT_NAME:-}" == pull_request 
     fi
     mapfile -d '' -t dateien < <(git diff -z --name-only --no-renames --ignore-submodules=none "$basis" HEAD 2>/dev/null)
     woher="PR, Basis ${basis:0:7}"
+elif [[ "${GITHUB_ACTIONS:-}" == true && "${GITHUB_EVENT_NAME:-}" == push ]]; then
+    # Push to a branch (since 0.53.0, see the header). Every doubt means the full suite.
+    if [[ "${GITHUB_REF:-}" != refs/heads/* ]]; then
+        echo "volle Suite: push of ${GITHUB_REF:-an unknown ref}, not a branch (tags are always checked in full)"
+        exit 1
+    fi
+    if [[ -z "${GITHUB_SHA:-}" || "$(git rev-parse -q --verify HEAD 2>/dev/null)" != "$GITHUB_SHA" ]]; then
+        echo "volle Suite: push, but HEAD is not GITHUB_SHA (the pushed commit)"
+        exit 1
+    fi
+    # A top-level field of the event payload, printed as JSON scalar text ("true", a SHA); nothing if unreadable.
+    # jq first (GitHub images and the self-hosted runners carry it), python3 as fallback.
+    ereignis_feld() {
+        local datei="${GITHUB_EVENT_PATH:-}"
+        [[ -n "$datei" && -r "$datei" ]] || return 1
+        if command -v jq >/dev/null 2>&1; then
+            jq -r --arg k "$1" 'if type == "object" and has($k) then .[$k] | tostring else empty end' "$datei" 2>/dev/null
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -I -c 'import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+v = d.get(sys.argv[2]) if isinstance(d, dict) else None
+print(v if isinstance(v, str) else json.dumps(v)) if v is not None else None' "$datei" "$1" 2>/dev/null
+        else
+            return 1
+        fi
+    }
+    basis="$(ereignis_feld before)"
+    if [[ ! "$basis" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ || "$basis" =~ ^0+$ ]]; then
+        echo "volle Suite: push without a usable before SHA (first push, new branch or unreadable event payload)"
+        exit 1
+    fi
+    if [[ "$(ereignis_feld forced)" != false ]]; then
+        echo "volle Suite: forced push (or the payload does not say it was not forced)"
+        exit 1
+    fi
+    if ! git cat-file -e "$basis^{commit}" 2>/dev/null \
+            && ! git fetch -q --no-tags --depth=1 origin "$basis" 2>/dev/null; then
+        echo "volle Suite: before ${basis:0:7} of the push cannot be fetched"
+        exit 1
+    fi
+    git diff --quiet --no-renames --ignore-submodules=none "$basis" HEAD 2>/dev/null; rc=$?
+    if [[ $rc -gt 1 ]]; then
+        echo "volle Suite: Unterschied zu ${basis:0:7} nicht lesbar"
+        exit 1
+    fi
+    mapfile -d '' -t dateien < <(git diff -z --name-only --no-renames --ignore-submodules=none "$basis" HEAD 2>/dev/null)
+    woher="push, before ${basis:0:7}"
+elif [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    echo "volle Suite: event ${GITHUB_EVENT_NAME:-unknown} is always checked in full (only pull_request and a push to a branch may take the text lane)"
+    exit 1
 elif [[ -n "${CI_AENDERUNGEN+x}" && "${GITHUB_ACTIONS:-}" != true && "${CI_LOCAL_INSIDE:-}" == 1 ]]; then
     mapfile -t dateien < <(printf '%s\n' "$CI_AENDERUNGEN" | sed '/^[[:space:]]*$/d')
     woher="Liste von ci-local, Basis ${CI_AENDERUNGEN_BASIS:-?}"
