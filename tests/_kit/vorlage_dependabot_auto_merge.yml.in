@@ -81,6 +81,9 @@
 # überwiegend Deutsch, mergt nichts — außer in einer Übersetzung (Ordner `de/`, oder `.de` vor der Endung). Der Zweigname ist das
 # Signal, nicht die Dateiliste: So startet nicht jeder PR-Lauf einen Auto-Merge-Job auf den eigenen Runnern, und ein
 # Doku-PR, den jemand gelesen haben will, kommt von einem anderen Zweig. `DOKU_PR: "aus"` im Block je Repo schaltet ab.
+# GERMAN DOCS PER REPO (since 0.53.0, PO 2026-11-22, question 4b): `DOKU_SPRACHE: "de"` in the block per repo lets the
+# language rule accept German in the repo's docs — the root READMEs and CHANGELOGs and everything under `docs/`. The
+# backlog stays English (code, identifiers and commits are not checked here at all). Without the entry nothing changes.
 # Branch-Schutz bleibt, wie er ist: gemergt wird über die API wie bei Dependabot, nie per Direkt-Push.
 #
 # RUNNER (seit 0.51.0, PO 2026-11-20: GitHub-Minuten privater Repos fast aufgebraucht): `runs-on` leitet `repokit sync`
@@ -423,6 +426,13 @@ jobs:
           uebersetzung() {
             [[ "$1" =~ \.de\.md$ ]] || [[ "$1" =~ (^|/)de/ ]]
           }
+          # May this file be German (since 0.53.0)? $1 = file, $2 = DOKU_SPRACHE of the repo. A translation always;
+          # with exactly "de" also the repo's docs (root README/CHANGELOG, docs/) — never the backlog.
+          sprache_frei() {
+            uebersetzung "$1" && return 0
+            [ "$2" = de ] || return 1
+            [[ "$1" =~ ^(README|CHANGELOG)(\.[a-z]{2})?\.md$ ]] || [[ "$1" =~ ^docs/ ]]
+          }
           # Sprachregel (Repos sind Englisch): Sind die hinzugefügten Zeilen überwiegend Deutsch? stdin = Diff (patch)
           # einer Datei. Gezählt werden häufige Funktionswörter beider Sprachen, Inline-Code und Linkziele nicht.
           # Exit 0 = Deutsch (mindestens 5 deutsche Wörter und mehr als doppelt so viele wie englische).
@@ -589,7 +599,7 @@ jobs:
                 -q '.[] | select(.status != "removed") | "\(.filename)\u001f\(.patch // "" | @base64)"')"
               while IFS=$'\x1f' read -r f diff64; do
                 [ -n "$f" ] || continue
-                uebersetzung "$f" && continue
+                sprache_frei "$f" "${DOKU_SPRACHE:-}" && continue
                 [ -n "$diff64" ] || { GRUND="Diff von $f nicht lesbar — Sprachregel nicht prüfbar"; break; }
                 if base64 -d <<<"$diff64" | deutsch; then
                   GRUND="Sprachregel: $f ist überwiegend Deutsch, die Repos sind Englisch (deutsche Fassung als Übersetzung: Ordner de/ oder .de vor der Endung)"

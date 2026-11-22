@@ -11,6 +11,8 @@ ersten grünen; TinySesam ließ Majors durch, die anderen nicht. Jetzt gibt es e
     AUTO_OEKO          Ökosysteme, die ein Pflicht-Check wirklich abnimmt
     PFLICHT_WORKFLOWS  Workflows (Dateinamen), deren Jobs das Repo als Abnahme gelten lässt
     DOKU_PR            optional "aus": keine Doku-Schnellspur (Zweige doku/…, backlog) in diesem Repo
+    DOKU_SPRACHE       optional "de" (since 0.53.0): the language rule of the docs fast lane accepts German docs
+                       (root README/CHANGELOG, docs/); the backlog stays English
 
 Alles andere leitet `rendere()` aus den Workflows des Repos ab: den Auslöser (`workflows:` =
 deren `name:`) und den Nachlauf (jeder Workflow, den ein Push auf den Standardzweig startet).
@@ -289,6 +291,13 @@ def rendere(root: str, je_repo: str) -> tuple[str, list[str]]:
     doku = _wert(je_repo, "DOKU_PR")
     if doku is not None and doku != "aus":
         probleme.append(f'DOKU_PR "{doku}": nur "aus" (abschalten) — ohne den Eintrag ist die Doku-Schnellspur an')
+    # German docs per repo (since 0.53.0, PO 2026-11-22): exactly "de". The template asks `= de`, so any other value
+    # ("DE", "deutsch", "en") would silently do nothing — a typo must not pass as a switch.
+    # Quoted or not: YAML reads `DOKU_SPRACHE: de` as the string too, so an unquoted typo must not slip past.
+    ms = re.search(r'^\s*DOKU_SPRACHE:[ \t]*(.*?)[ \t]*(?:#.*)?$', je_repo, re.M)
+    sprache = ms.group(1) if ms else None
+    if sprache is not None and sprache not in ('"de"', "'de'", "de"):
+        probleme.append(f'DOKU_SPRACHE "{sprache}": only "de" (German docs allowed) — without the entry docs are English')
     nach = nachlauf(root)
     # Abnahme nach dem Merge (seit 0.32.0): Jede so eingetragene Action muss in einem Workflow stehen,
     # den der Nachlauf auf dem Standardzweig startet — sonst nähme sie gar nichts ab, und ihr Update
