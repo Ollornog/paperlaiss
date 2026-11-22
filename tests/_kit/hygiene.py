@@ -2073,6 +2073,13 @@ _AUDIT_WERKZEUG = re.compile(
     r"\bpip-audit\b|\bgovulncheck\b|\bcomposer\s+audit\b|\bnpm\s+audit\b(?!\s+signatures)")
 
 
+def _ohne_yaml_kommentare(inhalt: str) -> str:
+    """The workflow text without `#` comments, line numbers kept: whole comment lines become empty, and a ` # …`
+    tail is cut. Rough on purpose (a `#` inside a quoted string with a space before it is cut too) — it only decides
+    which tools a workflow calls, and a quoted ` #` in front of a tool name does not occur in the fleet."""
+    return "\n".join(re.sub(r"(^|\s)#.*$", "", z) for z in inhalt.split("\n"))
+
+
 def pruefe_audit_workflow(root: str, dateien: list[str],
                           ausgenommen: dict[str, str] | None = None) -> list[str]:
     """Hat das Repo ein scharfes Schwachstellen-Tor? (M6/B1, „Baustein C", 2026-10-11)
@@ -2144,6 +2151,9 @@ def pruefe_audit_workflow(root: str, dateien: list[str],
             if ist_audit_datei:
                 traeger.append((rel, ""))
             continue
+        # Comments do not run (0.54.0): a release.yml whose COMMENT named pip-audit counted as an audit carrier, and
+        # then every continue-on-error in it was forbidden — a false alarm found in TinySesam on 2026-11-22.
+        inhalt = _ohne_yaml_kommentare(inhalt)
         if ist_audit_datei or _AUDIT_WERKZEUG.search(inhalt):
             traeger.append((rel, inhalt))
 
@@ -2746,7 +2756,76 @@ def _workflow_bloecke(inhalt: str) -> tuple[bool, list[dict]]:
             job["if"] += ""                                 # andere Job-Schluessel: uninteressant
             if re.match(r"^\s+environment:", z):
                 job["environment"] = z.split(":", 1)[1].strip() or "?"
+            if re.match(r"^\s+continue-on-error:\s*true\b", z):
+                job["continue_on_error"] = True
     return (bool(hat_tags and hat_knopf), jobs)
+
+
+# Attestation retry (0.54.0, PO 2026-11-22): Sigstore writes the transparency log entry, and reading it back right
+# away sometimes returns `error fetching tlog entry - (404) Not Found` (seen 2026-10-29 and twice on 2026-11-22).
+# The actions have no retry input (actions/attest and attest-build-provenance v4.2.2, action.yml), and a `uses:` step
+# cannot be repeated natively, so the retry is a chain of steps:
+#
+#   - id: attest-1                 # attempt 1, continue-on-error: true
+#   - if: steps.attest-1.outcome == 'failure'   run: sleep 20
+#   - id: attest-2                 # same condition, continue-on-error: true
+#   - if: steps.attest-2.outcome == 'failure'   run: sleep 60
+#   - (attempt 3)                  # same condition on attest-2, NO continue-on-error -> red if it fails too
+#
+# `outcome` is the result before continue-on-error, `conclusion` the one after; a skipped step has outcome `skipped`,
+# so every later link stays quiet once one attempt succeeded.
+_ATTEST_USES = re.compile(r"^\s*(?:-\s+)?uses:\s*actions/attest", re.M)
+_STEP_ID = re.compile(r"^\s*(?:-\s+)?id:\s*['\"]?([\w-]+)", re.M)
+_STEP_COE = re.compile(r"^\s*(?:-\s+)?continue-on-error:\s*true\b", re.M)
+_NACH_FEHLSCHLAG = re.compile(r"steps\.([\w-]+)\.outcome\s*==\s*'failure'")
+_PAUSE = re.compile(r"\bsleep\s+(\d+)")
+
+
+def _beglaubigung_wiederholt(rel: str, job: dict, probe_job: bool) -> list[str]:
+    """Findings on the attestation retry chain of one job (see the comment above)."""
+    treffer: list[str] = []
+    schritte = job["steps"]
+    beglaubigt = [i for i, s in enumerate(schritte) if _ATTEST_USES.search(s["text"])]
+    if not beglaubigt:
+        return treffer
+    wo = f"{rel}:{job['name']}"
+    if job.get("continue_on_error"):
+        treffer.append(f"{wo}: job-level `continue-on-error: true` on a job that attests — it would hide a failed "
+                       "last attempt")
+    ids = {i: (m.group(1) if (m := _STEP_ID.search(schritte[i]["text"])) else None) for i in beglaubigt}
+    lockert = {i: bool(_STEP_COE.search(schritte[i]["text"])) for i in beglaubigt}
+    nach = {i: _NACH_FEHLSCHLAG.findall(schritte[i]["if"]) for i in beglaubigt}
+    for i in beglaubigt:
+        sid = ids[i]
+        # A follow-up attempt behind a strict step never runs: the strict step's failure already ends the job.
+        for vorher in nach[i]:
+            vorg = next((j for j in beglaubigt if j < i and ids[j] == vorher), None)
+            if vorg is not None and not lockert[vorg]:
+                treffer.append(f"{wo}: attempt after `{vorher}` never runs — `{vorher}` has no continue-on-error")
+        ist_anfang = not any(any(ids[j] == v for j in beglaubigt if j < i) for v in nach[i])
+        probe = probe_job or _ist_generalprobe(schritte[i]["if"])
+        if probe and ist_anfang and not lockert[i]:
+            treffer.append(f"{wo}: rehearsal attestation without retry — Sigstore's transparency log answers 404 "
+                           "now and then; attempt 1 with `id` and continue-on-error, pause, further attempts, the "
+                           "last one strict (kit README, \"Attestation retry\")")
+        if not lockert[i]:
+            continue
+        if not sid:
+            treffer.append(f"{wo}: attestation with continue-on-error but without `id` — the next attempt cannot "
+                           "refer to its outcome")
+            continue
+        folge = next((j for j in beglaubigt if j > i and sid in nach[j]), None)
+        if folge is None:
+            treffer.append(f"{wo}: last attempt `{sid}` carries continue-on-error — the last attempt must be "
+                           "strict, or a failed attestation turns green")
+            continue
+        pausen = [int(m.group(1)) for s in schritte[i + 1:folge]
+                  if sid in _NACH_FEHLSCHLAG.findall(s["if"]) and not _ATTEST_USES.search(s["text"])
+                  for m in [_PAUSE.search(s["text"])] if m]
+        if not any(p > 0 for p in pausen):
+            treffer.append(f"{wo}: no pause between `{sid}` and the next attempt — a step with "
+                           f"`if: steps.{sid}.outcome == 'failure'` and `run: sleep <seconds>` belongs in between")
+    return treffer
 
 
 def pruefe_veroeffentlichen_am_tag(root: str, dateien: list[str] | None = None) -> list[str]:
@@ -2778,6 +2857,12 @@ def pruefe_veroeffentlichen_am_tag(root: str, dateien: list[str] | None = None) 
     Aufbau sind (`actions/checkout`, `setup-*`, `cache`, `*-artifact`, `docker/setup-*` zaehlen
     nicht). Gemessen ueber die Flotte: 4-7 wirkende Schritte je Workflow, kein Repo war betroffen —
     es ist also ein Rueckfall-Schutz.
+
+    **Third part (since 0.54.0): attestation retry.** In every workflow, a step using `actions/attest*` with
+    `continue-on-error: true` needs an `id`, a later attempt with `if: steps.<id>.outcome == 'failure'`, and a
+    `sleep` step with the same condition in between; the last attempt and the job carry no continue-on-error. A
+    rehearsal attestation (`ref_type != 'tag'`) must retry at all — Sigstore's transparency log answers 404 now
+    and then right after the write (see `_beglaubigung_wiederholt`).
     """
     treffer: list[str] = []
     verz = os.path.join(root, ".github", "workflows")
@@ -2790,6 +2875,11 @@ def pruefe_veroeffentlichen_am_tag(root: str, dateien: list[str] | None = None) 
         if inhalt is None:
             continue
         tag_workflow, jobs = _workflow_bloecke(inhalt)
+        # Attestation retry (0.54.0): checked in EVERY workflow, not only in tag workflows with a button — a
+        # chain whose last attempt is lenient hides a failed attestation wherever it stands.
+        for job in jobs:
+            treffer.extend(_beglaubigung_wiederholt(f".github/workflows/{name}", job,
+                                                    _ist_generalprobe(job.get("if", ""))))
         if not tag_workflow:
             continue
         for job in jobs:
