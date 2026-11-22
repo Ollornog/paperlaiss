@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Geändert
+
+- Docs fast lane: a classifier job runs `scripts/_nur_text.sh`; on a text-only PR the image, pre-consume and audit
+  jobs skip (a skipped job is a green check; the `if:` is the fail-safe form checked by the kit). Push, schedule and
+  manual runs behave as before.
+
 ## [0.14.1] - 2026-11-21
 
 ### Geändert

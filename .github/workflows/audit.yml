@@ -33,7 +33,30 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  klassifizieren:
+    # Docs fast lane (repokit 0.52.0): text-only PR → the heavy job(s) below skip (a skipped job is a green check). The
+    # decision lives only in scripts/_nur_text.sh; a broken classifier leaves the output empty and the job runs.
+    # Push, schedule and manual runs are never text-only (no PR merge commit), so they behave as before.
+    name: Text oder Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      nur_text: ${{ steps.k.outputs.nur_text }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          # The PR merge commit and its base: _nur_text.sh needs the first parent, no credentials to fetch it.
+          fetch-depth: 2
+      - name: Klassifizieren
+        id: k
+        run: |
+          if grund="$(scripts/_nur_text.sh)"; then echo "nur_text=ja" >> "$GITHUB_OUTPUT"; fi
+          echo "$grund"
+
   audit:
+    needs: klassifizieren
+    if: ${{ !cancelled() && needs.klassifizieren.outputs.nur_text != 'ja' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
