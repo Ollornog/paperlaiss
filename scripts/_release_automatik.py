@@ -12,7 +12,8 @@ Hand. Sicherheitsfixes erreichten den Betrieb so nie von selbst. Die Kette:
         CHANGELOG und öffnet mit dem App-Token den PR `release/v<version>`
       → Pflicht-Checks grün → Auto-Merge (Autor die App, nur die Dateien aus `RELEASE_DATEIEN`)
       → release.yml per workflow_dispatch, `automatik=taggen`: dieses Skript prüft den Stand und setzt den Tag
-      → Tag-Lauf von release.yml baut das Abbild, danach `fc-pin`: Pin-PR `pin/<repo>-<tag>` im Ziel-Repo
+      → Tag-Lauf von release.yml baut das Abbild, danach `fc-pin`: Pin-PR `pin/<repo>` im Ziel-Repo (EINER je Quell-Repo,
+        fortgeschrieben; mit PIN_ANHAENGE `pin/<repo>-<tag>`, ältere werden geschlossen — seit 0.58.0)
       → dort Startprobe und Auto-Merge (nur Pin-Zeilen), danach der Converge der Flotte.
 
 Warum ein Release-PR statt eines direkten Commits: Öffentliche Repos verlangen Pflicht-Checks auf `main`; ein direkter
@@ -25,11 +26,18 @@ Konfiguration je Repo: `.github/release-automatik.json`
       "versionsdateien": [{"datei": "pyproject.toml", "muster": "^version = \\"(?P<v>[^\\"]+)\\"$"}],   # nur semver;
                                                # "alle": true = jeder Treffer (mind. einer, alle gleich) wird gehoben
       "changelog": {"datei": "CHANGELOG.md", "form": "keepachangelog" | "datum", "sprache": "de" | "en",
-                    "kopf": "## [{version}] - {datum}"} | null,   # kopf optional, Vorgaben siehe KOPF
+                    "kopf": "## [{version}] - {datum}",   # kopf optional, Vorgaben siehe KOPF
+                    "erlaubt": ["Fixed", "Security", "Dependencies"]} | null,   # erlaubt optional, siehe unten
       "versionsbefehl": ["scripts/_release.py", "{version}"],   # optional: eigenes Werkzeug des Repos setzt die Version
       "pruefbefehl": ["scripts/_release.py", "--check"],        # optional: vor dem Tag, rc != 0 → kein Tag
       "abbilder": ["<registry>/<owner>/<name>"]   # was der Tag-Lauf veröffentlicht; fc-pin hebt genau diese Pins
     }
+
+Schutz vor falschen Patch-Releases (seit 0.55.0): `vorbereiten` schneidet nur einen Patch. Steht unter [Unreleased] aber
+Neues (`### Added`, `### Changed` …) oder Text ohne Kategorie, verweigert es (rc 1, Meldung samt Job-Summary): Das ist ein
+Minor und gehört einem Menschen. Erlaubt sind die Kategorien aus `changelog.erlaubt` (Namen ohne Beachtung der
+Groß-/Kleinschreibung; ein Zusatz nach ` — ` an der Überschrift zählt nicht); Vorgabe je Sprache: en Fixed, Security,
+Dependencies · de Behoben, Sicherheit, Abhängigkeiten. `["*"]` schaltet die Prüfung ab. Gilt für `keepachangelog`.
 
 Aufrufe (GH_TOKEN = App-Token; GITHUB_REPOSITORY wie in Actions):
 
@@ -159,6 +167,36 @@ _TEXTE = {
 KOPF = {"keepachangelog": "## [{version}] — {datum}", "datum": "## {datum} — {titel} (v{version})"}
 
 
+ERLAUBT = {"de": ["Behoben", "Sicherheit", "Abhängigkeiten"], "en": ["Fixed", "Security", "Dependencies"]}
+
+
+def unreleased_unerlaubt(text: str, erlaubt: list[str]) -> list[str]:
+    """Kategorien unter [Unreleased], die kein Patch-Release tragen dürfen (leer = alles in Ordnung). Text ohne
+    Kategorie-Überschrift zählt als `(ohne Kategorie)`. `*` in `erlaubt` schaltet die Prüfung ab."""
+    if "*" in erlaubt:
+        return []
+    m = UNVEROEFFENTLICHT.search(text)
+    if not m:
+        return []
+    rest = text[m.end():]
+    n = re.search(r"^## ", rest, re.M)
+    block = rest[:n.start()] if n else rest
+    ok = {e.casefold() for e in erlaubt}
+    schlecht: list[str] = []
+    lose = False
+    in_kategorie = False
+    for zeile in block.splitlines():
+        h = re.match(r"^### (.+?)\s*$", zeile)
+        if h:
+            in_kategorie = True
+            name = re.split(r"\s+[—–-]\s+", h.group(1), maxsplit=1)[0].strip()
+            if name.casefold() not in ok and name not in schlecht:
+                schlecht.append(name)
+        elif zeile.strip() and not in_kategorie:
+            lose = True
+    return (["(ohne Kategorie)"] if lose else []) + schlecht
+
+
 def changelog_eintragen(text: str, form: str, sprache: str, version: str, datum: str, eintraege: list[str],
                         kopf: str | None = None) -> str:
     """Den Abschnitt des neuen Release in den CHANGELOG setzen.
@@ -181,7 +219,13 @@ def changelog_eintragen(text: str, form: str, sprache: str, version: str, datum:
         # Hat das Werkzeug des Repos den Abschnitt schon geschlossen ([Unreleased] → [version]), kommt der Eintrag dort hinein.
         da = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n", text, re.M)
         if da:
-            return text[:da.end()] + f"\n### {t['kategorie']}\n\n{rumpf}" + text[da.end():]
+            neu = text[:da.end()] + f"\n### {t['kategorie']}\n\n{rumpf}" + text[da.end():]
+            if not UNVEROEFFENTLICHT.search(neu):
+                # Das Werkzeug hat [Unreleased] umbenannt statt ein leeres zu lassen: ohne den Kopf landen spätere
+                # Einträge im veröffentlichten Abschnitt (TinySesam v0.26.3/v0.27.1). Ein leeres kommt darüber.
+                label = "Unveröffentlicht" if sprache == "de" else "Unreleased"
+                neu = neu[:da.start()] + f"## [{label}]\n\n" + neu[da.start():]
+            return neu
         m = UNVEROEFFENTLICHT.search(text)
         neu_kopf = f"{zeile}\n\n"
         if m:
@@ -316,6 +360,20 @@ def gh(pfad: str, methode: str = "GET", daten: dict | None = None) -> object:
     return json.loads(aus) if aus.strip() else None
 
 
+def _baum_mit(repo: str, kopf: str, dateien: dict[str, str | bytes], modi: dict[str, str] | None) -> str:
+    """Neuer Baum: der Baum von `kopf` plus `dateien` (Text als utf-8-Blob, Bytes als base64). Gibt die Baum-SHA."""
+    baum = gh(f"repos/{repo}/git/commits/{kopf}")["tree"]["sha"]
+    eintraege = []
+    for pfad, inhalt in sorted(dateien.items()):
+        if isinstance(inhalt, bytes):
+            daten = {"content": base64.b64encode(inhalt).decode("ascii"), "encoding": "base64"}
+        else:
+            daten = {"content": inhalt, "encoding": "utf-8"}
+        blob = gh(f"repos/{repo}/git/blobs", "POST", daten)["sha"]
+        eintraege.append({"path": pfad, "mode": (modi or {}).get(pfad, "100644"), "type": "blob", "sha": blob})
+    return gh(f"repos/{repo}/git/trees", "POST", {"base_tree": baum, "tree": eintraege})["sha"]
+
+
 def pr_oeffnen(repo: str, basis: str, zweig: str, dateien: dict[str, str | bytes], titel: str, text: str,
                modi: dict[str, str] | None = None) -> str:
     """Ein Commit mit `dateien` (Pfad → Inhalt) auf `basis`, als Zweig `zweig`, und ein PR. Gibt die PR-URL.
@@ -329,16 +387,7 @@ def pr_oeffnen(repo: str, basis: str, zweig: str, dateien: dict[str, str | bytes
     if offen:
         return offen[0]["html_url"]
     kopf = gh(f"repos/{repo}/git/ref/heads/{basis}")["object"]["sha"]
-    baum = gh(f"repos/{repo}/git/commits/{kopf}")["tree"]["sha"]
-    eintraege = []
-    for pfad, inhalt in sorted(dateien.items()):
-        if isinstance(inhalt, bytes):
-            daten = {"content": base64.b64encode(inhalt).decode("ascii"), "encoding": "base64"}
-        else:
-            daten = {"content": inhalt, "encoding": "utf-8"}
-        blob = gh(f"repos/{repo}/git/blobs", "POST", daten)["sha"]
-        eintraege.append({"path": pfad, "mode": (modi or {}).get(pfad, "100644"), "type": "blob", "sha": blob})
-    neu_baum = gh(f"repos/{repo}/git/trees", "POST", {"base_tree": baum, "tree": eintraege})["sha"]
+    neu_baum = _baum_mit(repo, kopf, dateien, modi)
     commit = gh(f"repos/{repo}/git/commits", "POST", {"message": titel, "tree": neu_baum, "parents": [kopf]})["sha"]
     try:
         gh(f"repos/{repo}/git/refs", "POST", {"ref": f"refs/heads/{zweig}", "sha": commit})
@@ -347,6 +396,91 @@ def pr_oeffnen(repo: str, basis: str, zweig: str, dateien: dict[str, str | bytes
         gh(f"repos/{repo}/git/refs/heads/{zweig}", "PATCH", {"sha": commit, "force": True})
     pr = gh(f"repos/{repo}/pulls", "POST", {"title": titel, "head": zweig, "base": basis, "body": text})
     return pr["html_url"]
+
+
+def alter_pin_zweig(ref: str, name: str, aktuell: str) -> bool:
+    """Ist `ref` ein anderer Pin-Zweig desselben Quell-Repos — der feste `pin/<name>` oder einer nach dem Muster bis
+    0.57.0, `pin/<name>-<tag>` mit Tag `v…` oder `main-…`? `pin/app-agg` ist kein Zweig von `app` (kein Tag-Anfang)."""
+    if ref == aktuell:
+        return False
+    return ref == f"pin/{name}" or bool(re.fullmatch(rf"pin/{re.escape(name)}-(?:v|main-)[A-Za-z0-9._-]+", ref))
+
+
+def _offene_prs(repo: str) -> list[dict]:
+    prs: list[dict] = []
+    seite = 1
+    while True:
+        teil = gh(f"repos/{repo}/pulls?state=open&per_page=100&page={seite}") or []
+        prs += teil
+        if len(teil) < 100:
+            return prs
+        seite += 1
+
+
+def pin_pr_fortschreiben(repo: str, basis: str, zweig: str, name: str, dateien: dict[str, str | bytes], titel: str,
+                         text: str, modi: dict[str, str] | None = None) -> str:
+    """Der eine Pin-PR eines Quell-Repos (seit 0.58.0): `zweig` wird bei jedem Lauf neu auf den Kopf von `basis` gebaut
+    (ein Commit, immer auf main-Stand — das braucht ein Fast-Forward-Merge im Ziel), ein offener PR dafür bekommt Titel
+    und Text des neuen Stands, sonst wird einer geöffnet. Danach schließt es die anderen offenen Pin-PRs desselben
+    Quell-Repos (siehe `alter_pin_zweig`) mit Verweis und löscht ihre Zweige. Gibt die PR-URL.
+
+    Force-with-lease über die API, die keinen Vergleich beim Schreiben kennt: Der Zweig wird nur überschrieben, wenn
+    (1) alle seine Commits seit `basis` von der App stammen — ein Mensch, der etwas daraufgelegt hat, verliert es nicht
+    still —, (2) ein offener PR auf genau den gelesenen Kopf zeigt und (3) der Zweig unmittelbar vor dem Schreiben
+    noch dort steht. Sonst Fehler (Lauf rot, nichts überschrieben). Das Restfenster zwischen (3) und dem Schreiben ist
+    eine API-Runde.
+    """
+    eigner = repo.split("/")[0]
+    offen = (gh(f"repos/{repo}/pulls?state=open&head={eigner}:{zweig}") or [None])[0]
+    kopf = gh(f"repos/{repo}/git/ref/heads/{basis}")["object"]["sha"]
+    try:
+        gelesen = gh(f"repos/{repo}/git/ref/heads/{zweig}")["object"]["sha"]
+    except Fehler:
+        gelesen = None   # Zweig gibt es nicht (404): neu anlegen; legt ihn jemand dazwischen an, scheitert POST laut.
+    neu_baum = _baum_mit(repo, kopf, dateien, modi)
+    if gelesen is None:
+        if offen:
+            raise Fehler(f"{zweig}: offener PR #{offen.get('number')}, aber der Zweig fehlt — nichts überschrieben")
+        commit = gh(f"repos/{repo}/git/commits", "POST", {"message": titel, "tree": neu_baum, "parents": [kopf]})["sha"]
+        gh(f"repos/{repo}/git/refs", "POST", {"ref": f"refs/heads/{zweig}", "sha": commit})
+    else:
+        if offen and offen["head"]["sha"] != gelesen:
+            raise Fehler(f"{zweig}: PR #{offen.get('number')} zeigt auf {offen['head']['sha'][:12]}, der Zweig auf "
+                         f"{gelesen[:12]} — fremd bewegt, nichts überschrieben")
+        fremde = sorted({(c.get("author") or {}).get("login") or "(unbekannt)"
+                         for c in gh(f"repos/{repo}/compare/{basis}...{gelesen}").get("commits") or []} - {APP_LOGIN})
+        if fremde:
+            raise Fehler(f"{zweig}: Commits von {', '.join(fremde)} auf dem Zweig — fremd bewegt, nichts überschrieben. "
+                         "Den PR prüfen und schließen (oder den Zweig löschen); der nächste Lauf baut ihn neu.")
+        alt = gh(f"repos/{repo}/git/commits/{gelesen}")
+        if alt["tree"]["sha"] == neu_baum and [p["sha"] for p in alt.get("parents") or []] == [kopf]:
+            print(f"{zweig} steht schon auf diesem Stand — Zweig unverändert")
+        else:
+            commit = gh(f"repos/{repo}/git/commits", "POST", {"message": titel, "tree": neu_baum, "parents": [kopf]})["sha"]
+            jetzt = gh(f"repos/{repo}/git/ref/heads/{zweig}")["object"]["sha"]
+            if jetzt != gelesen:
+                raise Fehler(f"{zweig}: während des Laufs von {gelesen[:12]} auf {jetzt[:12]} bewegt — nichts überschrieben")
+            gh(f"repos/{repo}/git/refs/heads/{zweig}", "PATCH", {"sha": commit, "force": True})
+    if offen:
+        gh(f"repos/{repo}/pulls/{offen['number']}", "PATCH", {"title": titel, "body": text})
+        url = offen["html_url"]
+    else:
+        url = gh(f"repos/{repo}/pulls", "POST", {"title": titel, "head": zweig, "base": basis, "body": text})["html_url"]
+    for pr in _offene_prs(repo):
+        ref = pr["head"]["ref"]
+        if ((pr.get("user") or {}).get("login") != APP_LOGIN or pr["head"].get("repo", {}).get("full_name") != repo
+                or not alter_pin_zweig(ref, name, zweig) or not pr.get("title", "").startswith(f"{name}: pin ")):
+            continue
+        gh(f"repos/{repo}/issues/{pr['number']}/comments", "POST", {"body":
+           f"Superseded by {url}: the release automation now keeps one rolling pin PR per source repo "
+           f"(branch `{zweig}`), rebuilt on `{basis}` for each new state. Closing this one."})
+        gh(f"repos/{repo}/pulls/{pr['number']}", "PATCH", {"state": "closed"})
+        try:
+            gh(f"repos/{repo}/git/refs/heads/{ref}", "DELETE")
+        except Fehler as e:
+            print(f"::warning::PR #{pr['number']} geschlossen, Zweig {ref} nicht gelöscht: {e}")
+        print(f"Alter Pin-PR #{pr['number']} ({ref}) geschlossen")
+    return url
 
 
 def _tags(root: str) -> list[str]:
@@ -380,6 +514,14 @@ def vorbereiten(root: str, repo: str, basis: str, trocken: bool = False) -> str:
     version = naechste_version(k["schema"], quelltext, _tags(root), _heute())
     if trocken:
         return version
+    cl0 = k.get("changelog")
+    if cl0 and cl0.get("form") == "keepachangelog":
+        with open(os.path.join(root, cl0["datei"]), encoding="utf-8") as fh:
+            erlaubt = cl0.get("erlaubt") or ERLAUBT.get(cl0.get("sprache", "en"), ERLAUBT["en"])
+            schlecht = unreleased_unerlaubt(fh.read(), erlaubt)
+        if schlecht:
+            raise Fehler(f"{cl0['datei']}: unter [Unreleased] steht {', '.join(schlecht)} — das ist kein Patch-Release "
+                         f"(erlaubt: {', '.join(erlaubt)}; changelog.erlaubt). Kein Release-PR; das Release schneidet ein Mensch.")
     if k.get("versionsbefehl"):
         # Das Repo hat ein eigenes Werkzeug, das die Version überall setzt (TinySesam: scripts/_release.py) — es wird
         # benutzt, statt seine Stellen hier nachzubauen. Was es ändert, kommt in den PR (die Diff-Prüfung des Auto-Merge
@@ -553,9 +695,14 @@ def fc_pin(root: str, repo: str, tag: str, ziel: str, digests: dict[str, str] | 
     if regeln:
         hinweis = (f"Release assets: {', '.join(sorted(anhang_dateien)) or 'unchanged'} — each checked against the "
                    f"{SUMMEN} of release {tag}; the auto-merge checks pin lines and assets against that release.")
-    url = pr_oeffnen(ziel, basis, zweigname("pin", name, tag), {**geaendert, **anhang_dateien}, f"{name}: pin {tag}",
-                     f"Pin from the release run of {repo} {tag} (release automation):\n\n{zeilen}\n\n"
-                     f"Files: {', '.join(sorted(geaendert))}. {hinweis}", modi)
+    # Ein fester Zweig je Quell-Repo (seit 0.58.0). Mit Anhängen bleibt der Tag im Namen: der Auto-Merge des Ziels liest
+    # Quelle und Release der Anhänge aus `pin/<repo>-<tag>` (Vorlage, anhang_quelle) — auch dann bleibt es EIN offener PR.
+    zweig = zweigname("pin", name, tag) if regeln else zweigname("pin", name)
+    url = pin_pr_fortschreiben(ziel, basis, zweig, name, {**geaendert, **anhang_dateien}, f"{name}: pin {tag}",
+                               f"Pin from the release run of {repo} {tag} (release automation):\n\n{zeilen}\n\n"
+                               f"Files: {', '.join(sorted(geaendert))}. {hinweis}\n\n"
+                               f"Rolling PR: each new state of {repo} rebuilds `{zweig}` on `{basis}` and updates this PR.",
+                               modi)
     print(f"Pin-PR: {url}")
     return url
 
@@ -590,6 +737,13 @@ def main(argv: list[str]) -> int:
             fc_pin(a.root, repo, a.tag, a.ziel)
     except Fehler as e:
         print(f"::error::{e}", file=sys.stderr)
+        zusammenfassung = os.environ.get("GITHUB_STEP_SUMMARY")
+        if zusammenfassung:
+            try:
+                with open(zusammenfassung, "a", encoding="utf-8") as fh:
+                    fh.write(f"### Release automation stopped\n\n{e}\n")
+            except OSError:
+                pass
         return 1
     return 0
 
