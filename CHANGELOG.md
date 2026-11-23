@@ -8,6 +8,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ### Geändert
 
+- Dependabot: the root `pip` entry now excludes `panel/**` and `.github/**`; it had opened a duplicate PR for the bumps the
+  `uv` entry already makes (#211 duplicated #210).
 - Release rehearsal `generalprobe-beglaubigen`: the attestation retries (kit 0.54.0) — attempt 1 and 2 lenient, 20 s and
   60 s pause, attempt 3 strict — because Sigstore's transparency log sometimes answers "error fetching tlog entry -
   (404)" right after the write (PR #220). A new step verifies the probe attestation with the signer pinned.
