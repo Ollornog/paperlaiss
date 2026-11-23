@@ -36,6 +36,12 @@ updates:
       - dependency-name: "actions/create-github-app-token"
   - package-ecosystem: pip
     directory: /
+    # Only pyproject.toml. Without the exclusion this entry also read panel/requirements.in/.txt and opened a second PR
+    # for the same bumps as the uv entry (#211 duplicated #210, conflicting after #210 merged; the file belongs to the
+    # uv entry, the tool list to /.github/audit).
+    exclude-paths:
+      - "panel/**"
+      - ".github/**"
     # Wartezeit vor Versions-Updates (PO 2026-09-28), gilt nicht für Sicherheits-Updates.
     cooldown:
       default-days: 3
