@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-26
+
 ### Geändert
 
 - Dependabot: the root `pip` entry now excludes `panel/**` and `.github/**`; it had opened a duplicate PR for the bumps the
