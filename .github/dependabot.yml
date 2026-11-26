@@ -86,6 +86,13 @@ updates:
       default-days: 3
     schedule:
       interval: monthly
+    # TinySesam 0.31.0 is a breaking release (new baseline, refuses databases below schema 26; API keys issued anew) and
+    # the next release bundles more breaks. Tests start from a fresh database, so a bump would pass and roll out broken.
+    # Hold everything from 0.31 until the next TinySesam release with its upgrading list; 0.30.x stays allowed, it is the
+    # last release that migrates. The wildcard covers the name with extras (`tinysesam[oidc,argon2]`).
+    ignore:
+      - dependency-name: "tinysesam*"
+        versions: [">=0.31"]
     groups:
       klein:
         patterns: ["*"]
