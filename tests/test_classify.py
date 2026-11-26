@@ -1994,11 +1994,15 @@ classify.patch_doc = lambda did, patch, pause=None: (_ab["patch"].append(patch),
 classify.CFG, classify.DRY = {**classify.CFG, **_kcfg}, False
 try:
     classify.abbruch_markieren("5", _ue.HTTPError("u", 503, "Service Unavailable", {}, None))
+    classify.abbruch_markieren("5", _ue.HTTPError("u", 400, "Bad Request", {}, None))
 finally:
     for _n, _v in _alt.items():
         setattr(classify, _n, _v)
 r.check("Abbruch: Dokument bekommt KI-unsicher und eine Notiz mit dem Grund",
-        _ab["patch"] == [{"tags": [3, 1]}] and "Lauf abgebrochen" in _ab["send"][0][1]["note"], str(_ab))
+        _ab["patch"][:1] == [{"tags": [3, 1]}] and "Lauf abgebrochen" in _ab["send"][0][1]["note"], str(_ab))
+r.check("Abbruch (T-33): ein Fehler des Dokuments bittet ums Prüfen, ein Ausfall nur ums Neu-Klassifizieren",
+        "bitte neu klassifizieren" in _ab["send"][0][1]["note"] and "bitte prüfen und neu klassifizieren" in _ab["send"][1][1]["note"]
+        and "400" in _ab["send"][1][1]["note"], str(_ab["send"]))
 
 # mistral_ocr itself leaves invented pages out of the text and reports them.
 _alt_ms, _alt_get = classify.mistral_senden, classify.get
@@ -2029,8 +2033,8 @@ try:
 finally:
     classify.main, classify.abbruch_markieren = _alt_main, _alt_ab
     os.environ.pop("CLASSIFY_DOC", None)
-r.check("Abbruch: nach 503 markiert, nach 400 nicht (Fehler des Dokuments, nicht der Lage)",
-        _abr == [("5", 503)] and _c503 == 2 and _c400 == 2, str(_abr))
+r.check("Abbruch: nach 503 und nach 400 markiert — jeder Abbruch, nicht nur ein Ausfall (T-33)",
+        _abr == [("5", 503), ("5", 400)] and _c503 == 2 and _c400 == 2, str(_abr))
 
 # 3. The model names a known alias: use that correspondent, do not create a new one .
 _meta_alt = dict(classify.CORR_META)
@@ -2515,42 +2519,139 @@ r.check("T-14 billing month: label, old 'Monat/Jahr' box, 'Abrechnung für'; a c
         and classify.abrechnungsmonat("Abrechnungsmonat 04.2005/ 2") == (2005, 4)
         and classify.abrechnungsmonat("Entgeltabrechnung für Februar 2024") == (2024, 2)
         and classify.abrechnungsmonat("Rückrechnung März 2022") is None and classify.abrechnungsmonat("") is None)
-r.check("T-14 month end: first day → last day of the billing month, also from a correction month and without proposal",
-        classify.monatsletzter_datum("2023-06-01", "Abrechnungsmonat Juni 2023", "Lohnabrechnung", _T) == "2023-06-30"
-        and classify.monatsletzter_datum("2022-03-01", "Rückrechnung März 2022\nAbrechnungsmonat Juni 2022", "Lohnabrechnung", _T) == "2022-06-30"
-        and classify.monatsletzter_datum(None, "Abrechnungsmonat Februar 2024", "Lohnabrechnung", _T) == "2024-02-29"
-        and classify.monatsletzter_datum("1999-08-01", "Monat/Jahr 8 / 99", "Lohnabrechnung", _T) == "1999-08-31"
-        and classify.monatsletzter_datum("2024-03-01", "Gehalt März 2024", "Lohnabrechnung", _T) == "2024-03-31"
-        and classify.monatsletzter_datum("2022-06-01", "Eintritt 01.06.2022 Abrechnungsmonat Juni 2022", "Lohnabrechnung", _T)
-        == "2022-06-30")
-r.check("T-14 month end: a date of issue stays, other types and an empty list are untouched",
-        classify.monatsletzter_datum("2005-05-05", "Erstellungsdatum 05.05.2005 Abrechnungsmonat 04.2005/ 2", "Lohnabrechnung", _T) == "2005-05-05"
-        and classify.monatsletzter_datum("2024-02-01", "Abrechnungsmonat Februar 2024", "Rechnung", _T) == "2024-02-01"
-        and classify.monatsletzter_datum("2024-02-01", "Abrechnungsmonat Februar 2024", "Lohnabrechnung", []) == "2024-02-01"
-        and classify.monatsletzter_datum("2024-02-01", "Lohn", "Lohnabrechnung", _T) == "2024-02-01"
-        and classify.monatsletzter_datum("2018-07-17", "Abrechnungsmonat Juni 2018\nDie Abrechnung wurde am 17.07.2018 um 11:25 erstellt.",
-                                         "Lohnabrechnung", _T) == "2018-07-17"
-        and classify.monatsletzter_datum("2022-07-01", "Abrechnungsmonat Juni 2022 Erstellungsdatum 01.07.2022", "Lohnabrechnung", _T)
+r.check("T-14/T-33 month start: the first day of the billing month, also from a correction month and without proposal",
+        classify.abrechnungsmonat_datum("2023-06-30", "Abrechnungsmonat Juni 2023", "Lohnabrechnung", _T) == "2023-06-01"
+        and classify.abrechnungsmonat_datum("2022-03-01", "Rückrechnung März 2022\nAbrechnungsmonat Juni 2022", "Lohnabrechnung", _T) == "2022-06-01"
+        and classify.abrechnungsmonat_datum(None, "Abrechnungsmonat Februar 2024", "Lohnabrechnung", _T) == "2024-02-01"
+        and classify.abrechnungsmonat_datum("1999-08-31", "Monat/Jahr 8 / 99", "Lohnabrechnung", _T) == "1999-08-01"
+        and classify.abrechnungsmonat_datum("2024-03-31", "Gehalt März 2024", "Lohnabrechnung", _T) == "2024-03-01"
+        and classify.abrechnungsmonat_datum("2022-06-30", "Eintritt 01.06.2022 Abrechnungsmonat Juni 2022", "Lohnabrechnung", _T)
+        == "2022-06-01")
+r.check("T-14 month start: a date of issue stays, other types and an empty list are untouched",
+        classify.abrechnungsmonat_datum("2005-05-05", "Erstellungsdatum 05.05.2005 Abrechnungsmonat 04.2005/ 2", "Lohnabrechnung", _T) == "2005-05-05"
+        and classify.abrechnungsmonat_datum("2024-02-29", "Abrechnungsmonat Februar 2024", "Rechnung", _T) == "2024-02-29"
+        and classify.abrechnungsmonat_datum("2024-02-29", "Abrechnungsmonat Februar 2024", "Lohnabrechnung", []) == "2024-02-29"
+        and classify.abrechnungsmonat_datum("2024-02-29", "Lohn", "Lohnabrechnung", _T) == "2024-02-29"
+        and classify.abrechnungsmonat_datum("2018-07-17", "Abrechnungsmonat Juni 2018\nDie Abrechnung wurde am 17.07.2018 um 11:25 erstellt.",
+                                            "Lohnabrechnung", _T) == "2018-07-17"
+        and classify.abrechnungsmonat_datum("2022-07-01", "Abrechnungsmonat Juni 2022 Erstellungsdatum 01.07.2022", "Lohnabrechnung", _T)
         == "2022-07-01"
-        and classify.monatsletzter_datum("2022-10-03", "Abrechnungsmonat Oktober 2022\n03.10.2022 - 03.10.2022: Feiertag",
-                                         "Lohnabrechnung", _T) == "2022-10-31")
+        and classify.abrechnungsmonat_datum("2022-10-03", "Abrechnungsmonat Oktober 2022\n03.10.2022 - 03.10.2022: Feiertag",
+                                            "Lohnabrechnung", _T) == "2022-10-01")
 r.check("T-14 billing month: OCR columns (labels first, values later in the same order), correction first",
         classify.abrechnungsmonat("Hamburg\n\nRückrechnung\nAbrechnungsmonat\n\nKostenstelle\n\nSeite |\n\nJanuar 2022\nJuni 2022\n")
         == (2022, 6)
         and classify.abrechnungsmonat("Hamburg\nAbrechnungsmonat\n\nKostenstelle\n\nJuni 2022\n") == (2022, 6)
         and classify.ausstellungsdatum("2011-06-10", "Datum: 10.06.2011") and classify.ausstellungsdatum("2025-07-28", "Hamburg, den 28.07.2025")
         and not classify.ausstellungsdatum("2022-10-03", "03.10.2022 - 03.10.2022: Feiertag"))
-_alt_ml = classify.CFG.get("monatsletzter_typen")
+_alt_ml = classify.CFG.get("abrechnungsmonat_typen")
 try:
-    classify.CFG["monatsletzter_typen"] = _T
+    classify.CFG["abrechnungsmonat_typen"] = _T
     _w1 = classify.wirksames_datum({"document_date": "2022-01-01", "document_type": "Lohnabrechnung"},
                                    "Rückrechnung Januar 2022\nAbrechnungsmonat Juni 2022", {})
-    classify.CFG["monatsletzter_typen"] = []
-    _w2 = classify.wirksames_datum({"document_date": "2022-06-01", "document_type": "Lohnabrechnung"}, "Abrechnungsmonat Juni 2022", {})
+    _w3 = classify.wirksames_datum({"document_date": "2026-11-26", "document_type": "Lohnabrechnung"},
+                                   "ABRECHNUNGSBELEG\nfür den Zeitraum Juli 2026 Fnr / Pnr: 4 / 1234", {})
+    classify.CFG["abrechnungsmonat_typen"] = []
+    _w2 = classify.wirksames_datum({"document_date": "2022-06-30", "document_type": "Lohnabrechnung"}, "Abrechnungsmonat Juni 2022", {})
 finally:
-    classify.CFG["monatsletzter_typen"] = _alt_ml
-r.check("T-14 wiring: the effective date takes the month end with the key set, keeps the proposal without it",
-        _w1 == "2022-06-30" and _w2 == "2022-06-01" and classify.CFG["monatsletzter_typen"] == [], f"{_w1} {_w2}")
+    classify.CFG["abrechnungsmonat_typen"] = _alt_ml
+r.check("T-14/T-33 wiring: the effective date takes the month start with the key set, keeps the proposal without it",
+        _w1 == "2022-06-01" and _w3 == "2026-07-01" and _w2 == "2022-06-30" and classify.CFG["abrechnungsmonat_typen"] == [],
+        f"{_w1} {_w3} {_w2}")
+r.check("T-33 the old key is gone: no default for monatsletzter_typen, abrechnungsmonat_typen off by default",
+        "monatsletzter_typen" not in classify._BEKANNT and _alt_ml == [])
+# ==== T-33: Austrian payslips (Sage DPW) name the month only as a word and print no annual totals
+def _beleg(kopf, gehalt="3.087,31", netto="2.252,44"):
+    """A made-up Austrian payslip in the layout of the anlass (no real person, no real numbers)."""
+    return (f"Muster Austria GmbH\n5000 Musterstadt Musterweg 1\n\nABRECHNUNGSBELEG\n{kopf} Fnr / Pnr: 4 / 12345678\n"
+            "Eintritt am: 01-10-2024\n\nHerr\nMax MUSTER\nMusterstraße 1\n5000 Musterstadt\n\n"
+            f"Lohnart Bezeichnung Einheiten Satz / BMG Abzüge Bezüge\n1000 Gehalt {gehalt}\n5070 Essenszuschuss 57,60\n"
+            "8250 Pensionskassenbeitrag DG 23,00\n3.153,29\nSumme Abzüge 59,49-\n30/30/0 3.027,82 548,64 548,64-\n"
+            f"2.480,69 292,72-\n4,81 841,36-\nAuszahlung {netto}\n3.036,20 46,45 91,09 122,97 637,00\n")
+_juli, _juni = _beleg("für den Zeitraum Juli 2026"), _beleg("für den Zeitraum Juni 2026")
+r.check("T-33 billing month: 'für den Zeitraum <Monat> <Jahr>', Austrian Jänner/Feber, period 13/14 = December",
+        classify.abrechnungsmonat(_juli) == (2026, 7)
+        and classify.abrechnungsmonat("ABRECHNUNGSBELEG\nfür den Abrechnungszeitraum Feber 2018") == (2018, 2)
+        and classify.abrechnungsmonat("ABRECHNUNGSBELEG\nfür den Zeitraum Jänner 2018 Fnr") == (2018, 1)
+        and classify.abrechnungsmonat("Ergebnis der Rollungen aus Periode 13 2025 Fnr / Pnr") == (2025, 12)
+        and classify.abrechnungsmonat("Ergebnis der Rollungen aus Periode 14 2025") == (2025, 12)
+        and classify.abrechnungsmonat("Periode 12 2025") is None
+        and classify.abrechnungsmonat("Lohnzettel für den Zeitraum Bezugsauszahlende Stelle\nvom 01.01. bis 31.12.2025") is None
+        and classify.monat_belegt("2018-02-01", "für den Zeitraum Feber 2018"),
+        f"{classify.abrechnungsmonat(_juli)}")
+r.check("T-33 numbers: the billing month as a word counts as MM/JJJJ, every slip of a compilation",
+        "07/2026" in classify.kennzahlen(_juli) and "06/2026" not in classify.kennzahlen(_juli)
+        and {"07/2026", "06/2026"} <= classify.kennzahlen(_juli + "\n" + _juni)
+        and "12/2025" in classify.kennzahlen("aus Periode 14 2025 Gehalt 871,40"))
+_d_juni = {"id": 140, "title": "Lohnabrechnung 06/2026", "content": _juni, "page_count": 1}
+_d_kopie = {"id": 141, "title": "Lohnabrechnung 07/2026", "content": _beleg("für den Zeitraum Juli 2026"), "page_count": 1}
+r.check("T-33 duplicate: two months with the same salary are none; the same month twice still is",
+        classify.dublette(_juli, 1, [_d_juni]) is None
+        and (classify.dublette(_juli, 1, [_d_kopie]) or "").startswith("wie Dokument 141")
+        and classify.teilkopie(_juni, 1, [{"id": 9, "title": "Mappe", "content": _juli + "\n" + _juni, "page_count": 2}]),
+        f"{classify.dublette(_juli, 1, [_d_juni])} {classify.dublette(_juli, 1, [_d_kopie])}")
+
+# Two runs create the same new correspondent at once: the second gets 400 and takes the first one's (T-33).
+_ka = {"get": [], "send": []}
+_alt_ka = {n: getattr(classify, n) for n in ("get", "send")}
+
+
+def _ka_send(antwort):
+    def send(p, d, m="PATCH", **k):
+        _ka["send"].append((p, d))
+        if isinstance(antwort, Exception):
+            raise antwort
+        return antwort
+    return send
+
+
+def _ka_get(ergebnis):
+    def get(p, raw=False, warten=None):
+        _ka["get"].append(p)
+        return {"results": ergebnis}
+    return get
+
+
+try:
+    classify.send, classify.get = _ka_send({"id": 615, "name": "Fortinet"}), _ka_get([])
+    _k_neu = classify.korrespondent_anlegen("Fortinet")
+    classify.send = _ka_send(_ue.HTTPError("u", 400, "Bad Request", {}, None))
+    classify.get = _ka_get([{"id": 614, "name": "Fortinet"}])
+    try:
+        _k_da = classify.korrespondent_anlegen("Fortinet & Co")
+    except _ue.HTTPError as _e:
+        _k_da = ("Fehler", _e.code)
+    classify.get = _ka_get([])
+    try:
+        classify.korrespondent_anlegen("Leer")
+        _k_leer = "kein Fehler"
+    except _ue.HTTPError as _e:
+        _k_leer = _e.code
+    classify.send = _ka_send(_ue.HTTPError("u", 403, "Forbidden", {}, None))
+    try:
+        classify.korrespondent_anlegen("Verboten")
+        _k_403 = "kein Fehler"
+    except _ue.HTTPError as _e:
+        _k_403 = _e.code
+finally:
+    for _n, _v in _alt_ka.items():
+        setattr(classify, _n, _v)
+r.check("T-33 new correspondent: created → NEU; 400 and the name exists → that one (looked up by exact name); "
+        "400 without a match and other errors pass on",
+        _k_neu == (615, "NEU='Fortinet'") and _k_da == (614, "exakt='Fortinet' (gleichzeitig angelegt)")
+        and "/correspondents/?name__iexact=Fortinet%20%26%20Co" in _ka["get"] and _k_leer == 400 and _k_403 == 403
+        and classify.korrespondent_ergebnis(_k_da[1]) == "Fortinet",
+        f"{_k_neu} {_k_da} {_k_leer} {_k_403} {_ka['get']}")
+_alt_ka2 = classify.korrespondent_anlegen
+_ka_ruf = []
+classify.korrespondent_anlegen = lambda n: (_ka_ruf.append(n), (614, "exakt='Neuhaus Lager GmbH' (gleichzeitig angelegt)"))[1]
+try:
+    _kr = _lauf([{**_ok, "correspondent": "Neuhaus Lager GmbH"}], dry=False)
+finally:
+    classify.korrespondent_anlegen = _alt_ka2
+r.check("T-33 wiring: a run that creates a correspondent goes through korrespondent_anlegen and writes its id",
+        _ka_ruf == ["Neuhaus Lager GmbH"] and [p.get("correspondent") for p in _kr.get("patch", [])][:1] == [614],
+        f"{_ka_ruf} {_kr.get('patch')}")
 _su, _, _sv = classify.stammdaten_nachtragen({}, {"ustid": "DE113822785"}, "", _eg, "Test", text="Brief ohne Kennung")
 _su2, _, _ = classify.stammdaten_nachtragen({}, {"ustid": "DE113822785"}, "", _eg, "Test", text="USt.-ID Nr. DE 113 822 785")
 r.check("T-14 VAT ID: not learned (and no finding) when the text does not print it; learned when it does",

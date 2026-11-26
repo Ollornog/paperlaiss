@@ -6,6 +6,32 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-27
+
+Austrian payslips, the date of payslips and an unflagged broken-off run (backlog T-33).
+
+### Geändert
+
+- **Breaking (config): `monatsletzter_typen` is now `abrechnungsmonat_typen`, and the date is the FIRST day of the
+  billing month**, no longer the last (installation rule changed). A labelled date of issue ("wurde am … erstellt",
+  "Erstellungsdatum") still wins. A config that still names `monatsletzter_typen` has no effect; rename the key.
+  Trace key `datum_abrechnungsmonat` (was `datum_monatsletzter`).
+- Every run that breaks off flags the document (`unsicher_tag` and, with `pruef_notiz`, a note), not only one that broke
+  off on an outage: a 400 from Paperless left a document without flag and note. The note asks to check the document
+  when the error was not an outage.
+
+### Behoben
+
+- Billing month of Austrian payslips (Sage DPW): "für den Zeitraum Juli 2026" and "für den Abrechnungszeitraum …" are
+  read, as are the Austrian month names "Jänner" and "Feber"; "Periode 13 <year>" / "Periode 14 <year>" (13th/14th
+  salary, rollings) is December.
+- Duplicate check: the billing month counts among a document's numbers also when the text names it as a word (every
+  slip of a compilation). Austrian payslips print no annual totals, so two months with the same salary had the same
+  numbers and were reported as copies of each other. Measured on one installation's 27 payslips: 12 hints, 5 with the
+  wrong month → 9 hints, all right.
+- Two runs that create the same new correspondent at once: the second got HTTP 400 (name taken) and broke off. Now it
+  looks the correspondent up by its exact name and uses it.
+
 ## [0.15.1] - 2026-11-26
 
 ### Sicherheit

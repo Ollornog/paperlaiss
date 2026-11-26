@@ -266,8 +266,9 @@ classifier uses it in three ways:
   the `kaputt_tag` instead. If the model names an own person, or a health insurer/collecting agency on a
   type the employer issues (`arbeitgeber_typen`, `einzugsstellen_muster`), it is asked once for the
   issuer; without an answer it sets no correspondent and the run is marked. With `pruef_notiz` the
-  reason is written as a note on the document (once per wording). A run that breaks off on an outage
-  (Paperless or Mistral 429/5xx after all retries) gets the `unsicher_tag` and a note. The **control
+  reason is written as a note on the document (once per wording). A run that breaks off — on an outage
+  (Paperless or Mistral 429/5xx after all retries) or, since 0.16, on any other error — gets the `unsicher_tag`
+  and a note. The **control
   run** (`CLASSIFY_KONTROLLE=<ids>`) applies the checks without the model to documents already in
   Paperless and flags what it finds; nothing else changes. Since 0.6: an IBAN (field or master data) is
   taken only with valid check digits (ISO 13616) and as printed in the text; an identifier field takes no
@@ -293,9 +294,13 @@ classifier uses it in three ways:
   is split and checked part by part, a cost centre ("Kostenstelle") is never one; the name similarity that
   picks the pass-2 candidates also looks at aliases, and a proposal that starts with a candidate's whole
   name (two words or more, "Deutsche Bank Privat- und Geschäftskunden AG" → "Deutsche Bank") goes to pass 2.
-  Since 0.9: on the types of `monatsletzter_typen` the date is the last day of the billing month, decided in code
-  from "Abrechnungsmonat …" / "Monat/Jahr …" (never from a correction line), unless a labelled date of issue is
-  printed; a VAT ID is only learned when the text prints it.
+  Since 0.9: on the types of `abrechnungsmonat_typen` (up to 0.15 `monatsletzter_typen`, which set the last day)
+  the date is the first day of the billing month, decided in code from "Abrechnungsmonat …" / "für den Zeitraum …"
+  / "Monat/Jahr …" (never from a correction line; Austrian "Periode 13/14 <year>" is December; "Jänner" and
+  "Feber" count), unless a labelled date of issue is printed; a VAT ID is only learned when the text prints it.
+  Since 0.16 the billing month counts among a document's numbers also when the text names it as a word, so two
+  payslips without annual totals and with the same salary are no duplicate; when two runs create the same new
+  correspondent at once, the second takes the one the first created.
   Since 0.10: a role, a placeholder or two letters never become a new correspondent (`allerweltsnamen`,
   `korrespondent_min_zeichen`), and a bracket the text does not print is dropped before matching ("AVG
   (Albatros Versicherungsdienst GmbH)" → "AVG").

@@ -106,11 +106,12 @@ CFG = {
     # and none of our own persons is flagged for checking (T-12: a stack scan of one person held the tax
     # notices and payslips of a former partner). Per account: konten[<username>]["fremde_namen"].
     "fremde_namen": [],
-    # Types whose date is the LAST day of the billing month when the document has no date of issue (a payslip
-    # names only "Abrechnungsmonat Juni 2023" or "Monat/Jahr 8 / 99"). Decided in code from the text, not
-    # left to the model: it proposed the first day in 43 of 67 payslips, and the month of a correction
-    # ("Rückrechnung März 2022") instead of the billing month (T-14). Empty = off.
-    "monatsletzter_typen": [],
+    # Types whose date is the FIRST day of the billing month when the document has no date of issue (a payslip
+    # names only "Abrechnungsmonat Juni 2023", "für den Zeitraum Juli 2026" or "Monat/Jahr 8 / 99"). Decided in
+    # code from the text, not left to the model: it proposed the day of the import, or the month of a correction
+    # ("Rückrechnung März 2022") instead of the billing month (T-14). Up to 0.15 the key was `monatsletzter_typen`
+    # and set the LAST day (T-33). Empty = off.
+    "abrechnungsmonat_typen": [],
     # Warranty (T-16): on a purchase (types in `garantie_typen`, empty = any type) the model fills the years
     # field — the statutory default `garantie_standard_jahre`, or a longer manufacturer warranty printed in the
     # text; nothing for services, subscriptions, insurances, contracts. The end field is never the model's:
@@ -1900,17 +1901,23 @@ def monat_belegt(iso, text):
     t = str(text or "")
     j, jj, m = str(tag.year), str(tag.year)[2:], tag.month
     zahl = rf"(?<![\d.,/])0?{m}\s*[./]\s*(?:{j}|{jj})(?![\d.,])"
-    name = rf"\b{_MONATE[m - 1]}\s+{j}\b" + (rf"|\bJänner\s+{j}\b" if m == 1 else "")
+    name = rf"\b{_MONATE[m - 1]}\s+{j}\b" + {1: rf"|\bJänner\s+{j}\b", 2: rf"|\bFeber\s+{j}\b"}.get(m, "")
     return bool(re.search(zahl, t) or re.search(name, t, re.IGNORECASE))
 
 
-_MONAT_NR = {**{n.lower(): i for i, n in enumerate(_MONATE, 1)}, "maerz": 3, "marz": 3, "jänner": 1, "jaenner": 1}
+# Austrian names too: Jänner, Feber (T-33).
+_MONAT_NR = {**{n.lower(): i for i, n in enumerate(_MONATE, 1)}, "maerz": 3, "marz": 3, "jänner": 1, "jaenner": 1,
+             "feber": 2}
 _MONAT_NAME = "|".join(sorted(_MONAT_NR, key=len, reverse=True))
-# The billing month, in order of trust: a labelled "Abrechnungsmonat"/"Abrechnungszeitraum", then the
-# "Monat/Jahr" box of old payslips, then "Abrechnung für <Monat> <Jahr>". A correction line
+# Austrian payroll (Sage DPW) settles the 13th and 14th salary and the rollings of the year as "Periode 13/14 <Jahr>"
+# — they belong to December (T-33).
+_PERIODE_DEZEMBER = re.compile(r"\bPeriode\s+1[34]\s+((?:19|20)\d\d)\b", re.IGNORECASE)
+# The billing month, in order of trust: a labelled "Abrechnungsmonat"/"Abrechnungszeitraum" or "für den Zeitraum"
+# (Austria, T-33), then the "Monat/Jahr" box of old payslips, then "Abrechnung für <Monat> <Jahr>". A correction line
 # ("Rückrechnung März 2022") is never one of these — it names the corrected month, not the billing month.
 _ABRECHNUNGSMONAT = [
-    re.compile(rf"Abrechnungs(?:monat|zeitraum)\s*:?\s*({_MONAT_NAME})\s+((?:19|20)\d\d)\b", re.IGNORECASE),
+    re.compile(rf"(?:Abrechnungs(?:monat|zeitraum)|\bfür\s+den\s+Zeitraum)\s*:?\s*({_MONAT_NAME})\s+((?:19|20)\d\d)\b",
+               re.IGNORECASE),
     re.compile(r"Abrechnungs(?:monat|zeitraum)\s*:?\s*(0?[1-9]|1[0-2])\s*[./]\s*((?:19|20)?\d\d)(?![\d.])", re.IGNORECASE),
     re.compile(r"Monat\s*/\s*Jahr[\s:\-|]*?(0?[1-9]|1[0-2])\s*/\s*((?:19|20)?\d\d)(?!\d)", re.IGNORECASE),
     re.compile(rf"(?:Entgelt|Gehalts|Lohn|Verdienst|Bezüge)?abrechnung\s+(?:für\s+)?(?:den\s+Monat\s+)?({_MONAT_NAME})\s+((?:19|20)\d\d)\b",
@@ -1937,22 +1944,40 @@ def _abrechnungsmonat_spalte(text):
     return _MONAT_NR.get(werte[index][0].lower()), int(werte[index][1])
 
 
+def _monat_aus(m):
+    """(year, month) from a match of `_ABRECHNUNGSMONAT`, or None."""
+    mon = _MONAT_NR.get(m.group(1).lower()) if not m.group(1).isdigit() else int(m.group(1))
+    jahr = int(m.group(2))
+    if jahr < 100:
+        jahr += 1900 if jahr >= 50 else 2000
+    return (jahr, mon) if mon and 1950 <= jahr <= 2035 else None
+
+
 def abrechnungsmonat(text):
     """(year, month) of the billing month named in the text, or None."""
-    spalte = _abrechnungsmonat_spalte(str(text or ""))
+    t = str(text or "")
+    spalte = _abrechnungsmonat_spalte(t)
     if spalte and spalte[0]:
         return spalte[1], spalte[0]
     for rx in _ABRECHNUNGSMONAT:
-        m = rx.search(str(text or ""))
-        if not m:
-            continue
-        mon = _MONAT_NR.get(m.group(1).lower()) if not m.group(1).isdigit() else int(m.group(1))
-        jahr = int(m.group(2))
-        if jahr < 100:
-            jahr += 1900 if jahr >= 50 else 2000
-        if mon and 1950 <= jahr <= 2035:
-            return jahr, mon
+        m = rx.search(t)
+        if m and _monat_aus(m):
+            return _monat_aus(m)
+    m = _PERIODE_DEZEMBER.search(t)
+    if m and 1950 <= int(m.group(1)) <= 2035:
+        return int(m.group(1)), 12
     return None
+
+
+def abrechnungsmonate(text):
+    """Every billing month the text names with a label, as "MM/JJJJ" — a compilation of payslips names one per slip."""
+    t = str(text or "")
+    am = abrechnungsmonat(t)
+    monate = {am} if am else set()
+    for rx in _ABRECHNUNGSMONAT:
+        monate |= {x for x in map(_monat_aus, rx.finditer(t)) if x}
+    monate |= {(int(m.group(1)), 12) for m in _PERIODE_DEZEMBER.finditer(t) if 1950 <= int(m.group(1)) <= 2035}
+    return {f"{mon:02d}/{jahr}" for jahr, mon in monate}
 
 
 _DATUM_ETIKETT = r"(?:Erstellungs|Ausstellungs|Druck|Abrechnungs)?datum|Datum|erstellt am|wurde am|, den|[A-ZÄÖÜ][a-zäöüß]+,"
@@ -1976,8 +2001,8 @@ def _monatsletzter(jahr, monat):
     return ((datetime.date(jahr, monat, 28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)).isoformat()
 
 
-def monatsletzter_datum(datum, text, typ, typen):
-    """The date of a document of the `monatsletzter_typen`: the last day of the billing month (T-14).
+def abrechnungsmonat_datum(datum, text, typ, typen):
+    """The date of a document of the `abrechnungsmonat_typen`: the first day of the billing month (T-14, T-33).
 
     A date of issue stays: the proposal is kept when the text prints it after a label (`ausstellungsdatum`).
     Otherwise the billing month from the text decides; without one, the month of the proposal if the text names
@@ -1988,23 +2013,22 @@ def monatsletzter_datum(datum, text, typ, typen):
         return datum                                            # a date of issue
     am = abrechnungsmonat(text)
     if am:
-        return _monatsletzter(*am)
+        return datetime.date(am[0], am[1], 1).isoformat()
     if datum and monat_belegt(datum, text):
-        tag = datetime.date.fromisoformat(datum)
-        return _monatsletzter(tag.year, tag.month)
+        return datum[:8] + "01"
     return datum
 
 
 def wirksames_datum(prop, content, doc):
     """Das Datum, das tatsächlich geschrieben würde: KI-Vorschlag, nur mit Beleg im Text und nicht
     der Importtag einer Office-Datei. Eine Funktion für Lauf und Trockenlauf, damit der Trockenlauf
-    (und die Testsammlung) dasselbe zeigt wie ein echter Lauf. Bei den `monatsletzter_typen` entscheidet
-    der Code (T-14)."""
+    (und die Testsammlung) dasselbe zeigt wie ein echter Lauf. Bei den `abrechnungsmonat_typen` entscheidet
+    der Code (T-14, T-33)."""
     datum = dokument_datum(prop)
-    if CFG.get("monatsletzter_typen"):
-        neu = monatsletzter_datum(datum, content, prop.get("document_type"), CFG.get("monatsletzter_typen"))
+    if CFG.get("abrechnungsmonat_typen"):
+        neu = abrechnungsmonat_datum(datum, content, prop.get("document_type"), CFG.get("abrechnungsmonat_typen"))
         if neu != datum:
-            TRACE["datum_monatsletzter"] = {"vorschlag": datum, "gesetzt": neu}
+            TRACE["datum_abrechnungsmonat"] = {"vorschlag": datum, "gesetzt": neu}
             return neu
     if datum and not datum_belegt(datum, content) and not monat_belegt(datum, content):
         TRACE["datum_ohne_beleg"] = datum
@@ -2852,9 +2876,26 @@ def nur_markieren(did, doc, tag_ids_on, befunde, marker_id, unsicher_id, kaputt_
     save_trace(did)
 
 
+def korrespondent_anlegen(name):
+    """Create the correspondent `name`: (id, trace text). Paperless answers 400 when the name is taken — another run
+    created it a moment ago (T-33: two documents of one sender imported together, the second run broke off). Then the
+    existing one is looked up by name and used; any other 400 is passed on."""
+    try:
+        nc = send("/correspondents/", {"name": name, "owner": None}, "POST")
+        return nc["id"], f"NEU='{name}'"
+    except urllib.error.HTTPError as e:
+        if e.code != 400:
+            raise
+        treffer = get(f"/correspondents/?name__iexact={urllib.parse.quote(name)}").get("results") or []
+        if not treffer:
+            raise
+        return treffer[0]["id"], f"exakt='{treffer[0].get('name', name)}' (gleichzeitig angelegt)"
+
+
 def abbruch_markieren(did, e):
-    """After a run broke off on a passing outage (overload, network): flag the document and say why, so it
-    does not silently stay unclassified (T-10: two payslips after a two-minute 503 of the model)."""
+    """After a run broke off — on a passing outage (overload, network) or on any other error: flag the document and
+    say why, so it does not silently stay unclassified (T-10: two payslips after a two-minute 503 of the model;
+    T-33: a 400 from Paperless left a document without flag and note)."""
     if DRY or not did or not CFG.get("unsicher_tag"):
         return
     try:
@@ -2864,7 +2905,8 @@ def abbruch_markieren(did, e):
         if uid and uid not in (doc.get("tags") or []):
             patch_doc(did, {"tags": list(doc.get("tags") or []) + [uid]})
         if CFG.get("pruef_notiz"):
-            notiz_setzen(did, befund_text({"abbruch": f"{e!r} — bitte neu klassifizieren"}))
+            notiz_setzen(did, befund_text({"abbruch": f"{e!r} — bitte "
+                                           + ("neu klassifizieren" if voruebergehend(e) else "prüfen und neu klassifizieren")}))
     except Exception as e2:
         log(f"abbruch-markieren-fail {did}: {e2!r}")
 
@@ -3031,9 +3073,12 @@ _MONAT_JAHR = re.compile(r"(?<![\d.,/])(0?[1-9]|1[0-2])\s?[./]\s?((?:19|20)\d{2}
 
 def kennzahlen(text):
     """Beträge, Daten, lange Ziffernfolgen und Abrechnungsmonate („MM/JJJJ“) — was zwei Fassungen desselben
-    Dokuments gemeinsam haben."""
+    Dokuments gemeinsam haben. The billing month also when the text names it as a word: an Austrian payslip
+    („für den Zeitraum Juli 2026“) prints no annual totals, so two months with the same salary had the same numbers
+    and were reported as copies (T-33)."""
     t = str(text or "")
-    return set(_KENNZAHL.findall(t)) | {f"{int(m):02d}/{j}" for m, j in _MONAT_JAHR.findall(t)}
+    return (set(_KENNZAHL.findall(t)) | {f"{int(m):02d}/{j}" for m, j in _MONAT_JAHR.findall(t)}
+            | abrechnungsmonate(t))
 
 
 def _ist_datum(z):
@@ -4309,8 +4354,7 @@ def main():
                 else:
                     # No owner (T-18): Paperless makes the calling account the owner unless the request names one.
                     # A correspondent owned by the service account is invisible to every person without superuser.
-                    nc = send("/correspondents/", {"name": corr_name, "owner": None}, "POST")
-                    corr_id = nc["id"]; corr_info = f"NEU='{corr_name}'"
+                    corr_id, corr_info = korrespondent_anlegen(corr_name)
         TRACE["correspondent"] = {"vorschlag": corr_name, "ergebnis": corr_info, "pass2": pass2}
 
     # --- Tags (nur wenn Tagging aktiv) ---
@@ -4806,7 +4850,7 @@ def ausfuehren():
         eid = LAUF_DOC[0] or os.environ.get("CLASSIFY_DOC") or os.environ.get("DOCUMENT_ID") or "?"
         log(f"FEHLER {eid} | " + repr(e) + " | " + traceback.format_exc().replace("\n", " ")[:600])
         save_trace(None if eid == "?" else eid, {"error": repr(e), "traceback": traceback.format_exc()[:1500]})
-        if voruebergehend(e) and eid != "?":
+        if eid != "?":
             abbruch_markieren(eid, e)
         return 2 if os.environ.get("CLASSIFY_DOC") else 0
     finally:

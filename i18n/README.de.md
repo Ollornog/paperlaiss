@@ -241,8 +241,14 @@ Stammdatensystem, ein Skript). Der Klassifizierer nutzt das dreifach:
   eine eigene Person oder eine Krankenkasse/Einzugsstelle bei einem Typ vom Arbeitgeber
   (`arbeitgeber_typen`, `einzugsstellen_muster`), fragt der Lauf einmal nach dem Aussteller; ohne Antwort
   setzt er keinen Korrespondenten und markiert. Mit `pruef_notiz` steht der Grund als Notiz am Dokument
-  (je Wortlaut einmal). Ein Lauf, der an einem Ausfall abbricht (Paperless oder Mistral 429/5xx nach allen
-  Wiederholungen), bekommt den `unsicher_tag` und eine Notiz. Der **Kontrolllauf**
+  (je Wortlaut einmal). Ein Lauf, der abbricht — an einem Ausfall (Paperless oder Mistral 429/5xx nach allen
+  Wiederholungen) oder seit 0.16 an jedem anderen Fehler —, bekommt den `unsicher_tag` und eine Notiz.
+  Bei den Typen aus `abrechnungsmonat_typen` (bis 0.15 `monatsletzter_typen` mit dem Monatsletzten) ist das
+  Datum der Erste des Abrechnungsmonats, entschieden im Code aus „Abrechnungsmonat …“, „für den Zeitraum …“ oder
+  „Monat/Jahr …“ (nie aus einer Rückrechnung; österreichisch „Periode 13/14 <Jahr>“ = Dezember, „Jänner“ und
+  „Feber“ zählen), außer ein Ausstellungsdatum mit Etikett steht im Text. Seit 0.16 zählt der Abrechnungsmonat
+  auch als Wort zu den Zahlen eines Dokuments: zwei Abrechnungen ohne Jahreswerte mit gleichem Gehalt sind keine
+  Dublette. Legen zwei Läufe gleichzeitig denselben neuen Korrespondenten an, nimmt der zweite den des ersten. Der **Kontrolllauf**
   (`CLASSIFY_KONTROLLE=<ids>`) wendet die Prüfungen ohne KI auf vorhandene Dokumente an und markiert,
   was er findet; sonst ändert er nichts. Seit 0.6 gilt eine IBAN (Feld oder Stammdaten) nur mit gültiger
   Prüfziffer (ISO 13616) und so, wie sie im Text steht; ein Kennungsfeld nimmt keine Personalnummer und
