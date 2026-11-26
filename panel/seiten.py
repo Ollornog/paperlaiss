@@ -1023,10 +1023,11 @@ EINSTELLUNGEN = {
                      "Namen von Menschen, deren Dokumente nicht ins Archiv gehören (etwa eine frühere Partnerin). Nennt "
                      "ein Dokument einen davon und keine eigene Person, wird es zum Prüfen markiert. Je Konto auch unter "
                      "konten.<Benutzer>.fremde_namen. Einer je Zeile."),
-    "monatsletzter_typen": ("Felder", "Datum = Monatsletzter",
-                            "Dokumenttypen ohne Ausstellungsdatum, deren Datum der letzte Tag des Abrechnungsmonats ist "
-                            "(Lohnabrechnung). paperlaiss liest den Monat aus „Abrechnungsmonat …“ bzw. „Monat/Jahr …“, "
-                            "nicht aus einer Rückrechnung; ein Ausstellungsdatum im Text bleibt. Leer = aus. Einer je Zeile."),
+    "abrechnungsmonat_typen": ("Felder", "Datum = Erster des Abrechnungsmonats",
+                               "Dokumenttypen ohne Ausstellungsdatum, deren Datum der erste Tag des Abrechnungsmonats ist "
+                               "(Lohnabrechnung). paperlaiss liest den Monat aus „Abrechnungsmonat …“, „für den Zeitraum …“ "
+                               "bzw. „Monat/Jahr …“ („Periode 13/14“ = Dezember), nicht aus einer Rückrechnung; ein "
+                               "Ausstellungsdatum im Text bleibt. Leer = aus. Einer je Zeile."),
     "garantie_aktiv": ("Felder", "Garantie berechnen",
                        "An: bei Käufen füllt die KI das Feld „Garantie in Jahren“, und paperlaiss rechnet das Ende "
                        "(Belegdatum + Jahre) selbst aus — beim Klassifizieren und im täglichen Abgleich, auch nach einer "

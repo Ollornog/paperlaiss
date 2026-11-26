@@ -7,7 +7,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 
 ## Meilensteine
 
-* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 20/32 erledigt
+* ☐ **[M-1](M-1-produktionsreif.md)** Produktionsreif für fremde Installationen — 21/33 erledigt
 
 ## Aufgaben
 
@@ -43,6 +43,7 @@ Konventionen: [README-KONVENTION.md](README-KONVENTION.md).
 * ☐ **[T-30](T-30-pass-2-assign-correspondent-inside-the-pass-1-conv.md)** Pass 2 (assign correspondent) inside the pass 1 conversation · M-1
 * ☐ **[T-31](T-31-measure-quality-against-paperless-built-in-classif.md)** Measure quality against Paperless' built-in classifier · M-1
 * ☑ **[T-32](T-32-probe-backlog-push-takes-the-text-fast-lane.md)** Probe: backlog push takes the text fast lane · M-1
+* ☑ **[T-33](T-33-austrian-payslips-billing-month-as-a-word-month-st.md)** Austrian payslips: billing month as a word, month start as date, race on a new correspondent · M-1
 
 ## Entscheidungen (ADR)
 
