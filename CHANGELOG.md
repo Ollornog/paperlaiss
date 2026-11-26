@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Sicherheit
+
+- Panel `/api/trace/{doc_id}`: the ID must be decimal digits and the trace path must resolve inside the trace folder
+  (`kern.trace_pfad`); before, the raw path parameter went into the file path (CodeQL `py/path-injection`). Test in
+  `tests/test_panel.py`.
+
 ## [0.15.0] - 2026-11-26
 
 ### Geändert

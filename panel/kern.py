@@ -233,6 +233,19 @@ def auffaelligkeiten(zeilen, geloest_nach=None):
     return out
 
 
+def trace_pfad(trace_dir, doc_id):
+    """Path of a document's trace file, or None. Only a decimal document ID counts, and the resolved path must stay inside
+    `trace_dir` (CodeQL py/path-injection: the ID comes from the URL)."""
+    doc_id = str(doc_id)
+    if not doc_id.isascii() or not doc_id.isdigit():
+        return None
+    basis = os.path.realpath(trace_dir)
+    pfad = os.path.realpath(os.path.join(basis, f"{int(doc_id)}.json"))
+    if not pfad.startswith(basis + os.sep):
+        return None
+    return pfad
+
+
 def panel_pfad(env) -> str:
     """Der Pfad, unter dem das Panel im Browser erreichbar ist (`PANEL_PFAD`, etwa `/paperlaiss`
     hinter derselben Domain wie Paperless). Leer = an der Wurzel. Nur einfache Pfadteile — der Wert
