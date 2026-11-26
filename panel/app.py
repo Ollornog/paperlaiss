@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from kern import (KORR_FELDER, sperre_oeffnen, korr_anzeige, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
+from kern import (KORR_FELDER, trace_pfad, sperre_oeffnen, korr_anzeige, knopf_annehmen, knopf_fortschritt, aktivitaet, auffaelligkeiten, auth_einstellungen, knopf_rechte, korr_eintrag,
                   config_uebernehmen, doc_id_aus_webhook, feld_typ, verlauf, vorschlag_aus_ausgabe)
 import exportlogik
 import exportpdf
@@ -301,8 +301,8 @@ def running(request: Request):
 @app.get("/api/trace/{doc_id}")
 def trace(request: Request, doc_id: str):
     guard(request)
-    p = os.path.join(TRACE_DIR, f"{doc_id}.json")
-    if not os.path.exists(p):
+    p = trace_pfad(TRACE_DIR, doc_id)
+    if p is None or not os.path.exists(p):
         raise HTTPException(404, "kein Trace")
     return json.load(open(p))
 

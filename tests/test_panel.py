@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +40,15 @@ r.check("Webhook: ohne ID ergibt None",
 r.check("Webhook: leerer Rumpf ergibt None", kern.doc_id_aus_webhook("") is None)
 r.check("Webhook: Unsinn ergibt None statt Absturz",
         kern.doc_id_aus_webhook("{{{ kaputt") is None)
+
+# ---- trace_pfad(): the document ID comes from the URL (/api/trace/{doc_id}); only digits, never out of the folder.
+_td = os.path.realpath(tempfile.mkdtemp())
+r.check("trace_pfad: digit ID gives <dir>/<id>.json", kern.trace_pfad(_td, "42") == os.path.join(_td, "42.json"))
+r.check("trace_pfad: leading zeros are the same document", kern.trace_pfad(_td, "007") == os.path.join(_td, "7.json"))
+r.check("trace_pfad: path traversal, separators, empty and non-ASCII digits give None",
+        all(kern.trace_pfad(_td, x) is None for x in ("..", "../x", "..%2Fx", "/etc/passwd", "1/2", "", "1.json", "\u0661")))
+os.symlink("/", os.path.join(_td, "9.json"))
+r.check("trace_pfad: a link leading out of the folder gives None", kern.trace_pfad(_td, "9") is None)
 
 # ---- config_uebernehmen(): ein Formular liefert Text, die Konfiguration braucht Typen.
 # Ohne Rückwandlung stünde nach dem ersten Speichern "true" statt true und "300" statt 300 —
