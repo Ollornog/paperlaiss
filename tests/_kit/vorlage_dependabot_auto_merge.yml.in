@@ -122,6 +122,24 @@
 # run), a `Claude-Session:` line in a public repo. If GitHub refuses the fast-forward (base moved, branch protection,
 # ruleset), `ausfuehren` squashes as before. The head branch is deleted only after GitHub shows the PR as merged
 # (`nachsehen` reads, `aufraeumen` deletes) — deleting it earlier would close the PR unmerged.
+# BREAKING RELEASES IN PIN PRS (since 0.69.0, FleetCommander #1144): the pin of TinySesam v0.30.0 → v0.31.0, a release
+# that broke the fleet's API keys, was merged at once — a watcher looked for the PR by its title and missed it. Rule (PO
+# 2026-11-23): risky majors are held back as drafts and rolled out with a human. Only for pin PRs of the app; Dependabot
+# still merges majors (PO 2026-10-11). `entscheiden` reads the old and new tag of every pin line of the diff (base →
+# head, so a rolling PR is judged against what the base runs) and holds the PR when
+#   (a) semver: the major differs, or at 0.x the minor (semver item 4: anything may change before 1.0), or
+#   (b) the changelog of the source repo (file from its `.github/release-automatik.json` at the new tag; `"changelog":
+#       null` = none) gains, between the old and the new ref, a line with "breaking", "Upgrading from" or
+#       "Upgrade-Hinweis" — the marks the app repos write above a break (TinySesam: "Upgrading from 0.30.x"), or
+#   (c) anything of it cannot be read: tag forms that differ or are unknown (`v1.2.3`, `vJJJJ.MM.TT[.n]` and
+#       `main-<sha>` are known), more than one new tag, config or changelog unreadable (API error, private repo without
+#       the app). Fail safe: only a complete pass lets the PR on.
+# Date tags and `main-<sha>` carry no semver statement; for them only (b) holds. The source repo is `<owner>/<name>` of
+# the branch `pin/<name>[-<tag>]` (fc-pin names it so); private source repos are read with a short-lived app token
+# (`quelle`, contents: read, only that repo). Holding is `zurueckhalten`: a comment with the reason (old → new tag), then
+# the PR becomes a draft. The comment is the hold, the draft its sign: a run that finds the same reason already said does
+# nothing, so a human who takes the PR out of the draft merges it by hand (`pr-mergen`) and is not overruled. A new
+# release in the rolling PR is a new reason and holds again.
 name: Dependabot Auto-Merge
 
 on:  # zizmor: ignore[dangerous-triggers] — kein Checkout, kein PR-Code; Herkunft per API geprüft
@@ -248,10 +266,46 @@ jobs:
       basis: ${{ steps.pruefung.outputs.basis }}
       zweig: ${{ steps.pruefung.outputs.zweig }}
     steps:
+      # Source repo of a pin PR (since 0.69.0, see the head): only its name, for the read token below. The check itself
+      # derives it again from the PR; a wrong name here only means an unreadable changelog, and that holds the PR.
+      - name: Quell-Repo eines Pin-PR
+        id: quelle
+        if: >
+          env.MIT_APP == 'true' && (github.event_name != 'workflow_run' ||
+          startsWith(github.event.workflow_run.head_branch, 'pin/'))
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.head_sha }}
+        run: |
+          set -euo pipefail
+          NAME=""
+          if [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
+             && REF="$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" -q '.[0].head.ref // ""')" \
+             && [[ "$REF" =~ ^pin/([a-z0-9._-]+)$ ]]; then
+            NAME="${BASH_REMATCH[1]}"
+            if [[ "$NAME" =~ ^(.+)-(v[0-9][A-Za-z0-9._-]*|main-[0-9a-f]+)$ ]]; then NAME="${BASH_REMATCH[1]}"; fi
+          fi
+          echo "Quell-Repo: ${NAME:-keins}"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+      # Read token for the source repo (since 0.69.0): contents read, only that repo. Fails it (app not installed there),
+      # the check reads with the workflow token — a private repo then stays unreadable, and the PR is held.
+      - name: App-Token zum Lesen des Quell-Repos
+        id: quelltoken
+        if: steps.quelle.outputs.name != ''
+        continue-on-error: true
+        uses: @@PIN:actions/create-github-app-token@@
+        with:
+          client-id: ${{ vars.AUTOMERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.quelle.outputs.name }}
+          permission-contents: read
       - name: Herkunft, Abnahme und Pflicht-Workflows prüfen
         id: pruefung
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUELLE_TOKEN: ${{ steps.quelltoken.outputs.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.head_sha }}
           APP_LOGIN: "ollornog-auto-merge[bot]"
@@ -377,6 +431,60 @@ jobs:
               if [ "${z:0:1}" = "-" ]; then minus+="${BASH_REMATCH[1]}"$'\n'; else plus+="${BASH_REMATCH[1]}"$'\n'; fi
             done
             [ "$n" -gt 0 ] && [ "$(sort <<<"$minus")" = "$(sort <<<"$plus")" ]
+          }
+          # Breaking release (since 0.69.0, see the head). Old and new tag per image of a pin PR: stdin = the diffs of the
+          # compose files (pin lines checked by nur_pin_zeilen). Output "<old> <new>" per pair, sorted, no duplicates.
+          pin_tags() {
+            local z a x y re='^([-+])[[:space:]]+image:[[:space:]]+([^[:space:]]+):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}[[:space:]]*$'
+            local -A alt=() neu=()
+            while IFS= read -r z; do
+              [[ "$z" =~ $re ]] || continue
+              if [ "${BASH_REMATCH[1]}" = "-" ]; then alt["${BASH_REMATCH[2]}"]+="${BASH_REMATCH[3]} "
+              else neu["${BASH_REMATCH[2]}"]+="${BASH_REMATCH[3]} "; fi
+            done
+            for a in "${!neu[@]}"; do
+              for x in ${alt[$a]:-}; do for y in ${neu[$a]}; do echo "$x $y"; done; done
+            done | sort -u
+          }
+          # Form of a tag: semver (v1.2.3), datum (vJJJJ.MM.TT[.n], schema "datum"), main (main-<sha>, one image per
+          # commit), else unbekannt. The date first: v2026.11.21 would also read as semver.
+          tag_art() {
+            if [[ "$1" =~ ^v20[0-9]{2}\.[01][0-9]\.[0-3][0-9](\.[0-9]+)?$ ]]; then echo datum
+            elif [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo semver
+            elif [[ "$1" =~ ^main-[0-9a-f]{7,40}$ ]]; then echo main
+            else echo unbekannt; fi
+          }
+          # Does the step from $1 to $2 (both semver) break? The major differs, or at 0.x the minor. Output: the reason.
+          semver_bruch() {
+            local a1 a2 b1 b2
+            IFS=. read -r a1 a2 _ <<<"${1#v}"
+            IFS=. read -r b1 b2 _ <<<"${2#v}"
+            if [ "$((10#$a1))" -ne "$((10#$b1))" ]; then echo "major step"; return 0; fi
+            if [ "$((10#$a1))" -eq 0 ] && [ "$((10#$a2))" -ne "$((10#$b2))" ]; then
+              echo "minor step at 0.x (before 1.0 the minor breaks)"; return 0
+            fi
+            return 1
+          }
+          # Name of the source repo of a pin branch: pin/<name> or pin/<name>-<tag> (fc-pin). $1 = branch, $2 = new tag.
+          pin_quelle() {
+            local rest="${1#pin/}"
+            if [[ "$rest" == *"-$2" ]]; then rest="${rest%"-$2"}"; fi
+            echo "$rest"
+          }
+          # Lines of file $2 that file $1 does not have (what the new changelog adds, wherever).
+          neue_zeilen() {
+            awk 'NR == FNR { da[$0] = 1; next } !($0 in da)' "$1" "$2"
+          }
+          # A break mark in changelog lines? stdin = the added lines. Output: the first such line (printable, at most
+          # 160 characters, no @ — it goes into a comment).
+          changelog_bruch() {
+            local z re='breaking|upgrading from|upgrade-hinweis'
+            while IFS= read -r z; do
+              if [[ "${z,,}" =~ $re ]]; then
+                z="${z//[^[:print:]]/}"; z="${z//@/ }"; echo "${z:0:160}"; return 0
+              fi
+            done
+            return 1
           }
           # Release-Anhänge (seit 0.48.0): Quelle und Tag eines Pin-Zweigs. $1 = Zweig, weitere = PIN_ANHAENGE.
           # Ausgabe „<owner/repo> <tag>“ des Eintrags, dessen Repo-Name (klein) den Zweig pin/<name>-<tag> erzeugt;
@@ -592,6 +700,58 @@ jobs:
             ergebnis="$(anhaenge_ok "$soll" "$ist" <<<"$ANDERE")" || { echo "$ergebnis"; return 1; }
             echo "$qrepo $qtag: $ergebnis"
           }
+          # Breaking release in a pin PR (since 0.69.0, see the head). Output "frei" or the reason to hold. Whatever cannot
+          # be read is a reason (fail safe); only a complete pass ends with "frei". The log goes to stderr.
+          bruch_pruefen() {
+            local paare tags tag name quelle tok alt neu art g cfg datei ref_a ref_n zeilen
+            local fa="$RUNNER_TEMP/changelog-alt" fn="$RUNNER_TEMP/changelog-neu"
+            paare="$(pin_tags <<<"$PATCHES")"
+            [ -n "$paare" ] || { echo "tags of the pin lines not readable"; return; }
+            tags="$(cut -d' ' -f2 <<<"$paare" | sort -u)"
+            [[ "$tags" != *$'\n'* ]] || { echo "more than one new tag ($(tr '\n' ' ' <<<"$tags"))"; return; }
+            tag="$tags"
+            name="$(pin_quelle "$ZWEIG" "$tag")"
+            quelle="${REPO%%/*}/$name"
+            [[ "$name" =~ ^[a-z0-9._-]+$ ]] || { echo "source repo of branch $ZWEIG not readable"; return; }
+            tok="${QUELLE_TOKEN:-$GH_TOKEN}"
+            while read -r alt neu; do
+              [ "$alt" != "$neu" ] || continue
+              art="$(tag_art "$neu")"
+              [ "$(tag_art "$alt")" = "$art" ] || { echo "$quelle $alt → $neu: tag forms differ"; return; }
+              case "$art" in
+                semver)
+                  if g="$(semver_bruch "$alt" "$neu")"; then echo "$quelle $alt → $neu: $g"; return; fi
+                  ref_a="$alt"; ref_n="$neu" ;;
+                datum) ref_a="$alt"; ref_n="$neu" ;;
+                main) ref_a="${alt#main-}"; ref_n="${neu#main-}" ;;
+                *) echo "$quelle $alt → $neu: unknown tag form"; return ;;
+              esac
+              cfg="$(GH_TOKEN="$tok" gh api "repos/$quelle/contents/.github/release-automatik.json?ref=$ref_n" \
+                -H "Accept: application/vnd.github.raw" < /dev/null)" \
+                || { echo "$quelle $alt → $neu: .github/release-automatik.json not readable"; return; }
+              datei="$(jq -r 'if (.changelog | type) == "null" then "-" else (.changelog.datei // "") end' <<<"$cfg")" \
+                || datei=""
+              if [ "$datei" = "-" ]; then echo "$quelle $alt → $neu: no changelog (release-automatik.json)" >&2; continue; fi
+              if ! [[ "$datei" =~ ^[A-Za-z0-9_][A-Za-z0-9._/-]*$ ]] || [[ "$datei" == *..* ]]; then
+                echo "$quelle $alt → $neu: changelog file not readable from release-automatik.json"; return
+              fi
+              if ! GH_TOKEN="$tok" gh api "repos/$quelle/contents/$datei?ref=$ref_a" -H "Accept: application/vnd.github.raw" \
+                   > "$fa" < /dev/null \
+                 || ! GH_TOKEN="$tok" gh api "repos/$quelle/contents/$datei?ref=$ref_n" -H "Accept: application/vnd.github.raw" \
+                   > "$fn" < /dev/null; then
+                echo "$quelle $alt → $neu: $datei not readable"; return
+              fi
+              zeilen="$(neue_zeilen "$fa" "$fn")" || { echo "$quelle $alt → $neu: $datei not comparable"; return; }
+              if g="$(changelog_bruch <<<"$zeilen")"; then echo "$quelle $alt → $neu: $datei marks a break (\"$g\")"; return; fi
+              echo "$quelle $alt → $neu: no break (semver and $datei)" >&2
+            done <<<"$paare"
+            echo frei
+          }
+          # Hold once per reason (the reason names old → new tag): a human who takes the PR out of the draft is not
+          # overruled, a new release in the rolling PR holds again.
+          halten() {
+            if schon_gesagt "$1"; then ausgabe nichts "$1 (already held — release by hand)"; else ausgabe zurueckhalten "$1"; fi
+          }
           ZWEIG="$(jq -r '.head.ref' <<<"$J")"
           GRUND=""
           FOLGE=""
@@ -716,6 +876,11 @@ jobs:
             fi
           fi
           if [ -n "$GRUND" ]; then kommentar "$GRUND"; exit 0; fi
+          # Breaking release (since 0.69.0, see the head): only pin PRs of the app, before any wait for the checks.
+          if [ "$ART" = pin ]; then
+            BRUCH="$(bruch_pruefen)"
+            if [ "$BRUCH" != frei ]; then halten "breaking release: ${BRUCH:-check without result}"; exit 0; fi
+          fi
           # Jeder Pflicht-Workflow muss für genau diesen Kopf gelaufen und grün sein. Läuft einer
           # noch, endet dieser Lauf; dessen Ende löst den nächsten Anlauf aus.
           LAEUFE="$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&event=pull_request&per_page=100" -q '.workflow_runs')"
@@ -778,7 +943,7 @@ jobs:
   ausfuehren:
     timeout-minutes: 10
     needs: entscheiden
-    if: contains(fromJSON('["mergen", "kommentieren", "nachziehen"]'), needs.entscheiden.outputs.aktion)
+    if: contains(fromJSON('["mergen", "kommentieren", "nachziehen", "zurueckhalten"]'), needs.entscheiden.outputs.aktion)
     runs-on: @@RUNNER@@
     env:
       MIT_APP: ${{ secrets.AUTOMERGE_APP_KEY != '' && vars.AUTOMERGE_APP_CLIENT_ID != '' }}
@@ -878,6 +1043,21 @@ jobs:
           GRUND: ${{ needs.entscheiden.outputs.grund }}
         run: |
           gh pr comment "$PR" --repo "$REPO" --body "⚠️ Nicht automatisch gemergt: $GRUND. Bitte von Hand prüfen und mergen."
+
+      # Breaking release (since 0.69.0, see the head): the reason first, with the workflow token (`schon_gesagt` finds it
+      # and holds every later run), then the draft as the sign — with the app token if there is one. Fails the draft,
+      # this step is red and the comment still holds the PR.
+      - name: Bruch-Release halten (Entwurf)
+        if: needs.entscheiden.outputs.aktion == 'zurueckhalten'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.entscheiden.outputs.pr }}
+          GRUND: ${{ needs.entscheiden.outputs.grund }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body "⏸️ No auto-merge, held as a draft: $GRUND. Risky releases are rolled out with a human, PO rule of 2026-11-23. To release: take the PR out of the draft and merge it by hand with pr-mergen. The auto-merge does not hold it again for this reason."
+          GH_TOKEN="${APP_TOKEN:-$GH_TOKEN}" gh pr ready "$PR" --repo "$REPO" --undo
 
   nachsehen:
     # After a fast-forward (since 0.67.0): GitHub marks the PR as merged by itself once the base contains its head
