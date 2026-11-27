@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-11-27
+
+### Geändert
+
+Patch-Release der Release-Automatik nach Dependabot-Merges:
+
+- ci: bump python from '65a65fc' to '63bb298' in /panel
+
 ## [0.16.0] - 2026-11-27
 
 Austrian payslips, the date of payslips and an unflagged broken-off run (backlog T-33).
