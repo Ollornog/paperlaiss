@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Das Format folgt lose
 
 ## [Unreleased]
 
+### Behoben
+
+- `starlette` ist deklariert (`panel/requirements.in`, Extra `panel` in `pyproject.toml`; Lock neu erzeugt): `panel/app.py`
+  importiert es selbst, bisher kam es nur über fastapi. Kit 0.73.0 prüft ungenutzte Abhängigkeiten in `scripts/check.sh`
+  (scharf); `authlib` und `joserfc` bleiben als Sicherheits-Untergrenzen mit Begründung in `.github/abhaengigkeiten.json`.
+
 ## [0.16.1] - 2026-11-27
 
 ### Geändert
