@@ -34,6 +34,15 @@
 #     push: text only if all of them together are text only (before..HEAD). Full suite when before is missing or all
 #     zeros (first push, new branch), when the push was forced, when it pushes a tag, when the payload is unreadable
 #     (neither jq nor python3), or when before cannot be fetched.
+#   * SPRINT LANE (since kit 0.68.0, PO 2026-11-26 "sprint branch for every repo but the FleetCommander"): event
+#     pull_request whose base branch ($GITHUB_BASE_REF) is `sprint/<name>` (letters, digits, `.`, `_`, `-`; no further
+#     `/`) → exit 0 whatever the PR changes, once HEAD is the merge commit and its base is here (as above). The reason
+#     line starts with "SPRINT LANE". Effect: check.sh runs tests/test_repo.py, whose `hygiene.pruefe_nur_text` sees
+#     that line and runs the fast checks of the pre-push hook (`PREPUSH_SPRINT_BASIS=<base> .githooks/pre-push`:
+#     format/lint and the tests of the changed files) — a red one is a red hygiene; every classifier job answers
+#     `nur_text=ja`, so the heavy jobs skip. The full suite runs once, in the closing PR sprint/<name> → default branch
+#     (an ordinary PR). `aus alles` in the narrowing (below) switches the sprint lane off as well. Push, schedule and
+#     every other event never take it.
 #   * Any other event in GitHub Actions (schedule, workflow_dispatch, release, merge_group …) → full suite, always.
 #   * Keine Änderung (Push auf den Standardzweig selbst) → volle Suite. Der Standardzweig wird immer voll geprüft.
 #     Since 0.53.0 that holds outside Actions; in Actions a push that changes only text runs the fast check (above).
@@ -75,6 +84,9 @@ set -uo pipefail
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." || { echo "volle Suite: Repo nicht gefunden"; exit 1; }
 
 VERENGUNG="scripts/nur-text-verengung.txt"
+# Base branch of a sprint PR (sprint lane, kit 0.68.0): sprint/<name>, a plain ref name. hygiene.SPRINT_ZWEIG is the
+# same pattern (Python spelling), a test holds the two together.
+SPRINT_ZWEIG='^sprint/[A-Za-z0-9][A-Za-z0-9._-]*$'
 
 erlaubt() {
     [[ "$1" =~ ^[^/[:space:][:cntrl:]]+\.md$ ]] && return 0
@@ -135,6 +147,11 @@ if [[ "${GITHUB_ACTIONS:-}" == true && "${GITHUB_EVENT_NAME:-}" == pull_request 
             && ! git fetch -q --no-tags --depth=1 origin "$basis" 2>/dev/null; then
         echo "volle Suite: Basis ${basis:0:7} des PR nicht abrufbar"
         exit 1
+    fi
+    # Sprint lane (since kit 0.68.0, see the head): a PR into sprint/<name> takes the fast lane whatever it changes.
+    if [[ "${GITHUB_BASE_REF:-}" =~ $SPRINT_ZWEIG ]]; then
+        echo "SPRINT LANE — fast checks instead of the full suite: PR into $GITHUB_BASE_REF, base ${basis:0:7}; the hygiene (tests/test_repo.py) runs them, the full suite runs once in the closing PR into the default branch"
+        exit 0
     fi
     git diff --quiet --no-renames --ignore-submodules=none "$basis" HEAD 2>/dev/null; rc=$?
     if [[ $rc -gt 1 ]]; then
