@@ -1,0 +1,9 @@
+{
+  "_comment": "Unused-dependency check of the kit (scripts/_abhaengigkeiten.py). Every entry needs a reason.",
+  "allow": {
+    "panel/requirements.in": {
+      "authlib": "security floor for a transitive package of tinysesam (1.8.x carries known vulnerabilities)",
+      "joserfc": "security floor for a transitive package of tinysesam/authlib (CVE-2026-119284 in 1.7.5)"
+    }
+  }
+}

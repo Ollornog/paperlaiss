@@ -4,6 +4,8 @@
 # Bis 2026-10-08 war requirements.txt selbst die Eingabe: direkte Pins ohne Prüfsummen, die
 # Unterabhängigkeiten ungepinnt — jeder Bau zog, was der Index gerade lieferte.
 fastapi==0.165.0
+# app.py importiert starlette selbst (run_in_threadpool); bisher kam es nur über fastapi.
+starlette==1.7.0
 # Schlichtes uvicorn plus httptools und uvloop (nimmt es von selbst). `[standard]` zog bis 0.6.0 auch pyyaml,
 # watchfiles, websockets und python-dotenv (ungenutzt); pyyaml 6.0.3 hat kein Wheel für CPython 3.15.
 uvicorn==0.54.0
